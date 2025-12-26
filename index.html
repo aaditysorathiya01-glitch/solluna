@@ -6,9 +6,15 @@
     <meta name="description" content="SOLLUNA - India's Premium Adult Card Games for Couples & Parties. Deepen intimacy with couple games or ignite your party. Bold questions. Unforgettable connections.">
     <meta name="keywords" content="couple card games, adult card games, date night games, party games, intimate games for couples, India, Solluna">
     <title>SOLLUNA - Premium Adult Card Games for Couples & Parties | India</title>
-    <link rel="stylesheet" href="style.css">
+    
+    <!-- Preconnect for fonts (performance optimization) -->
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    
+    <!-- Preload critical LCP image -->
+    <link rel="preload" as="image" href="images/logo.png" fetchpriority="high">
+    
+    <link rel="stylesheet" href="style.css">
     <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;600;700;800;900&display=swap" rel="stylesheet">
 </head>
 <body>
@@ -73,7 +79,13 @@
                 <div class="hero-right">
                     <div class="hero-logo-container">
                         <div class="logo-glow"></div>
-                        <img src="images/logo.png" alt="SOLLUNA" class="hero-main-logo">
+                        <!-- LCP Image - Critical, needs to load fast -->
+                        <img src="images/logo.png" 
+                             alt="SOLLUNA - Premium Adult Card Games" 
+                             class="hero-main-logo"
+                             width="175"
+                             height="260"
+                             fetchpriority="high">
                     </div>
                     <div class="hero-features">
                         <a href="#couple-games" class="feature-tag feature-tag-link">❤️ Couple Games</a>
@@ -122,8 +134,6 @@
                     </div>
                 </div>
             </div>
-            <!-- END COUPLE GAMES -->
-
         </div>
     </section>
 
@@ -148,7 +158,12 @@
                     <div class="age-badge-18">18+</div>
                     <div class="product-badge">COUPLES</div>
                     <div class="product-image">
-                        <img src="images/who-couple-v1.png" alt="WHO? Couple V1 - Bold Edition" class="product-img">
+                        <img src="images/who-couple-v1.jpg" 
+                             alt="WHO? Couple V1 - Bold Edition Card Game" 
+                             class="product-img"
+                             width="300"
+                             height="420"
+                             loading="lazy">
                     </div>
                     <div class="product-info">
                         <h3 class="product-title">WHO? Couple V1</h3>
@@ -183,7 +198,12 @@
                     <div class="age-badge-18">18+</div>
                     <div class="product-badge">EXTREME</div>
                     <div class="product-image">
-                        <img src="images/who-couple-v2.png" alt="WHO? Couple V2 - Unfiltered Edition" class="product-img">
+                        <img src="images/who-couple-v2.jpg" 
+                             alt="WHO? Couple V2 - Unfiltered Edition Card Game" 
+                             class="product-img"
+                             width="300"
+                             height="420"
+                             loading="lazy">
                     </div>
                     <div class="product-info">
                         <h3 class="product-title">WHO? Couple V2</h3>
@@ -229,7 +249,12 @@
                     <div class="age-badge-18">18+</div>
                     <div class="product-badge">BESTSELLER</div>
                     <div class="product-image">
-                        <img src="images/shots-fired.png" alt="SHOTS FIRED - Never Have I Ever Drinking Game" class="product-img">
+                        <img src="images/shots-fired.jpg" 
+                             alt="SHOTS FIRED - Never Have I Ever Drinking Game" 
+                             class="product-img"
+                             width="300"
+                             height="420"
+                             loading="lazy">
                     </div>
                     <div class="product-info">
                         <h3 class="product-title">SHOTS FIRED</h3>
@@ -266,7 +291,12 @@
                     <div class="age-badge-18">18+</div>
                     <div class="product-badge">HOT</div>
                     <div class="product-image">
-                        <img src="images/who-party-v1.png" alt="WHO? Party V1 - Bold Edition" class="product-img">
+                        <img src="images/who-party-v1.jpg" 
+                             alt="WHO? Party V1 - Bold Edition Party Card Game" 
+                             class="product-img"
+                             width="300"
+                             height="420"
+                             loading="lazy">
                     </div>
                     <div class="product-info">
                         <h3 class="product-title">WHO? Party V1</h3>
@@ -301,7 +331,12 @@
                     <div class="age-badge-18">18+</div>
                     <div class="product-badge">EXTREME</div>
                     <div class="product-image">
-                        <img src="images/who-party-v2.png" alt="WHO? Party V2 - Unfiltered Edition" class="product-img">
+                        <img src="images/who-party-v2.jpg" 
+                             alt="WHO? Party V2 - Unfiltered Edition Party Card Game" 
+                             class="product-img"
+                             width="300"
+                             height="420"
+                             loading="lazy">
                     </div>
                     <div class="product-info">
                         <h3 class="product-title">WHO? Party V2</h3>
@@ -347,7 +382,12 @@
                     <div class="age-badge-18">18+</div>
                     <div class="product-badge">GIRLS NIGHT</div>
                     <div class="product-image">
-                        <img src="images/who-girls-v1.png" alt="WHO? Girls Party V1 - Bold Edition" class="product-img">
+                        <img src="images/who-girls-v1.jpg" 
+                             alt="WHO? Girls Party V1 - Bold Edition Girls Night Card Game" 
+                             class="product-img"
+                             width="300"
+                             height="420"
+                             loading="lazy">
                     </div>
                     <div class="product-info">
                         <h3 class="product-title">WHO? Girls Party V1</h3>
@@ -382,7 +422,12 @@
                     <div class="age-badge-18">18+</div>
                     <div class="product-badge">EXTREME</div>
                     <div class="product-image">
-                        <img src="images/who-girls-v2.png" alt="WHO? Girls Party V2 - Unfiltered Edition" class="product-img">
+                        <img src="images/who-girls-v2.jpg" 
+                             alt="WHO? Girls Party V2 - Unfiltered Edition Girls Night Card Game" 
+                             class="product-img"
+                             width="300"
+                             height="420"
+                             loading="lazy">
                     </div>
                     <div class="product-info">
                         <h3 class="product-title">WHO? Girls Party V2</h3>
@@ -415,86 +460,6 @@
                 </div>
             </div>
             <!-- END GIRLS GAMES -->
-
-            <!-- COUPLE GAMES CATEGORY -->
-            <div class="product-category">
-                <div class="category-header">
-                    <h3 class="category-title">❤️ Couple Games</h3>
-                    <p class="category-desc">Deepen intimacy & ignite passion - date nights redefined</p>
-                </div>
-                <div class="products-grid">
-                <div class="product-card">
-                    <div class="age-badge-18">18+</div>
-                    <div class="product-badge">COUPLES</div>
-                    <div class="product-image">
-                        <img src="images/who-couple-v1.png" alt="WHO? Couple V1 - Bold Edition" class="product-img">
-                    </div>
-                    <div class="product-info">
-                        <h3 class="product-title">WHO? Couple V1</h3>
-                        <p class="product-subtitle">Bold Edition - Couples Only</p>
-                        <div class="spice-level">
-                            <span>Spice Level:</span>
-                            <div class="flames">
-                                <span>🔥</span>
-                                <span>🔥</span>
-                                <span>🔥</span>
-                            </div>
-                        </div>
-                        <ul class="product-features">
-                            <li>✓ 60 Unique Questions</li>
-                            <li>✓ Intimate & Fun</li>
-                            <li>✓ Date Night Perfect</li>
-                            <li>🔥 Date Night Essential</li>
-                        </ul>
-                        <div class="product-pricing">
-                            <span class="price-sale">₹299</span>
-                        </div>
-                        <div class="product-buttons">
-                            <a href="https://www.flipkart.com/solluna-who-couple-v1/p/itm2367d905fbc27" target="_blank" class="btn btn-buy flipkart">
-                                <span>Buy on Flipkart</span>
-                            </a>
-                        </div>
-                    </div>
-                </div>
-
-                <!-- Product 7: WHO? Couple V2 -->
-                <div class="product-card">
-                    <div class="age-badge-18">18+</div>
-                    <div class="product-badge">EXTREME</div>
-                    <div class="product-image">
-                        <img src="images/who-couple-v2.png" alt="WHO? Couple V2 - Unfiltered Edition" class="product-img">
-                    </div>
-                    <div class="product-info">
-                        <h3 class="product-title">WHO? Couple V2</h3>
-                        <p class="product-subtitle">Unfiltered Edition - Couples Only</p>
-                        <div class="spice-level">
-                            <span>Spice Level:</span>
-                            <div class="flames">
-                                <span>🔥</span>
-                                <span>🔥</span>
-                                <span>🔥</span>
-                                <span>🔥</span>
-                                <span>🔥</span>
-                            </div>
-                        </div>
-                        <ul class="product-features">
-                            <li>✓ 60 Unique Questions</li>
-                            <li>✓ Intimate & Spicy</li>
-                            <li>✓ Date Night Perfect</li>
-                            <li>🌙 Intimate Moments</li>
-                        </ul>
-                        <div class="product-pricing">
-                            <span class="price-sale">₹498</span>
-                        </div>
-                        <div class="product-buttons">
-                            <a href="https://www.flipkart.com/solluna-who-couple-v2/p/itm2367d905fbc27" target="_blank" class="btn btn-buy flipkart">
-                                <span>Buy on Flipkart</span>
-                            </a>
-                        </div>
-                    </div>
-                </div>
-            </div>
-            <!-- END COUPLE GAMES -->
 
         </div>
     </section>
@@ -585,7 +550,12 @@
         <div class="container">
             <div class="footer-content">
                 <div class="footer-brand">
-                    <img src="images/logo.png" alt="SOLLUNA" class="footer-logo">
+                    <img src="images/logo.jpg" 
+                         alt="SOLLUNA - Premium Adult Card Games" 
+                         class="footer-logo"
+                         width="120"
+                         height="178"
+                         loading="lazy">
                     <p>Premium Adult Card Games for Couples & Parties</p>
                     <div class="social-links">
                         <a href="https://instagram.com/solluna.play" target="_blank" aria-label="Instagram">
