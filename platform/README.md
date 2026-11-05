@@ -27,7 +27,7 @@ npm test     # skill-map drift check + 18 API E2E + 6 browser E2E (needs local P
 
 ## What is built (tested end-to-end)
 - **Auth:** customer registration (org + Manager Chat conversation), login, httpOnly session, staff roles, instant revocation, per-IP brute-force limit, audit log.
-- **Billing:** Razorpay Orders (REST), Checkout signature + webhook HMAC verification, idempotent activation, GST-inclusive invoices, failed-payment handling, plan switch, renewal reminder → grace → past due.
+- **Billing:** Razorpay Orders (REST), Checkout signature + webhook HMAC verification, idempotent activation, **GST-exclusive pricing with GST tax invoices** (CGST+SGST intra-state / IGST inter-state, place of supply from GSTIN or billing state, GSTIN check-digit validation, gap-free `SOL/26-27/00001` numbering per FY, amount in words, printable PDF), failed-payment handling, plan switch, renewal reminder → grace → past due.
 - **Features ↔ skills:** all 28 services served with their skill and connectors. The API refuses to boot if a skill is missing. Plan limits are read from the DB.
 - **Orchestrator:** workflow graphs from the orchestrator skill (new listing, replenishment, advertising, promotion, shipping labels, monthly reporting, single-step). Covers dependency propagation, skip rules, client approval gates, evidence-gated completion, quota reservation under a per-org lock, and client updates in the orchestrator's format.
 - **Connectors:** in-app notifications + HMAC-signed webhook for Zapier fan-out; Drive/Docs links enforced as delivery channels.

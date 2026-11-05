@@ -6,6 +6,7 @@ import { PrismaService } from '../common/prisma.service';
 import { AuditService } from '../common/audit.service';
 import { parse } from '../common/zod';
 import type { AuthUser } from './auth.types';
+import { isValidGstin } from '../billing/gst';
 
 const INDIAN_MOBILE = /^(\+91)?[6-9]\d{9}$/;
 const GSTIN = /^\d{2}[A-Z]{5}\d{4}[A-Z][1-9A-Z]Z[0-9A-Z]$/;
@@ -17,7 +18,7 @@ export const RegisterSchema = z.object({
   password: z.string().min(10, 'Use at least 10 characters').max(128),
   legalName: z.string().trim().min(2).max(200),
   brandName: z.string().trim().max(200).optional(),
-  gstin: z.string().trim().toUpperCase().regex(GSTIN, 'Invalid GSTIN').optional(),
+  gstin: z.string().trim().toUpperCase().regex(GSTIN, 'Invalid GSTIN').refine(isValidGstin, 'Invalid GSTIN check digit').optional(),
   category: z.string().trim().max(100).optional(),
 });
 export const LoginSchema = z.object({ email: z.string().trim().toLowerCase().email(), password: z.string().min(1) });
@@ -38,7 +39,7 @@ export class AuthService {
     const passwordHash = await bcrypt.hash(d.password, 12);
     const user = await this.db.$transaction(async (tx) => {
       const org = await tx.organization.create({
-        data: { legalName: d.legalName, brandName: d.brandName, gstin: d.gstin, category: d.category, contactEmail: d.email, contactPhone: phone },
+        data: { legalName: d.legalName, brandName: d.brandName, gstin: d.gstin, stateCode: d.gstin?.slice(0, 2), category: d.category, contactEmail: d.email, contactPhone: phone },
       });
       await tx.conversation.create({ data: { organizationId: org.id } });
       const u = await tx.user.create({ data: { type: 'CUSTOMER', email: d.email, phone, name: d.name, passwordHash, organizationId: org.id } });

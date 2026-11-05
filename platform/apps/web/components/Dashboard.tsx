@@ -3,6 +3,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { api, ApiError, inr, SECTIONS, SECTION_LABEL } from '@/lib/api';
 import { loadRazorpay } from '@/lib/razorpay';
+import Link from 'next/link';
 import { Logo } from './Logo';
 import { Markdownish } from './Markdownish';
 
@@ -12,11 +13,16 @@ interface Catalog { plan: { code: string; name: string; status: string; currentP
 interface TaskLite { id: string; title: string; status: string; skill: string; stepKey: string; blocker: string | null }
 interface Req { id: string; title: string; featureKey: string; status: string; entitlement: string; marketplace: string | null; createdAt: string; tasks: TaskLite[] }
 interface Approval { id: string; actionType: string; parameters: Record<string, unknown>; status: string; createdAt: string; task: { title: string; requestId: string } | null }
+interface BillingProfile { legalName: string; gstin: string | null; address: string | null; city: string | null; pincode: string | null; stateCode: string | null }
 interface Billing {
   paymentsConfigured: boolean;
+  profile: BillingProfile;
+  profileComplete: boolean;
+  gst: { rateBps: number; supplierState: string | null };
+  states: Record<string, string>;
   subscriptions: { id: string; status: string; currentPeriodEnd: string | null; plan: { code: string; name: string; pricePaise: number } }[];
   payments: { id: string; amountPaise: number; status: string; failureReason: string | null; createdAt: string }[];
-  invoices: { id: string; number: string; amountPaise: number; gstPaise: number; issuedAt: string }[];
+  invoices: { id: string; number: string; amountPaise: number; taxablePaise: number; gstPaise: number; issuedAt: string }[];
 }
 interface Plan { code: string; name: string; pricePaise: number; features: { enabled: boolean }[] }
 interface Notification { id: string; title: string; body: string; createdAt: string; readAt: string | null }
@@ -319,13 +325,19 @@ function BillingTab({ billing, plans, current, preselect, onDone }: { billing: B
     <div className="space-y-8">
       <h1 className="font-display text-3xl">Billing</h1>
       {!billing.paymentsConfigured && <p className="rounded-xl bg-amber-50 px-4 py-3 text-sm text-amber-900">Online payments are not configured yet. Please contact SOLLUNA to activate your plan.</p>}
+      <BillingProfileForm billing={billing} onSaved={(m) => onDone(m)} />
       <div className="grid gap-4 md:grid-cols-3">
         {sorted.map((p) => (
           <div key={p.code} className={`card p-6 ${preselect === p.code ? 'ring-2 ring-sun' : ''}`}>
             <p className="label">{p.name}</p>
-            <p className="font-display text-3xl">{inr(p.pricePaise)}<span className="font-sans text-sm text-ink-3"> /month</span></p>
-            <p className="mt-1 text-xs text-ink-3">{p.features.filter((f) => f.enabled).length} of {p.features.length} services · GST inclusive</p>
-            <button className="btn-primary mt-5 w-full" disabled={!billing.paymentsConfigured || busy !== null} onClick={() => choose(p.code)}>
+            <p className="font-display text-3xl">{inr(p.pricePaise)}<span className="font-sans text-sm text-ink-3"> /month + GST</span></p>
+            <p className="mt-1 text-xs text-ink-3">{p.features.filter((f) => f.enabled).length} of {p.features.length} services</p>
+            {billing.profileComplete && billing.gst.supplierState && (
+              <p className="mt-3 rounded-lg bg-ivory px-3 py-2 text-xs text-ink-2" data-testid={`total-${p.code}`}>
+                Payable <strong>{inrExact(gstTotal(p.pricePaise, billing).total)}</strong> incl. {gstTotal(p.pricePaise, billing).label}
+              </p>
+            )}
+            <button className="btn-primary mt-5 w-full" disabled={!billing.paymentsConfigured || !billing.profileComplete || busy !== null} onClick={() => choose(p.code)}>
               {busy === p.code ? 'Opening checkout…' : current === p.code ? 'Renew' : current ? `Switch to ${p.name}` : `Choose ${p.name}`}
             </button>
           </div>
@@ -336,7 +348,7 @@ function BillingTab({ billing, plans, current, preselect, onDone }: { billing: B
         <table className="mt-3 w-full min-w-[480px] text-sm">
           <tbody>
             {billing.payments.map((p) => (
-              <tr key={p.id} className="border-t border-ink/5"><td className="py-2">{new Date(p.createdAt).toLocaleString('en-IN')}</td><td>{inr(p.amountPaise)}</td><td><Status s={p.status} /></td><td className="text-xs text-ink-3">{p.failureReason}</td></tr>
+              <tr key={p.id} className="border-t border-ink/5"><td className="py-2">{new Date(p.createdAt).toLocaleString('en-IN')}</td><td>{inrExact(p.amountPaise)}</td><td><Status s={p.status} /></td><td className="text-xs text-ink-3">{p.failureReason}</td></tr>
             ))}
             {!billing.payments.length && <tr><td className="py-2 text-ink-3">No payments yet.</td></tr>}
           </tbody>
@@ -347,12 +359,80 @@ function BillingTab({ billing, plans, current, preselect, onDone }: { billing: B
         <table className="mt-3 w-full min-w-[480px] text-sm">
           <tbody>
             {billing.invoices.map((i) => (
-              <tr key={i.id} className="border-t border-ink/5"><td className="py-2 font-medium">{i.number}</td><td>{new Date(i.issuedAt).toLocaleDateString('en-IN')}</td><td>{inr(i.amountPaise)}</td><td className="text-ink-3">incl. GST {inr(i.gstPaise)}</td></tr>
+              <tr key={i.id} className="border-t border-ink/5">
+                <td className="py-2 font-medium">{i.number}</td><td>{new Date(i.issuedAt).toLocaleDateString('en-IN')}</td>
+                <td>{inrExact(i.amountPaise)}</td><td className="text-ink-3">GST {inrExact(i.gstPaise)}</td>
+                <td className="text-right"><Link className="font-semibold underline" href={`/invoices/${i.id}`}>View tax invoice</Link></td>
+              </tr>
             ))}
             {!billing.invoices.length && <tr><td className="py-2 text-ink-3">No invoices yet.</td></tr>}
           </tbody>
         </table>
       </section>
     </div>
+  );
+}
+
+const inrExact = (paise: number) => `₹${(paise / 100).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+
+/** Mirrors the server's GST calculation (apps/api/src/billing/gst.ts) for the pre-checkout total. */
+function gstTotal(taxable: number, b: Billing) {
+  const intra = b.gst.supplierState === b.profile.stateCode;
+  const half = Math.round((taxable * b.gst.rateBps) / 2 / 10_000);
+  const tax = intra ? half * 2 : Math.round((taxable * b.gst.rateBps) / 10_000);
+  const pct = b.gst.rateBps / 100;
+  return { total: taxable + tax, label: intra ? `CGST ${pct / 2}% + SGST ${pct / 2}%` : `IGST ${pct}%` };
+}
+
+function BillingProfileForm({ billing, onSaved }: { billing: Billing; onSaved: (m: { kind: 'ok' | 'err'; text: string }) => void }) {
+  const p = billing.profile;
+  const [editing, setEditing] = useState(!billing.profileComplete);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  if (!editing) {
+    return (
+      <section className="card flex flex-wrap items-start justify-between gap-4 p-6">
+        <div className="text-sm">
+          <p className="label">Billed to (on your GST invoice)</p>
+          <p className="font-semibold">{p.legalName}</p>
+          <p className="text-ink-3">{p.address}, {p.city} {p.pincode} · {billing.states[p.stateCode ?? '']}</p>
+          <p className="text-ink-3">{p.gstin ? `GSTIN ${p.gstin}` : 'Unregistered (no GSTIN)'}</p>
+        </div>
+        <button className="btn-ghost py-1.5 text-xs" onClick={() => setEditing(true)}>Edit billing details</button>
+      </section>
+    );
+  }
+  async function save(e: React.FormEvent<HTMLFormElement>) {
+    e.preventDefault();
+    const f = new FormData(e.currentTarget);
+    const body = Object.fromEntries([...f.entries()].map(([k, v]) => [k, String(v).trim()]).filter(([, v]) => v !== ''));
+    setBusy(true); setError(null);
+    try {
+      await api('/billing/profile', { method: 'PATCH', body });
+      setEditing(false);
+      onSaved({ kind: 'ok', text: 'Billing details saved.' });
+    } catch (err) {
+      const e = err as ApiError;
+      setError(e.issues?.length ? e.issues.map((i) => i.message).join(' · ') : e.message);
+    }
+    setBusy(false);
+  }
+  return (
+    <form onSubmit={save} className="card space-y-4 p-6" aria-label="Billing details">
+      <div><h2 className="font-semibold">Billing details for your GST invoice</h2><p className="text-xs text-ink-3">Add your GSTIN to claim input tax credit. Without a GSTIN, select your state; it decides CGST + SGST or IGST.</p></div>
+      <div className="grid gap-3 sm:grid-cols-2">
+        <div><label className="label" htmlFor="gstin">GSTIN (optional)</label><input id="gstin" name="gstin" className="input uppercase" defaultValue={p.gstin ?? ''} placeholder="24ABCDE1234F1Z6" /></div>
+        <div><label className="label" htmlFor="stateCode">State</label>
+          <select id="stateCode" name="stateCode" className="input" defaultValue={p.stateCode ?? ''}>
+            <option value="">Select state</option>
+            {Object.entries(billing.states).sort(([a], [b]) => a.localeCompare(b)).map(([c, n]) => <option key={c} value={c}>{c} · {n}</option>)}
+          </select></div>
+        <div className="sm:col-span-2"><label className="label" htmlFor="address">Billing address</label><input id="address" name="address" className="input" required defaultValue={p.address ?? ''} /></div>
+        <div><label className="label" htmlFor="city">City</label><input id="city" name="city" className="input" required defaultValue={p.city ?? ''} /></div>
+        <div><label className="label" htmlFor="pincode">PIN code</label><input id="pincode" name="pincode" className="input" required inputMode="numeric" defaultValue={p.pincode ?? ''} /></div>
+      </div>
+      {error && <p role="alert" className="rounded-xl bg-red-50 px-3 py-2 text-sm text-red-800">{error}</p>}
+      <div className="flex gap-2"><button className="btn-primary" disabled={busy}>{busy ? 'Saving…' : 'Save billing details'}</button>{billing.profileComplete && <button type="button" className="btn-ghost" onClick={() => setEditing(false)}>Cancel</button>}</div>
+    </form>
   );
 }

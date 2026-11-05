@@ -1,0 +1,3 @@
+-- AlterTable
+ALTER TABLE "Task" ADD COLUMN     "stepIndex" INTEGER NOT NULL DEFAULT 0;
+

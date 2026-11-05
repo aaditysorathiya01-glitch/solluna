@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Headers, HttpCode, Post, Req } from '@nestjs/common';
+import { Body, Controller, Get, Headers, HttpCode, Param, Patch, Post, Req } from '@nestjs/common';
 import type { RawBodyRequest } from '@nestjs/common';
 import { SkipThrottle } from '@nestjs/throttler';
 import type { Request } from 'express';
@@ -12,6 +12,15 @@ export class BillingController {
 
   @CustomerOnly() @Get()
   summary(@CurrentUser() user: AuthUser) { return this.billing.billingSummary(user); }
+
+  @CustomerOnly() @Patch('profile')
+  profile(@CurrentUser() user: AuthUser, @Body() body: unknown) { return this.billing.updateProfile(user, body); }
+
+  @StaffOnly('SUPER_ADMIN', 'ACCOUNTS_EXECUTIVE') @Get('admin/invoices/:id')
+  staffInvoice(@CurrentUser() user: AuthUser, @Param('id') id: string) { return this.billing.getInvoice(user, id); }
+
+  @CustomerOnly() @Get('invoices/:id')
+  invoice(@CurrentUser() user: AuthUser, @Param('id') id: string) { return this.billing.getInvoice(user, id); }
 
   @CustomerOnly() @Post('checkout')
   checkout(@CurrentUser() user: AuthUser, @Body() body: unknown) { return this.billing.checkout(user, body); }

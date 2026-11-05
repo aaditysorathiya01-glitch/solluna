@@ -62,6 +62,7 @@ before(async () => {
   const a = start('node', ['dist/apps/api/src/main.js'], apiDir, {
     DATABASE_URL, PORT: String(apiPort), JWT_SECRET: 'web-e2e-secret-web-e2e-secret-123', COOKIE_SECURE: 'false',
     RAZORPAY_KEY_ID: KEY_ID, RAZORPAY_KEY_SECRET: KEY_SECRET, RAZORPAY_WEBHOOK_SECRET: 'wh', RAZORPAY_API_BASE: `http://127.0.0.1:${rzpPort}`, RATE_LIMIT_PER_MIN: '10000', AUTH_RATE_LIMIT_PER_MIN: '100',
+    SUPPLIER_LEGAL_NAME: 'SOLLUNA Marketplace Services', SUPPLIER_GSTIN: '24AAJCS1234M1ZA', SUPPLIER_ADDRESS: 'B-220 Supath-2 Complex, Ahmedabad, Gujarat 380013', SUPPLIER_EMAIL: 'solluna.play@gmail.com',
   });
   apiProc = a.p;
   await waitFor(`${apiBase}/health`, 'API', a.logs);
@@ -108,6 +109,7 @@ test('landing page renders live plans and the 28-service comparison', async () =
   await page.goto(webBase);
   await page.getByRole('heading', { name: /run by specialists/i }).waitFor();
   for (const price of ['₹1,999', '₹4,999', '₹9,999']) assert.ok(await page.getByText(price).first().isVisible(), price);
+  assert.ok(await page.getByText('/month + GST').first().isVisible(), 'prices shown GST-exclusive');
   const serviceRows = await page.locator('#pricing tbody tr').count();
   assert.equal(serviceRows, 28 + 5, '28 services + 5 section headers');
   assert.ok(await page.getByText('On request').isVisible());
@@ -122,7 +124,7 @@ test('landing page has no horizontal scroll on a phone', async () => {
   assert.ok(overflow <= 0, `horizontal overflow ${overflow}px`);
 });
 
-test('register → choose Growth → Razorpay checkout → verified → plan active', async () => {
+test('register → billing details → GST total → Razorpay checkout → verified → GST tax invoice', async () => {
   const { page, errors } = await newPage();
   S.customer = page;
   await page.goto(`${webBase}/register?plan=GROWTH`);
@@ -135,13 +137,37 @@ test('register → choose Growth → Razorpay checkout → verified → plan act
   await page.fill('#phone', '9812345678');
   await page.click('button:has-text("Create account")');
   await page.waitForURL(/\/dashboard\?tab=billing&plan=GROWTH/);
-  await page.getByRole('heading', { name: 'Billing' }).waitFor();
+  await page.getByRole('heading', { name: 'Billing', exact: true }).waitFor();
+  const firstStates = await page.locator('#stateCode option').evaluateAll((o) => o.slice(1, 3).map((x) => x.textContent));
+  assert.deepEqual(firstStates, ['01 · Jammu and Kashmir', '02 · Himachal Pradesh'], 'states listed in GST code order');
+
+  assert.ok(await page.locator('button:has-text("Choose Growth")').isDisabled(), 'checkout needs billing details first');
+  await page.fill('#gstin', '24ABCDE1234F1Z5');
+  await page.fill('#address', '7 Linking Road, Bandra West'); await page.fill('#city', 'Mumbai'); await page.fill('#pincode', '400050');
+  await page.click('button:has-text("Save billing details")');
+  await page.getByRole('alert').getByText(/GSTIN/).waitFor(); // wrong check digit rejected by the API
+  await page.fill('#gstin', '');
+  await page.selectOption('#stateCode', '27');
+  await page.click('button:has-text("Save billing details")');
+  await page.getByText('Billing details saved.').waitFor();
+  await page.getByText('Unregistered (no GSTIN)').waitFor();
+  assert.equal((await page.getByTestId('total-GROWTH').innerText()).replace(/\s+/g, ' '), 'Payable ₹5,898.82 incl. IGST 18%');
 
   await page.click('button:has-text("Choose Growth")');
   await page.getByText('Payment verified. Your Growth plan is active.').waitFor();
   const opts = await page.evaluate(() => ({ amount: window.__rzpOptions.amount, key: window.__rzpOptions.key, currency: window.__rzpOptions.currency }));
-  assert.deepEqual(opts, { amount: 499900, key: KEY_ID, currency: 'INR' });
-  await page.getByText('incl. GST').waitFor();
+  assert.deepEqual(opts, { amount: 589882, key: KEY_ID, currency: 'INR' }, 'Razorpay charged ₹4,999 + 18% IGST');
+
+  await page.click('text=View tax invoice');
+  await page.waitForURL(/\/invoices\//);
+  const invoice = page.getByRole('article', { name: 'Tax invoice' });
+  await invoice.getByText('SOL/26-27/00001').waitFor();
+  for (const t of ['Tax Invoice', '24AAJCS1234M1ZA', 'Maharashtra (27)', 'IGST @ 18%', '₹5,898.82', 'Rupees Five Thousand Eight Hundred Ninety Eight and Eighty Two Paise Only', 'Unregistered recipient', '998399']) {
+    assert.ok(await invoice.getByText(t, { exact: false }).first().isVisible(), `invoice shows ${t}`);
+  }
+  assert.equal(await invoice.getByText('CGST', { exact: false }).count(), 0, 'inter-state invoice has no CGST/SGST');
+  await page.screenshot({ path: join(SHOTS, '5-tax-invoice.png'), fullPage: true });
+  await page.goBack();
 
   await page.click('nav[aria-label="Dashboard"] >> text=overview');
   await page.getByText('Renews').waitFor();

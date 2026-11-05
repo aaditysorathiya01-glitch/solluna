@@ -31,7 +31,7 @@ Run `cd platform && npm run verify:skills` after changing any of them; it fails 
 2. **Plan limits live in the DB** (`PlanFeature`, admin-editable) and are enforced in the API (`checkEntitlement`), never by hiding UI. If the plan can't be verified, the result is `PENDING_VERIFICATION`.
 3. **Approvals** (`Approval` model) are action-specific and required before: ad spend or budget changes, purchases, marketplace fees, price or offer changes, material listing changes, consequential order actions, third-party data sharing, and out-of-plan work.
 4. **Status is evidence-based:** never mark ACTIVE, COMPLETED or OPTED_OUT without marketplace confirmation.
-5. **Payments:** activate only after Razorpay server signature check + webhook.
+5. **Payments:** activate only after Razorpay server signature check + webhook. Prices are **GST-exclusive** (18% added); every verified payment issues a GST tax invoice (`apps/api/src/billing/gst.ts`).
 6. **Credentials:** OAuth tokens only, encrypted. Never passwords or OTPs in chat. No production reliance on scraping.
 7. **P&L:** never show verified profit with missing costs. Mark it ESTIMATED or UNAVAILABLE.
 8. **Labels:** never alter official marketplace labels. Thank-you notes are separate inserts.

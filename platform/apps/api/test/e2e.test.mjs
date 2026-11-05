@@ -25,6 +25,7 @@ const KEY_ID = 'rzp_test_e2e';
 const KEY_SECRET = 'e2e_key_secret';
 const WEBHOOK_SECRET = 'e2e_webhook_secret';
 const CONNECTOR_SECRET = 'e2e_connector_secret';
+const SUPPLIER_GSTIN = '24AAJCS1234M1ZA'; // Gujarat (valid check digit)
 const ADMIN = { email: 'admin@solluna.test', password: 'Admin-Passw0rd-123' };
 
 let api, base, db, rzpServer, sinkServer;
@@ -65,6 +66,7 @@ before(async () => {
       ...process.env, DATABASE_URL, PORT: String(port), JWT_SECRET: 'e2e-jwt-secret-e2e-jwt-secret-1234', COOKIE_SECURE: 'false',
       RAZORPAY_KEY_ID: KEY_ID, RAZORPAY_KEY_SECRET: KEY_SECRET, RAZORPAY_WEBHOOK_SECRET: WEBHOOK_SECRET, RAZORPAY_API_BASE: `http://127.0.0.1:${rzpPort}`,
       CONNECTOR_WEBHOOK_URL: `http://127.0.0.1:${sinkPort}/hook`, CONNECTOR_WEBHOOK_SECRET: CONNECTOR_SECRET, RATE_LIMIT_PER_MIN: '10000', AUTH_RATE_LIMIT_PER_MIN: '40',
+      SUPPLIER_LEGAL_NAME: 'SOLLUNA Marketplace Services', SUPPLIER_GSTIN: SUPPLIER_GSTIN, SUPPLIER_ADDRESS: 'B-220 Supath-2 Complex, Ahmedabad, Gujarat 380013', INVOICE_SAC: '998399',
     },
     stdio: ['ignore', 'pipe', 'pipe'],
   });
@@ -107,7 +109,9 @@ async function registerCustomer(name) {
 }
 async function login(email, password) { return ok(await call('POST', '/auth/login', { body: { email, password } })).token; }
 const sign = (secret, data) => createHmac('sha256', secret).update(data).digest('hex');
-async function pay(token, planCode) {
+const PROFILE = { address: '12 MG Road, Andheri East', city: 'Mumbai', pincode: '400069', stateCode: '27' };
+async function pay(token, planCode, profile = PROFILE) {
+  if (profile) ok(await call('PATCH', '/billing/profile', { token, body: profile }));
   const co = ok(await call('POST', '/billing/checkout', { token, body: { planCode } }));
   const paymentId = `pay_${co.orderId}`;
   ok(await call('POST', '/billing/verify', { token, body: { razorpay_order_id: co.orderId, razorpay_payment_id: paymentId, razorpay_signature: sign(KEY_SECRET, `${co.orderId}|${paymentId}`) } }));
@@ -137,7 +141,7 @@ test('auth: registration validation, duplicates, login, session cookie, me', asy
   assert.equal(bad.status, 400);
   assert.ok(bad.body.issues.some((i) => i.path === 'phone'));
 
-  const r = await call('POST', '/auth/register', { body: { name: 'Asha Mehta', email: 'Asha@Seller.test', phone: '9876543210', password: 'Seller-Pass-123', legalName: 'Asha Home Decor LLP', gstin: '24ABCDE1234F1Z5' } });
+  const r = await call('POST', '/auth/register', { body: { name: 'Asha Mehta', email: 'Asha@Seller.test', phone: '9876543210', password: 'Seller-Pass-123', legalName: 'Asha Home Decor LLP', gstin: '24ABCDE1234F1Z6' } });
   ok(r);
   assert.match(r.headers.get('set-cookie'), /solluna_session=.*HttpOnly/i);
   S.a = r.body.token;
@@ -147,7 +151,9 @@ test('auth: registration validation, duplicates, login, session cookie, me', asy
   S.a = await login('asha@seller.test', 'Seller-Pass-123');
   const me = ok(await call('GET', '/auth/me', { token: S.a }));
   assert.equal(me.user.type, 'CUSTOMER');
-  assert.equal(me.organization.gstin, '24ABCDE1234F1Z5');
+  assert.equal(me.organization.gstin, '24ABCDE1234F1Z6');
+  const badGstin = await call('POST', '/auth/register', { body: { name: 'Bad Gst', email: 'bad@gst.test', phone: '9876500011', password: 'Seller-Pass-123', legalName: 'Bad GST Co', gstin: '24ABCDE1234F1Z5' } });
+  assert.equal(badGstin.status, 400, 'GSTIN with wrong check digit rejected');
   assert.equal((await call('GET', '/auth/me')).status, 401);
   S.admin = await login(ADMIN.email, ADMIN.password);
 });
@@ -173,11 +179,19 @@ test('orchestrator: request without a plan is blocked as out of plan, with a cli
 });
 
 test('billing: invalid signature never activates; payment in flight = plan verification', async () => {
+  const noProfile = await call('POST', '/billing/checkout', { token: S.a, body: { planCode: 'RESELLER' } });
+  assert.equal(noProfile.status, 400, 'billing address required for the GST invoice');
+  assert.match(noProfile.body.message, /billing address/);
+  assert.equal((await call('PATCH', '/billing/profile', { token: S.a, body: { gstin: '24ABCDE1234F1Z6', address: '4 CG Road', city: 'Ahmedabad', pincode: '12345' } })).status, 400, 'bad PIN');
+  const prof = ok(await call('PATCH', '/billing/profile', { token: S.a, body: { gstin: '24ABCDE1234F1Z6', stateCode: '27', address: '4 CG Road, Navrangpura', city: 'Ahmedabad', pincode: '380009' } }));
+  assert.equal(prof.stateCode, '24', 'GSTIN state wins over a conflicting selected state');
   const co = ok(await call('POST', '/billing/checkout', { token: S.a, body: { planCode: 'RESELLER' } }));
-  assert.equal(co.amount, 199900);
+  // GST-exclusive: ₹1,999 + 18% GST, intra-state (Gujarat → Gujarat) = CGST 9% + SGST 9%
+  assert.equal(co.amount, 235882);
+  assert.deepEqual([co.tax.taxablePaise, co.tax.cgstPaise, co.tax.sgstPaise, co.tax.igstPaise], [199900, 17991, 17991, 0]);
   assert.equal(co.keyId, KEY_ID);
   const order = orders.find((o) => o.id === co.orderId);
-  assert.equal(order.amount, 199900);
+  assert.equal(order.amount, 235882, 'Razorpay is charged the GST-inclusive total');
   assert.equal(order.notes.planCode, 'RESELLER');
 
   const forged = await call('POST', '/billing/verify', { token: S.a, body: { razorpay_order_id: co.orderId, razorpay_payment_id: 'pay_x', razorpay_signature: sign('wrong-secret', `${co.orderId}|pay_x`) } });
@@ -198,7 +212,7 @@ test('billing: verified checkout activates once, issues GST invoice, resumes wai
   assert.deepEqual(v, { status: 'ACTIVE', alreadyActive: false });
 
   // Webhook for the same payment is idempotent.
-  const evt = JSON.stringify({ event: 'payment.captured', payload: { payment: { entity: { id: paymentId, order_id: S.aOrder.orderId, amount: 199900, status: 'captured' } } } });
+  const evt = JSON.stringify({ event: 'payment.captured', payload: { payment: { entity: { id: paymentId, order_id: S.aOrder.orderId, amount: 235882, status: 'captured' } } } });
   const wh = ok(await call('POST', '/billing/webhook/razorpay', { raw: evt, headers: { 'content-type': 'application/json', 'x-razorpay-signature': sign(WEBHOOK_SECRET, evt) } }));
   assert.equal(wh.alreadyActive, true);
   assert.equal((await call('POST', '/billing/webhook/razorpay', { raw: evt, headers: { 'content-type': 'application/json', 'x-razorpay-signature': 'deadbeef' } })).status, 400);
@@ -206,7 +220,21 @@ test('billing: verified checkout activates once, issues GST invoice, resumes wai
   const billing = ok(await call('GET', '/billing', { token: S.a }));
   assert.equal(billing.subscriptions.filter((s) => s.status === 'ACTIVE').length, 1);
   assert.equal(billing.invoices.length, 1);
-  assert.equal(billing.invoices[0].gstPaise, 30493); // GST-inclusive ₹1,999 → 18/118 = ₹304.93
+  const inv = billing.invoices[0];
+  assert.equal(inv.number, 'SOL/26-27/00001');
+  assert.ok(inv.number.length <= 16, 'Rule 46: invoice number ≤ 16 characters');
+  assert.deepEqual([inv.taxablePaise, inv.cgstPaise, inv.sgstPaise, inv.igstPaise, inv.gstPaise, inv.amountPaise], [199900, 17991, 17991, 0, 35982, 235882]);
+  assert.equal(inv.placeOfSupply, '24');
+  assert.equal(inv.sac, '998399');
+  const full = ok(await call('GET', `/billing/invoices/${inv.id}`, { token: S.a }));
+  assert.equal(full.amountInWords, 'Rupees Two Thousand Three Hundred Fifty Eight and Eighty Two Paise Only');
+  assert.equal(full.supplier.gstin, SUPPLIER_GSTIN);
+  assert.equal(full.supplier.pan, 'AAJCS1234M');
+  assert.equal(full.buyer.gstin, '24ABCDE1234F1Z6');
+  assert.equal(full.buyer.stateName, 'Gujarat');
+  assert.equal(full.placeOfSupplyName, 'Gujarat');
+  assert.equal(full.reverseCharge, 'No');
+  S.aInvoice = inv.id;
 
   const resumed = ok(await call('GET', `/requests/${S.pendingRequest}`, { token: S.a }));
   assert.equal(resumed.request.status, 'QUEUED', 'request waiting on plan verification resumes automatically');
@@ -222,9 +250,10 @@ test('billing: verified checkout activates once, issues GST invoice, resumes wai
 
 test('billing: failed payment keeps the subscription inactive and notifies the client', async () => {
   S.b = await registerCustomer('Bharat');
+  ok(await call('PATCH', '/billing/profile', { token: S.b, body: PROFILE }));
   const co = ok(await call('POST', '/billing/checkout', { token: S.b, body: { planCode: 'GROWTH' } }));
-  assert.equal(co.amount, 499900);
-  const evt = JSON.stringify({ event: 'payment.failed', payload: { payment: { entity: { id: 'pay_fail', order_id: co.orderId, amount: 499900, status: 'failed', error_description: 'Card declined by bank' } } } });
+  assert.equal(co.amount, 589882); // ₹4,999 + 18% IGST (Maharashtra buyer, Gujarat supplier)
+  const evt = JSON.stringify({ event: 'payment.failed', payload: { payment: { entity: { id: 'pay_fail', order_id: co.orderId, amount: 589882, status: 'failed', error_description: 'Card declined by bank' } } } });
   ok(await call('POST', '/billing/webhook/razorpay', { raw: evt, headers: { 'content-type': 'application/json', 'x-razorpay-signature': sign(WEBHOOK_SECRET, evt) } }));
   const billing = ok(await call('GET', '/billing', { token: S.b }));
   assert.equal(billing.payments[0].status, 'FAILED');
@@ -234,6 +263,14 @@ test('billing: failed payment keeps the subscription inactive and notifies the c
   // Then the client pays successfully.
   await pay(S.b, 'GROWTH');
   assert.equal(ok(await call('GET', '/features', { token: S.b })).plan.code, 'GROWTH');
+  const bInv = ok(await call('GET', '/billing', { token: S.b })).invoices[0];
+  assert.equal(bInv.number, 'SOL/26-27/00002', 'gap-free sequence: the failed payment issued no invoice');
+  assert.deepEqual([bInv.taxablePaise, bInv.cgstPaise, bInv.sgstPaise, bInv.igstPaise, bInv.amountPaise, bInv.intraState], [499900, 0, 0, 89982, 589882, false]);
+  assert.equal((await call('GET', `/billing/invoices/${S.aInvoice}`, { token: S.b })).status, 404, "another client's invoice is not visible");
+  const accounts = await staff('ACCOUNTS_EXECUTIVE', S.admin);
+  assert.equal(ok(await call('GET', `/billing/admin/invoices/${S.aInvoice}`, { token: accounts.token })).number, 'SOL/26-27/00001');
+  const lister = await staff('LISTING_EXECUTIVE', S.admin);
+  assert.equal((await call('GET', `/billing/admin/invoices/${S.aInvoice}`, { token: lister.token })).status, 403);
 });
 
 test('workflow: new Amazon listing — catalog check → new listing → SEO, evidence-gated, quota consumed once', async () => {

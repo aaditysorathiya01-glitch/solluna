@@ -1,4 +1,5 @@
-import { BadRequestException, ConflictException, Injectable, Logger, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ConflictException, Injectable, Logger, NotFoundException, ServiceUnavailableException } from '@nestjs/common';
+import { Prisma } from '@prisma/client';
 import { z } from 'zod';
 import { PrismaService } from '../common/prisma.service';
 import { AuditService } from '../common/audit.service';
@@ -7,10 +8,19 @@ import { config } from '../common/config';
 import { DispatcherService } from '../connectors/dispatcher.service';
 import { RazorpayClient } from './razorpay.client';
 import type { AuthUser } from '../auth/auth.types';
+import { STATES, amountInWords, computeGst, financialYear, invoiceNumber, isValidGstin, stateOfGstin } from './gst';
 
 const addMonths = (d: Date, n: number) => { const x = new Date(d); x.setMonth(x.getMonth() + n); return x; };
 const addDays = (d: Date, n: number) => new Date(d.getTime() + n * 86_400_000);
-const formatInr = (paise: number) => `₹${(paise / 100).toLocaleString('en-IN')}`;
+const formatInr = (paise: number) => `₹${(paise / 100).toLocaleString('en-IN', { minimumFractionDigits: paise % 100 ? 2 : 0, maximumFractionDigits: 2 })}`;
+
+const ProfileSchema = z.object({
+  gstin: z.string().trim().toUpperCase().refine(isValidGstin, 'Invalid GSTIN (format or check digit)').optional().or(z.literal('').transform(() => undefined)),
+  stateCode: z.string().refine((c) => c in STATES, 'Select your state').optional(),
+  address: z.string().trim().min(5).max(300),
+  city: z.string().trim().min(2).max(100),
+  pincode: z.string().trim().regex(/^[1-9]\d{5}$/, 'Enter a valid 6-digit PIN code'),
+});
 
 /**
  * Subscription lifecycle (plan doc §17):
@@ -45,13 +55,22 @@ export class BillingService {
       : (await this.db.subscription.findFirst({ where: { organizationId: orgId, planId: plan.id, status: 'PENDING_PAYMENT' } }))
         ?? (await this.db.subscription.create({ data: { organizationId: orgId, planId: plan.id, status: 'PENDING_PAYMENT' } }));
 
-    const payment = await this.db.payment.create({ data: { organizationId: orgId, subscriptionId: subscription.id, amountPaise: plan.pricePaise } });
-    const order = await this.rzp.createOrder(plan.pricePaise, payment.id, { organizationId: orgId, planCode, paymentId: payment.id });
-    if (order.amount !== plan.pricePaise || order.currency !== 'INR') throw new BadRequestException('Gateway returned an unexpected amount');
-    await this.db.payment.update({ where: { id: payment.id }, data: { razorpayOrderId: order.id } });
-    await this.audit.log({ actor: user, action: 'payment.initiated', entity: 'Payment', entityId: payment.id, after: { planCode, amountPaise: plan.pricePaise, orderId: order.id } });
+    // Prices are GST-exclusive: plan price = taxable value, GST added per place of supply.
+    const supplierState = this.supplierState();
+    const org = await this.db.organization.findUniqueOrThrow({ where: { id: orgId } });
+    const pos = org.gstin ? stateOfGstin(org.gstin) : org.stateCode;
+    if (!pos || !org.address || !org.pincode) throw new BadRequestException('Add your billing address and state (or GSTIN) before paying — it is required on your GST invoice');
+    const tax = computeGst(plan.pricePaise, supplierState, pos, config.gstRateBps);
 
-    return { paymentId: payment.id, orderId: order.id, amount: order.amount, currency: order.currency, keyId: this.rzp.keyId, plan: { code: plan.code, name: plan.name } };
+    const payment = await this.db.payment.create({
+      data: { organizationId: orgId, subscriptionId: subscription.id, amountPaise: tax.totalPaise, taxablePaise: tax.taxablePaise, taxPaise: tax.taxPaise, placeOfSupply: pos },
+    });
+    const order = await this.rzp.createOrder(tax.totalPaise, payment.id, { organizationId: orgId, planCode, paymentId: payment.id });
+    if (order.amount !== tax.totalPaise || order.currency !== 'INR') throw new BadRequestException('Gateway returned an unexpected amount');
+    await this.db.payment.update({ where: { id: payment.id }, data: { razorpayOrderId: order.id } });
+    await this.audit.log({ actor: user, action: 'payment.initiated', entity: 'Payment', entityId: payment.id, after: { planCode, ...tax, orderId: order.id } });
+
+    return { paymentId: payment.id, orderId: order.id, amount: order.amount, currency: order.currency, keyId: this.rzp.keyId, plan: { code: plan.code, name: plan.name }, tax };
   }
 
   /** Called with the fields Razorpay Checkout returns to the browser. */
@@ -118,15 +137,7 @@ export class BillingService {
         // currentPeriodStart is the billing anchor (see billingMonthStart); renewals only extend the end.
         data: { status: 'ACTIVE', currentPeriodStart: renewing ? sub.currentPeriodStart : start, currentPeriodEnd: end, graceUntil: null },
       });
-      // Plan prices are treated as GST-inclusive (18%); the invoice breaks the GST out.
-      const count = await tx.invoice.count();
-      await tx.invoice.create({
-        data: {
-          organizationId: payment.organizationId, paymentId: payment.id,
-          number: `SOL-${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, '0')}-${String(count + 1).padStart(5, '0')}`,
-          amountPaise: payment.amountPaise, gstPaise: Math.round((payment.amountPaise * 18) / 118),
-        },
-      });
+      await this.issueInvoice(tx, payment, sub.plan, start, end, now);
       await this.audit.log({ action: 'subscription.activate', entity: 'Subscription', entityId: sub.id, organizationId: payment.organizationId, after: { plan: sub.plan.code, source, periodEnd: end } }, tx);
       return { alreadyActive: false, payment, plan: sub.plan, end, subscription: updated };
     });
@@ -152,7 +163,7 @@ export class BillingService {
       const already = await this.db.auditLog.findFirst({ where: { action: 'subscription.renewal_reminder', entityId: s.id, after: { path: ['periodEnd'], equals: s.currentPeriodEnd!.toISOString() } } });
       if (already) continue;
       await this.audit.log({ action: 'subscription.renewal_reminder', entity: 'Subscription', entityId: s.id, organizationId: s.organizationId, after: { periodEnd: s.currentPeriodEnd!.toISOString() } });
-      await this.dispatch.emit({ type: 'subscription.renewal_reminder', organizationId: s.organizationId, title: 'Renewal due', body: `Your ${s.plan.name} plan renews on ${s.currentPeriodEnd!.toDateString()} (${formatInr(s.plan.pricePaise)}).` });
+      await this.dispatch.emit({ type: 'subscription.renewal_reminder', organizationId: s.organizationId, title: 'Renewal due', body: `Your ${s.plan.name} plan renews on ${s.currentPeriodEnd!.toDateString()} (${formatInr(s.plan.pricePaise)} + GST).` });
       out.reminders++;
     }
     const expired = await this.db.subscription.findMany({ where: { status: 'ACTIVE', currentPeriodEnd: { lte: now } } });
@@ -173,6 +184,68 @@ export class BillingService {
     return out;
   }
 
+  get invoicingConfigured() {
+    const sp = config.supplier;
+    return Boolean(sp.legalName && sp.address && sp.gstin && isValidGstin(sp.gstin));
+  }
+
+  private supplierState(): string {
+    if (!this.invoicingConfigured) throw new ServiceUnavailableException('GST invoicing is not configured (SUPPLIER_LEGAL_NAME, SUPPLIER_GSTIN, SUPPLIER_ADDRESS)');
+    return stateOfGstin(config.supplier.gstin!);
+  }
+
+  /** Billing details printed on the buyer section of the tax invoice. */
+  async updateProfile(user: AuthUser, input: unknown) {
+    const d = parse(ProfileSchema, input);
+    if (!d.gstin && !d.stateCode) throw new BadRequestException('Provide your GSTIN or select your state');
+    const stateCode = d.gstin ? stateOfGstin(d.gstin) : d.stateCode!;
+    const before = await this.db.organization.findUniqueOrThrow({ where: { id: user.organizationId! } });
+    const org = await this.db.organization.update({
+      where: { id: user.organizationId! },
+      data: { gstin: d.gstin ?? null, stateCode, address: d.address, city: d.city, pincode: d.pincode },
+    });
+    await this.audit.log({ actor: user, action: 'billing.profile_update', entity: 'Organization', entityId: org.id, before: { gstin: before.gstin, stateCode: before.stateCode }, after: { gstin: org.gstin, stateCode } });
+    return { gstin: org.gstin, stateCode, stateName: STATES[stateCode], address: org.address, city: org.city, pincode: org.pincode };
+  }
+
+  /** Issues a GST tax invoice inside the activation transaction. Sequence is gap-free per financial year. */
+  private async issueInvoice(
+    tx: Prisma.TransactionClient,
+    payment: { id: string; organizationId: string; amountPaise: number; taxablePaise: number; placeOfSupply: string | null },
+    plan: { name: string },
+    periodStart: Date, periodEnd: Date, now: Date,
+  ) {
+    const org = await tx.organization.findUniqueOrThrow({ where: { id: payment.organizationId } });
+    const supplierState = this.supplierState();
+    const pos = payment.placeOfSupply!;
+    const tax = computeGst(payment.taxablePaise, supplierState, pos, config.gstRateBps);
+    if (tax.totalPaise !== payment.amountPaise) throw new ConflictException('Invoice total does not match the amount paid');
+
+    const fy = financialYear(now);
+    await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${'invoice-seq:' + fy}))`;
+    const last = await tx.invoice.findFirst({ where: { financialYear: fy }, orderBy: { sequence: 'desc' }, select: { sequence: true } });
+    const sequence = (last?.sequence ?? 0) + 1;
+    const sp = config.supplier;
+    return tx.invoice.create({
+      data: {
+        organizationId: org.id, paymentId: payment.id, financialYear: fy, sequence, number: invoiceNumber(fy, sequence), issuedAt: now,
+        sac: config.invoiceSac,
+        description: `SOLLUNA ${plan.name} plan — Amazon & Flipkart marketplace management services (${periodStart.toLocaleDateString('en-IN')} to ${periodEnd.toLocaleDateString('en-IN')})`,
+        periodStart, periodEnd, placeOfSupply: pos, intraState: tax.intraState, gstRateBps: tax.rateBps,
+        taxablePaise: tax.taxablePaise, cgstPaise: tax.cgstPaise, sgstPaise: tax.sgstPaise, igstPaise: tax.igstPaise, gstPaise: tax.taxPaise, amountPaise: tax.totalPaise,
+        supplier: { legalName: sp.legalName, tradeName: sp.tradeName, gstin: sp.gstin, pan: sp.gstin!.slice(2, 12), address: sp.address, email: sp.email ?? null, stateCode: supplierState, stateName: STATES[supplierState] },
+        buyer: { legalName: org.legalName, brandName: org.brandName, gstin: org.gstin, address: org.address, city: org.city, pincode: org.pincode, stateCode: pos, stateName: STATES[pos], email: org.contactEmail, phone: org.contactPhone },
+      },
+    });
+  }
+
+  /** Tax invoice for display/print. Customers see only their own; accounts staff see all. */
+  async getInvoice(user: AuthUser, id: string) {
+    const inv = await this.db.invoice.findFirst({ where: { id, ...(user.type === 'CUSTOMER' ? { organizationId: user.organizationId! } : {}) } });
+    if (!inv) throw new NotFoundException('Invoice not found');
+    return { ...inv, amountInWords: amountInWords(inv.amountPaise), placeOfSupplyName: STATES[inv.placeOfSupply] ?? inv.placeOfSupply, reverseCharge: 'No' };
+  }
+
   async billingSummary(user: AuthUser) {
     const orgId = user.organizationId!;
     const [subscriptions, payments, invoices] = await Promise.all([
@@ -180,6 +253,14 @@ export class BillingService {
       this.db.payment.findMany({ where: { organizationId: orgId }, orderBy: { createdAt: 'desc' }, take: 20, select: { id: true, amountPaise: true, status: true, failureReason: true, createdAt: true, verifiedAt: true } }),
       this.db.invoice.findMany({ where: { organizationId: orgId }, orderBy: { issuedAt: 'desc' } }),
     ]);
-    return { subscriptions, payments, invoices, paymentsConfigured: this.rzp.configured };
+    const org = await this.db.organization.findUniqueOrThrow({ where: { id: orgId } });
+    const profile = { legalName: org.legalName, gstin: org.gstin, address: org.address, city: org.city, pincode: org.pincode, stateCode: org.gstin ? stateOfGstin(org.gstin) : org.stateCode };
+    return {
+      subscriptions, payments, invoices, profile,
+      profileComplete: Boolean(profile.stateCode && org.address && org.pincode),
+      paymentsConfigured: this.rzp.configured && this.invoicingConfigured,
+      gst: { rateBps: config.gstRateBps, supplierState: config.supplier.gstin ? stateOfGstin(config.supplier.gstin) : null },
+      states: STATES,
+    };
   }
 }

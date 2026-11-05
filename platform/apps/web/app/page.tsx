@@ -91,7 +91,7 @@ export default async function Home() {
       <section id="pricing" className="bg-ivory-2 py-20">
         <div className="mx-auto max-w-6xl px-4 sm:px-6">
           <h2 className="font-display text-3xl">Plans</h2>
-          <p className="mt-2 text-ink-3">Monthly, GST inclusive. Amazon and Flipkart included in every plan.</p>
+          <p className="mt-2 text-ink-3">Monthly, plus 18% GST. Every payment comes with a GST tax invoice for your input tax credit. Amazon and Flipkart included in every plan.</p>
           {!plans ? (
             <p className="card mt-8 p-6 text-sm text-ink-3">Pricing is temporarily unavailable. Please refresh in a moment.</p>
           ) : (
@@ -103,7 +103,7 @@ export default async function Home() {
                       <h3 className="text-sm font-semibold uppercase tracking-[0.2em] text-ink-3">{p.name}</h3>
                       {p.code === 'GROWTH' && <span className="chip bg-sun/15 text-sun-3">Most chosen</span>}
                     </div>
-                    <p className="mt-4 font-display text-4xl">{inr(p.pricePaise)}<span className="font-sans text-base text-ink-3"> /month</span></p>
+                    <p className="mt-4 font-display text-4xl">{inr(p.pricePaise)}<span className="font-sans text-base text-ink-3"> /month + GST</span></p>
                     <p className="mt-2 text-sm text-ink-3">{TAGLINE[p.code]}</p>
                     <p className="mt-5 text-sm"><strong>{p.features.filter((f) => f.enabled).length}</strong> of {p.features.length} services included</p>
                     <Link href={`/register?plan=${p.code}`} className={`${p.code === 'GROWTH' ? 'btn-gold' : 'btn-primary'} mt-7`}>Choose {p.name}</Link>

@@ -128,11 +128,11 @@ export class OrchestratorService implements OnModuleInit {
     const keys = new Set(included.map((s) => s.key));
     const ids = new Map<string, string>();
     const priority = (details.priority as 'P1' | 'P2' | 'P3' | 'P4') ?? 'P3';
-    for (const s of included) {
+    for (const [stepIndex, s] of included.entries()) {
       const f = this.stepFeature(s, feature);
       const t = await tx.task.create({
         data: {
-          organizationId: req.organizationId, requestId: req.id, stepKey: s.key, title: s.title, featureKey: f, skill: FEATURES[f].skill,
+          organizationId: req.organizationId, requestId: req.id, stepKey: s.key, stepIndex, title: s.title, featureKey: f, skill: FEATURES[f].skill,
           marketplace: req.marketplace, priority, status: 'NEW', entitlement: 'ALLOWED', approvalAction: s.approval ?? null,
           requiredInputs: details as Prisma.InputJsonValue,
         },
@@ -337,7 +337,7 @@ export class OrchestratorService implements OnModuleInit {
   // ───────────────────────── Client update (Step 7) ─────────────────────────
 
   async clientUpdate(requestId: string, orgId: string) {
-    const req = await this.db.serviceRequest.findFirst({ where: { id: requestId, organizationId: orgId }, include: { tasks: { orderBy: { createdAt: 'asc' } } } });
+    const req = await this.db.serviceRequest.findFirst({ where: { id: requestId, organizationId: orgId }, include: { tasks: { orderBy: [{ stepIndex: 'asc' }, { createdAt: 'asc' }] } } });
     if (!req) throw new NotFoundException('Request not found');
     const label = FEATURES[req.featureKey as FeatureKey].label;
     const mp = req.marketplace ? ` (${req.marketplace === 'AMAZON' ? 'Amazon' : 'Flipkart'})` : '';
@@ -404,14 +404,14 @@ export class OrchestratorService implements OnModuleInit {
   listRequests(user: AuthUser) {
     return this.db.serviceRequest.findMany({
       where: { organizationId: user.organizationId! }, orderBy: { createdAt: 'desc' },
-      include: { tasks: { select: { id: true, title: true, status: true, skill: true, stepKey: true, blocker: true }, orderBy: { createdAt: 'asc' } } },
+      include: { tasks: { select: { id: true, title: true, status: true, skill: true, stepKey: true, blocker: true }, orderBy: [{ stepIndex: 'asc' }, { createdAt: 'asc' }] } },
     });
   }
 
   async getRequest(user: AuthUser, id: string) {
     const req = await this.db.serviceRequest.findFirst({
       where: { id, organizationId: user.organizationId! },
-      include: { tasks: { select: { id: true, title: true, status: true, skill: true, stepKey: true, blocker: true, updatedAt: true }, orderBy: { createdAt: 'asc' } } },
+      include: { tasks: { select: { id: true, title: true, status: true, skill: true, stepKey: true, blocker: true, updatedAt: true }, orderBy: [{ stepIndex: 'asc' }, { createdAt: 'asc' }] } },
     });
     if (!req) throw new NotFoundException('Request not found');
     return { request: req, update: await this.clientUpdate(id, user.organizationId!) };
@@ -453,7 +453,7 @@ export class OrchestratorService implements OnModuleInit {
   }
 
   async staffRequest(user: AuthUser, id: string) {
-    const req = await this.db.serviceRequest.findUnique({ where: { id }, include: { tasks: { orderBy: { createdAt: 'asc' } }, organization: { select: { legalName: true } } } });
+    const req = await this.db.serviceRequest.findUnique({ where: { id }, include: { tasks: { orderBy: [{ stepIndex: 'asc' }, { createdAt: 'asc' }] }, organization: { select: { legalName: true } } } });
     if (!req) throw new NotFoundException('Request not found');
     if (!req.tasks.some((t) => this.canWork(user, t.featureKey)) && ROLE_FEATURES[user.staffRole!] !== 'ALL') throw new ForbiddenException();
     return { request: req, update: await this.clientUpdate(id, req.organizationId) };

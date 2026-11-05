@@ -212,6 +212,9 @@ model Organization {
   contactEmail String
   contactPhone String
   address      String?
+  city         String?
+  pincode      String?
+  stateCode    String?  // GST state code for place of supply (derived from GSTIN when present)
   isSuspended  Boolean  @default(false)
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
@@ -304,7 +307,10 @@ model Payment {
   organizationId    String
   organization      Organization  @relation(fields: [organizationId], references: [id])
   subscriptionId    String?
-  amountPaise       Int
+  amountPaise       Int           // total charged = taxable + GST
+  taxablePaise      Int           @default(0)
+  taxPaise          Int           @default(0)
+  placeOfSupply     String?       // GST state code
   status            PaymentStatus @default(INITIATED)
   razorpayOrderId   String?       @unique
   razorpayPaymentId String?       @unique
@@ -315,17 +321,34 @@ model Payment {
   @@index([organizationId])
 }
 
+/// GST tax invoice (CGST Rule 46). Supplier and buyer details are snapshotted at issue time.
 model Invoice {
   id             String       @id @default(cuid())
   organizationId String
   organization   Organization @relation(fields: [organizationId], references: [id])
-  paymentId      String?
-  number         String       @unique
-  amountPaise    Int
-  gstPaise       Int
+  paymentId      String?      @unique
+  number         String       @unique // SOL/26-27/00001
+  financialYear  String       @default("")
+  sequence       Int          @default(0)
+  sac            String       @default("")
+  description    String       @default("")
+  periodStart    DateTime?
+  periodEnd      DateTime?
+  placeOfSupply  String       @default("")
+  intraState     Boolean      @default(false)
+  gstRateBps     Int          @default(1800)
+  taxablePaise   Int          @default(0)
+  cgstPaise      Int          @default(0)
+  sgstPaise      Int          @default(0)
+  igstPaise      Int          @default(0)
+  gstPaise       Int          // total tax
+  amountPaise    Int          // invoice total
+  supplier       Json?
+  buyer          Json?
   fileKey        String?
   issuedAt       DateTime     @default(now())
 
+  @@unique([financialYear, sequence])
   @@index([organizationId])
 }
 
@@ -644,6 +667,7 @@ model Task {
   requestId      String?
   request        ServiceRequest? @relation(fields: [requestId], references: [id])
   stepKey        String?      // workflow step id
+  stepIndex      Int          @default(0) // position in the workflow (createdAt is identical within one transaction)
   approvalAction String?      // if set, client Approval of this action type gates the task
   title          String
   featureKey     String       // packages/permissions FEATURES key
