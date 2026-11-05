@@ -1,5 +1,5 @@
 ---
-name: solluna-marketplace-support-communication
+name: marketplace-support-communication
 description: Handle Amazon India and Flipkart seller-support cases for SOLLUNA clients, including issue diagnosis, evidence collection, case drafting, submission tracking, escalation, and client updates.
 ---
 

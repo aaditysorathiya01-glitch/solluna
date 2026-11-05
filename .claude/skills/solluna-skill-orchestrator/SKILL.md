@@ -67,6 +67,8 @@ If a listed skill is not installed, report that the specialist workflow is unava
 
 Use the client's confirmed active subscription and current service agreement. Do not infer a plan from the client's request or willingness to pay.
 
+**Source of truth:** `docs/plans/SOLLUNA_Marketplace_Management_Plans.txt` (the published plan matrix and its Terms & Conditions). If this section and the plan matrix ever differ, the plan matrix wins. At runtime, the platform's `PlanFeature` table (admin-editable) is authoritative for each client.
+
 ### Reseller — ₹1,999/month
 
 Core support includes:
@@ -87,21 +89,22 @@ Core support includes:
 Includes the Reseller scope plus:
 - Up to 25 new Amazon listings per billing month.
 - Up to 25 new Flipkart listings per billing month.
-- Call support.
+- Call support — **On Request** (scheduled when requested; not priority).
 - Ads management.
 - Promotional management.
 - Low-stock alerts.
 - Competitor and price monitoring.
 - Listing health monitoring.
 - Inventory and replenishment planning.
-- Shipping-label generation and daily label processing, subject to agreed operating schedule and platform eligibility.
-- Personalized thank-you notes.
+- Unlimited shipping-label generation and daily label processing, subject to agreed operating schedule and platform eligibility.
 
 ### Premium — ₹9,999/month
 
 Includes the Growth scope plus:
 - Unlimited new Amazon listings within agreed operational scope.
 - Unlimited new Flipkart listings within agreed operational scope.
+- Call support — **Priority**.
+- Personalized thank-you notes.
 - Customized thank-you note design.
 - Product research and suggestions.
 - Business growth and improvement suggestions.

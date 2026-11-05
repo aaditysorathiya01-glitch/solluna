@@ -1,5 +1,5 @@
 ---
-name: solluna-low-stock-alerts
+name: low-stock-alerts
 description: Monitor Amazon India and Flipkart inventory, calculate stock coverage, identify low-stock and stockout risks, and send actionable alerts to SOLLUNA clients using authorized inventory data.
 ---
 

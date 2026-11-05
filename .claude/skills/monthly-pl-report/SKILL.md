@@ -1,5 +1,5 @@
 ---
-name: solluna-monthly-profit-and-loss-report
+name: monthly-pl-report
 description: Prepare monthly marketplace profit-and-loss reports for SOLLUNA clients selling on Amazon India and Flipkart, using reconciled sales, settlement, fee, cost, advertising, return, and operating-expense data.
 ---
 

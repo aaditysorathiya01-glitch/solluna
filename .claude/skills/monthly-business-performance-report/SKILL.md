@@ -1,5 +1,5 @@
 ---
-name: solluna-monthly-business-performance-report
+name: monthly-business-performance-report
 description: Prepare accurate monthly Amazon India and Flipkart business performance reports for SOLLUNA marketplace-management clients using authorized marketplace reports and verified client data.
 ---
 

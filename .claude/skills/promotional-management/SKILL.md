@@ -1,5 +1,5 @@
 ---
-name: solluna-promotional-management
+name: promotional-management
 description: Plan, prepare, schedule, monitor, and report authorized Amazon India and Flipkart promotions, deals, coupons, and seller-funded offers for SOLLUNA clients with margin checks and explicit approval controls.
 ---
 

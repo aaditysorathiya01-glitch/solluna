@@ -1,5 +1,5 @@
 ---
-name: solluna-call-support
+name: call-support
 description: Coordinate scheduled and authorized client calls for SOLLUNA marketplace-management services, including call requests, booking, preparation, notes, action items, follow-up, and call records.
 ---
 

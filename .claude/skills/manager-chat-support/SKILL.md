@@ -1,5 +1,5 @@
 ---
-name: solluna-manager-chat-support
+name: manager-chat-support
 description: Manage client chat support for SOLLUNA marketplace-management services, including query intake, classification, response drafting, task routing, escalation, follow-up, and service-level tracking.
 ---
 

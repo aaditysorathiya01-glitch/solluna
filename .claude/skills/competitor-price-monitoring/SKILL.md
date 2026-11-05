@@ -1,5 +1,5 @@
 ---
-name: solluna-competitor-price-monitoring
+name: competitor-price-monitoring
 description: Monitor competitor listings, visible prices, offers, availability, and marketplace positioning for SOLLUNA Amazon India and Flipkart clients using authorized and compliant research methods.
 ---
 

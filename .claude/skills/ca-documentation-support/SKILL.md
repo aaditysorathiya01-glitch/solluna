@@ -1,5 +1,5 @@
 ---
-name: solluna-ca-documentation-support
+name: ca-documentation-support
 description: Organize and prepare marketplace-related financial records and documentation packs for SOLLUNA clients and their authorized Chartered Accountants. Does not provide tax filing, audit, certification, or legal opinions.
 ---
 

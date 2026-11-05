@@ -1,0 +1,23 @@
+{
+  "name": "solluna-2.0",
+  "private": true,
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "db:migrate": "prisma migrate dev --schema apps/api/prisma/schema.prisma",
+    "db:seed": "tsx apps/api/prisma/seed-plans.ts",
+    "verify:skills": "tsx scripts/verify-skill-map.ts",
+    "typecheck": "tsc -p tsconfig.base.json"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.6",
+    "prisma": "^5.22.0",
+    "tsx": "^4.19.2",
+    "typescript": "^5.6.3"
+  },
+  "dependencies": {
+    "@prisma/client": "^5.22.0"
+  }
+}

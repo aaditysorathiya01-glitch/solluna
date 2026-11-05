@@ -1,5 +1,5 @@
 ---
-name: solluna-seo-keyword-optimization
+name: seo-keyword-optimization
 description: Research, map, optimize, validate, and monitor Amazon India and Flipkart product listing keywords for SOLLUNA marketplace-management clients. Use when creating or improving listing titles, bullets, descriptions, search terms, attributes, or keyword reports.
 ---
 

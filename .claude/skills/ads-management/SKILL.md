@@ -1,5 +1,5 @@
 ---
-name: solluna-ads-management
+name: ads-management
 description: Plan, monitor, optimize, and report authorized Amazon India and Flipkart marketplace advertising campaigns for SOLLUNA clients, with budget controls, approval gates, and profitability-aware analysis.
 ---
 
