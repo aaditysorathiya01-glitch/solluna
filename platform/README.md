@@ -22,7 +22,7 @@ npm run dev:web                 # :3000  (proxies /api → API_URL)
 
 ## Test
 ```bash
-npm test     # skill-map drift check + 18 API E2E + 6 browser E2E (needs local Postgres)
+npm test     # skill-map drift check + 22 API E2E + 7 browser E2E (needs local Postgres)
 ```
 
 ## What is built (tested end-to-end)
@@ -31,7 +31,9 @@ npm test     # skill-map drift check + 18 API E2E + 6 browser E2E (needs local P
 - **Features ↔ skills:** all 28 services served with their skill and connectors. The API refuses to boot if a skill is missing. Plan limits are read from the DB.
 - **Orchestrator:** workflow graphs from the orchestrator skill (new listing, replenishment, advertising, promotion, shipping labels, monthly reporting, single-step). Covers dependency propagation, skip rules, client approval gates, evidence-gated completion, quota reservation under a per-org lock, and client updates in the orchestrator's format.
 - **Connectors:** in-app notifications + HMAC-signed webhook for Zapier fan-out; Drive/Docs links enforced as delivery channels.
+- **Manager Chat Support:** one private conversation per client, live both ways (Server-Sent Events, no extra dependency), attachments, read receipts, search, staff-only internal notes, manager auto-assignment at registration + reassignment, staff inbox with waiting time, log a request from chat through the orchestrator (plan rules apply), notifications in-app and via the Zapier connector.
+- **Documents:** uploads checked by file content (PDF, images, XLSX, DOCX, CSV, TXT only; executables/HTML/macro files rejected), 10 MB limit, client vs internal visibility, tenant isolation, SHA-256 integrity check on download, staff downloads audited; a shared document counts as task delivery evidence. Stored in Postgres for the MVP behind `StorageService` (swap for S3/R2 later).
 - **Web:** landing + live pricing, register/login, customer dashboard (overview, services, requests, approvals, billing with Razorpay Checkout), staff ops console (role-scoped queue, skill procedure, evidence form).
 
 ## Not built yet
-Manager Chat (real-time), file uploads to S3/R2, document/report modules, marketplace APIs (SP-API, Flipkart), manager-to-client assignment scoping, email/mobile OTP verification, admin 2FA, admin UI for editing plan limits (DB-ready; no screen yet).
+Virus scanning of uploads (files are marked NOT_SCANNED until a scanner such as ClamAV is added), S3/R2 storage driver, multi-instance live chat (needs Redis pub/sub), report/P&L modules, marketplace APIs (SP-API, Flipkart), email/mobile OTP verification, admin 2FA, admin UI for editing plan limits (DB-ready; no screen yet).

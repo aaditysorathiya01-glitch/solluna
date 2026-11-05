@@ -578,19 +578,28 @@ model CaDocument {
   @@index([organizationId, periodMonth])
 }
 
+/// A client file (business documents, deliverables, chat attachments). Bytes live in storage (fileKey).
 model Document {
   id             String       @id @default(cuid())
   organizationId String
   organization   Organization @relation(fields: [organizationId], references: [id])
-  kind           String       // GST_CERT | PAN | INVOICE | BRAND_AUTH | STATEMENT | OTHER
-  fileKey        String
-  mimeType       String
+  kind           String       // GST_CERT | PAN | INVOICE | BRAND_AUTH | STATEMENT | REPORT | CA_DOCUMENT | LABELS | CHAT_ATTACHMENT | OTHER
+  title          String       @default("")
+  fileName       String       @default("")
+  visibility     String       @default("CLIENT") // CLIENT (client + staff) | INTERNAL (SOLLUNA staff only)
+  fileKey        String       // storage key
+  sha256         String       @default("")
+  mimeType       String       // detected from content, not the file name
   sizeBytes      Int
-  scanStatus     String       @default("PENDING") // PENDING | CLEAN | INFECTED
+  scanStatus     String       @default("NOT_SCANNED") // NOT_SCANNED | CLEAN | INFECTED
   uploadedById   String
+  messageId      String?
+  message        Message?     @relation(fields: [messageId], references: [id])
+  deletedAt      DateTime?
   createdAt      DateTime     @default(now())
 
   @@index([organizationId, kind])
+  @@index([messageId])
 }
 
 // ───────────── Chat & support ─────────────
@@ -600,7 +609,15 @@ model Conversation {
   organizationId String       @unique // one Manager Chat per customer org
   organization   Organization @relation(fields: [organizationId], references: [id])
   messages       Message[]
+  lastMessageAt  DateTime?
   createdAt      DateTime     @default(now())
+}
+
+/// Database-backed object storage for the MVP (swap for S3/R2 behind StorageService).
+model FileBlob {
+  id        String   @id @default(cuid())
+  data      Bytes
+  createdAt DateTime @default(now())
 }
 
 model Message {
@@ -609,10 +626,12 @@ model Message {
   conversation   Conversation @relation(fields: [conversationId], references: [id])
   senderId       String
   sender         User         @relation(fields: [senderId], references: [id])
+  senderType     UserType     @default(CUSTOMER)
   body           String
   attachmentKeys String[]
+  attachments    Document[]
   isInternalNote Boolean      @default(false) // staff-only, never sent to customer
-  readAt         DateTime?
+  readAt         DateTime?    // set when the other side (client ↔ SOLLUNA) reads it
   createdAt      DateTime     @default(now())
 
   @@index([conversationId, createdAt])

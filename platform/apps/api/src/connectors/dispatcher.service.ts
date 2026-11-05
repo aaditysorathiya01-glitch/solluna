@@ -5,7 +5,7 @@ import { config } from '../common/config';
 
 export type EventType =
   | 'request.created' | 'request.status_changed' | 'task.status_changed' | 'approval.requested' | 'approval.decided'
-  | 'subscription.activated' | 'payment.failed' | 'subscription.renewal_reminder' | 'subscription.grace_period' | 'subscription.past_due';
+  | 'subscription.activated' | 'payment.failed' | 'chat.message' | 'subscription.renewal_reminder' | 'subscription.grace_period' | 'subscription.past_due';
 
 export interface PlatformEvent {
   type: EventType;

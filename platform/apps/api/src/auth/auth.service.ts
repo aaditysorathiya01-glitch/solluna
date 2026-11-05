@@ -27,6 +27,9 @@ const normalizePhone = (p: string) => (p.startsWith('+91') ? p : `+91${p}`);
 
 @Injectable()
 export class AuthService {
+  /** Set by ChatService wiring: assigns a manager after registration (onboarding step 7). */
+  onRegistered?: (organizationId: string) => Promise<unknown>;
+
   constructor(private readonly db: PrismaService, private readonly jwt: JwtService, private readonly audit: AuditService) {}
 
   /** Creates the customer user, their organization and the org's Manager Chat conversation in one transaction. */
@@ -46,6 +49,7 @@ export class AuthService {
       await this.audit.log({ actor: null, action: 'customer.register', entity: 'User', entityId: u.id, organizationId: org.id, ip }, tx);
       return u;
     });
+    await this.onRegistered?.(user.organizationId!);
     return this.issue(user.id);
   }
 

@@ -65,7 +65,7 @@ before(async () => {
     env: {
       ...process.env, DATABASE_URL, PORT: String(port), JWT_SECRET: 'e2e-jwt-secret-e2e-jwt-secret-1234', COOKIE_SECURE: 'false',
       RAZORPAY_KEY_ID: KEY_ID, RAZORPAY_KEY_SECRET: KEY_SECRET, RAZORPAY_WEBHOOK_SECRET: WEBHOOK_SECRET, RAZORPAY_API_BASE: `http://127.0.0.1:${rzpPort}`,
-      CONNECTOR_WEBHOOK_URL: `http://127.0.0.1:${sinkPort}/hook`, CONNECTOR_WEBHOOK_SECRET: CONNECTOR_SECRET, RATE_LIMIT_PER_MIN: '10000', AUTH_RATE_LIMIT_PER_MIN: '40',
+      CONNECTOR_WEBHOOK_URL: `http://127.0.0.1:${sinkPort}/hook`, CONNECTOR_WEBHOOK_SECRET: CONNECTOR_SECRET, RATE_LIMIT_PER_MIN: '10000', AUTH_RATE_LIMIT_PER_MIN: '40', MAX_UPLOAD_MB: '1',
       SUPPLIER_LEGAL_NAME: 'Aaditya Jitendrabhai Sorathia', SUPPLIER_TRADE_NAME: 'Solluna', SUPPLIER_GSTIN: SUPPLIER_GSTIN, SUPPLIER_ADDRESS: 'Survey No 135, Plot No 9, Shreeji Nagar, Meghpar Kumbhardi Sim, Anjar, Kachchh, Gujarat 370110', INVOICE_SAC: '998399',
     },
     stdio: ['ignore', 'pipe', 'pipe'],
@@ -475,6 +475,184 @@ test('billing month: quota periods roll monthly from the subscription anchor', a
   assert.equal(billingMonthStart(anchor, new Date('2026-01-20T00:00:00Z')).toISOString(), '2026-01-15T10:00:00.000Z');
   assert.equal(billingMonthStart(anchor, new Date('2026-03-14T00:00:00Z')).toISOString(), '2026-02-15T10:00:00.000Z');
   assert.equal(billingMonthStart(anchor, new Date('2026-03-15T11:00:00Z')).toISOString(), '2026-03-15T10:00:00.000Z');
+});
+
+
+// ───────────── documents & chat helpers ─────────────
+const PDF = Buffer.from('%PDF-1.4\n1 0 obj<<>>endobj\ntrailer<<>>\n%%EOF\n');
+const PNG = Buffer.from('89504e470d0a1a0a0000000d49484452000000010000000108060000001f15c4890000000d4944415478da63f8cfc0f01f0005000201a5f5f1a40000000049454e44ae426082', 'hex');
+async function upload(token, name, bytes, fields = {}) {
+  const fd = new FormData();
+  fd.append('file', new Blob([bytes]), name);
+  for (const [k, v] of Object.entries(fields)) fd.append(k, v);
+  const r = await fetch(base + '/documents', { method: 'POST', headers: { authorization: `Bearer ${token}` }, body: fd });
+  return { status: r.status, body: await r.json() };
+}
+async function openStream(token, path) {
+  const ctrl = new AbortController();
+  const res = await fetch(base + path, { headers: { authorization: `Bearer ${token}`, accept: 'text/event-stream' }, signal: ctrl.signal });
+  const events = [];
+  (async () => {
+    const reader = res.body.getReader(); let buf = '';
+    try {
+      for (;;) {
+        const { value, done } = await reader.read(); if (done) break;
+        buf += Buffer.from(value).toString('utf8');
+        let i;
+        while ((i = buf.indexOf('\n\n')) >= 0) {
+          const chunk = buf.slice(0, i); buf = buf.slice(i + 2);
+          const type = /^event: (.*)$/m.exec(chunk)?.[1];
+          const data = /^data: (.*)$/m.exec(chunk)?.[1];
+          if (data && type !== 'ping') events.push({ type, data: JSON.parse(data) });
+        }
+      }
+    } catch {}
+  })();
+  return { events, status: res.status, contentType: res.headers.get('content-type'), close: () => ctrl.abort() };
+}
+async function waitFor(events, pred, ms = 4000) {
+  const t0 = Date.now();
+  while (Date.now() - t0 < ms) { const e = events.find(pred); if (e) return e; await new Promise((r) => setTimeout(r, 50)); }
+  throw new Error('event not received: ' + JSON.stringify(events.map((e) => e.type)));
+}
+
+test('documents: content-based type checks, size limit, visibility, tenant isolation, integrity, audit', async () => {
+  const pdf = await upload(S.b, 'GST Certificate.pdf', PDF, { kind: 'GST_CERT' });
+  assert.equal(pdf.status, 201, JSON.stringify(pdf.body));
+  assert.equal(pdf.body.mimeType, 'application/pdf');
+  assert.equal(pdf.body.fileName, 'GST_Certificate.pdf');
+  assert.equal(pdf.body.scanStatus, 'NOT_SCANNED', 'no scanner configured — never claims CLEAN');
+  S.bDoc = pdf.body.id;
+
+  assert.equal((await upload(S.b, 'invoice.pdf', Buffer.from('MZ\x90\x00 fake exe'))).status, 400, 'executable disguised as PDF');
+  assert.equal((await upload(S.b, 'page.html', Buffer.from('<html><script>alert(1)</script></html>'))).status, 400);
+  assert.equal((await upload(S.b, 'data.csv', Buffer.from('a,b\n<script>x</script>'))).status, 400);
+  const png = await upload(S.b, 'photo.jpg', PNG, { kind: 'LISTING_ASSETS' });
+  assert.equal(png.body.mimeType, 'image/png', 'type comes from content, not name');
+  assert.equal(png.body.fileName, 'photo.png');
+  const csv = await upload(S.b, 'stock.csv', Buffer.from('sku,qty\nJTR-1,12\n'));
+  assert.equal(csv.body.mimeType, 'text/csv');
+  assert.equal((await upload(S.b, 'big.pdf', Buffer.concat([PDF, Buffer.alloc(1.2 * 1024 * 1024)]))).status, 413);
+
+  const dl = await fetch(`${base}/documents/${S.bDoc}/download`, { headers: { authorization: `Bearer ${S.b}` } });
+  assert.equal(dl.status, 200);
+  assert.match(dl.headers.get('content-disposition'), /attachment; filename="GST_Certificate.pdf"/);
+  assert.equal(dl.headers.get('x-content-type-options'), 'nosniff');
+  assert.ok(Buffer.from(await dl.arrayBuffer()).equals(PDF), 'bytes round-trip intact');
+
+  assert.equal((await fetch(`${base}/documents/${S.bDoc}/download`, { headers: { authorization: `Bearer ${S.c}` } })).status, 404, 'other tenant cannot download');
+  assert.ok(!ok(await call('GET', '/documents', { token: S.c })).some((d) => d.id === S.bDoc));
+  assert.equal((await upload(S.b, 'note.txt', Buffer.from('hello'), { visibility: 'INTERNAL' })).status, 403);
+
+  S.ops = await staff('OPERATIONS_MANAGER', S.admin);
+  const bOrg = (await db.user.findFirst({ where: { organization: { documents: { some: { id: S.bDoc } } } } })).organizationId;
+  S.bOrg = bOrg;
+  const internal = await upload(S.ops.token, 'margin-notes.txt', Buffer.from('internal margin notes'), { visibility: 'INTERNAL', organizationId: bOrg, kind: 'OTHER' });
+  assert.equal(internal.status, 201);
+  S.bInternalDoc = internal.body.id;
+  assert.ok(!ok(await call('GET', '/documents', { token: S.b })).some((d) => d.id === internal.body.id), 'client never sees INTERNAL documents');
+  assert.equal((await fetch(`${base}/documents/${internal.body.id}/download`, { headers: { authorization: `Bearer ${S.b}` } })).status, 404);
+  assert.ok(ok(await call('GET', `/documents?organizationId=${bOrg}`, { token: S.ops.token })).some((d) => d.id === internal.body.id));
+
+  await fetch(`${base}/documents/${S.bDoc}/download`, { headers: { authorization: `Bearer ${S.ops.token}` } });
+  assert.ok(await db.auditLog.findFirst({ where: { action: 'document.staff_download', entityId: S.bDoc } }), 'staff access to client files is audited');
+
+  ok(await call('DELETE', `/documents/${csv.body.id}`, { token: S.b }));
+  assert.ok(!ok(await call('GET', '/documents', { token: S.b })).some((d) => d.id === csv.body.id));
+});
+
+test('chat: auto-assigned manager, live delivery both ways, internal notes stay internal, read receipts, search', async () => {
+  S.sup1 = await staff('SUPPORT_EXECUTIVE', S.admin);
+  // Make sup1 the least-loaded candidate, then register a new client → auto-assigned (onboarding step 7).
+  await db.managerAssignment.deleteMany({});
+  S.d = await registerCustomer('Devika');
+  const dHist = ok(await call('GET', '/chat', { token: S.d }));
+  S.dOrg = dHist.organizationId;
+  assert.equal(dHist.managers.length, 1, 'a manager is assigned at registration');
+  const assigned = dHist.managers[0];
+  assert.ok(['SUPPORT_EXECUTIVE', 'OPERATIONS_MANAGER'].includes(assigned.staffRole));
+  if (assigned.id !== S.sup1.id) ok(await call('POST', `/admin/clients/${S.dOrg}/managers`, { token: S.admin, body: { managerId: S.sup1.id } }));
+
+  const clientStream = await openStream(S.d, '/chat/stream');
+  const staffStream = await openStream(S.sup1.token, '/ops/chats/stream');
+  assert.equal(clientStream.status, 200);
+  assert.match(clientStream.contentType, /text\/event-stream/);
+  await new Promise((r) => setTimeout(r, 150));
+
+  const att = await upload(S.d, 'brand-authorization.pdf', PDF, { kind: 'BRAND_AUTH' });
+  const sent = ok(await call('POST', '/chat/messages', { token: S.d, body: { body: 'Hi, our brand approval for Amazon got rejected. Letter attached.', documentIds: [att.body.id] } }));
+  assert.equal(sent.attachments[0].id, att.body.id);
+  const live = await waitFor(staffStream.events, (e) => e.type === 'message' && e.data.message.id === sent.id);
+  assert.equal(live.data.message.senderType, 'CUSTOMER');
+  assert.ok((await db.notification.findMany({ where: { userId: S.sup1.id, type: 'chat.client_message' } })).length >= 1, 'assigned manager notified');
+
+  const inbox = ok(await call('GET', '/ops/chats', { token: S.sup1.token }));
+  const row = inbox.find((r) => r.organizationId === S.dOrg);
+  assert.equal(row.unread, 1);
+  assert.equal(inbox[0].organizationId, S.dOrg, 'unanswered conversations first');
+
+  // An unassigned support executive with no work for this client has no access.
+  const sup2 = await staff('SUPPORT_EXECUTIVE', S.admin);
+  assert.equal((await call('GET', `/ops/chats/${S.dOrg}`, { token: sup2.token })).status, 403);
+  assert.ok(!ok(await call('GET', '/ops/chats', { token: sup2.token })).some((r) => r.organizationId === S.dOrg));
+
+  const note = ok(await call('POST', `/ops/chats/${S.dOrg}/messages`, { token: S.sup1.token, body: { body: 'INTERNAL: check if they are an authorized reseller', internal: true } }));
+  const reply = ok(await call('POST', `/ops/chats/${S.dOrg}/messages`, { token: S.sup1.token, body: { body: 'Thanks Devika — reviewing the letter now. Are you the brand owner or a reseller?' } }));
+  await waitFor(clientStream.events, (e) => e.type === 'message' && e.data.message.id === reply.id);
+  await new Promise((r) => setTimeout(r, 200));
+  assert.ok(!clientStream.events.some((e) => e.type === 'message' && e.data.message.id === note.id), 'internal note never streamed to the client');
+  const clientView = ok(await call('GET', '/chat', { token: S.d })).messages;
+  assert.ok(!clientView.some((m) => m.id === note.id), 'internal note never in client history');
+  assert.ok(ok(await call('GET', `/ops/chats/${S.dOrg}`, { token: S.sup1.token })).messages.some((m) => m.id === note.id));
+  assert.ok(ok(await call('GET', '/notifications', { token: S.d })).some((n) => n.type === 'chat.message'));
+  assert.ok(connectorEvents.some((e) => e.body.type === 'chat.message' && e.body.organizationId === S.dOrg), 'reply goes to the connector (Zapier → Gmail)');
+  assert.ok(!connectorEvents.some((e) => e.body.type === 'chat.message' && JSON.stringify(e.body).includes('INTERNAL:')), 'internal note never sent to the connector');
+
+  ok(await call('POST', '/chat/read', { token: S.d }));
+  await waitFor(staffStream.events, (e) => e.type === 'read' && e.data.by === 'CUSTOMER' && e.data.organizationId === S.dOrg);
+  const staffView = ok(await call('GET', `/ops/chats/${S.dOrg}`, { token: S.sup1.token })).messages;
+  assert.ok(staffView.find((m) => m.id === reply.id).readAt, 'client read receipt recorded');
+  ok(await call('POST', `/ops/chats/${S.dOrg}/read`, { token: S.sup1.token }));
+  assert.equal(ok(await call('GET', '/ops/chats', { token: S.sup1.token })).find((r) => r.organizationId === S.dOrg).unread, 0);
+
+  const found = ok(await call('GET', '/chat?q=brand%20owner', { token: S.d })).messages;
+  assert.deepEqual(found.map((m) => m.id), [reply.id]);
+
+  // Attachments must belong to the sender's own org and upload.
+  const foreign = await call('POST', '/chat/messages', { token: S.d, body: { body: 'x', documentIds: [S.bDoc] } });
+  assert.equal(foreign.status, 400);
+  assert.equal((await call('POST', '/chat/messages', { token: S.d, body: { body: 'x', internal: true } })).status, 400);
+  clientStream.close(); staffStream.close();
+});
+
+test('chat → orchestrator: staff log a request from chat; plan entitlements still apply', async () => {
+  const blocked = ok(await call('POST', `/ops/chats/${S.dOrg}/requests`, { token: S.sup1.token, body: { featureKey: 'BRAND_APPROVAL', title: 'Resolve Amazon brand approval rejection', marketplace: 'AMAZON' } }));
+  assert.equal(blocked.request.entitlement, 'OUT_OF_PLAN', 'client without a plan stays blocked even when staff log it');
+  const msgs = ok(await call('GET', '/chat', { token: S.d })).messages;
+  assert.match(msgs[msgs.length - 1].body, /logged this as a request: "Resolve Amazon brand approval rejection"/);
+
+  const queued = ok(await call('POST', `/ops/chats/${S.bOrg}/requests`, { token: S.ops.token, body: { featureKey: 'CATALOG_MAPPING', title: 'Map 30 steel bottle SKUs', marketplace: 'AMAZON' } }));
+  assert.equal(queued.request.status, 'QUEUED');
+  assert.equal(queued.request.organizationId, S.bOrg);
+
+  // Deliverable shared through the client's Documents counts as evidence; internal files do not.
+  const task = (await tasksOf(S.b, queued.request.id)).request.tasks[0];
+  ok(await move(S.ops.token, task.id, 'IN_PROGRESS'));
+  const ev = { summary: '30 SKUs matched to existing ASINs, mapping sheet shared', outcome: undefined };
+  assert.equal((await move(S.ops.token, task.id, 'COMPLETED', { evidence: { ...ev, documentId: S.bInternalDoc } })).status, 400);
+  const sheet = await upload(S.ops.token, 'mapping.csv', Buffer.from('sku,asin\nSB-1,B0TEST\n'), { organizationId: S.bOrg, kind: 'REPORT' });
+  ok(await move(S.ops.token, task.id, 'COMPLETED', { evidence: { summary: ev.summary, documentId: sheet.body.id } }));
+  assert.ok(ok(await call('GET', '/documents', { token: S.b })).some((d) => d.id === sheet.body.id), 'client can download the deliverable');
+});
+
+test('assignment: reassigning a client moves chat access to the new manager', async () => {
+  const sup3 = await staff('SUPPORT_EXECUTIVE', S.admin);
+  ok(await call('POST', `/admin/clients/${S.dOrg}/managers`, { token: S.ops.token, body: { managerId: sup3.id } }));
+  ok(await call('GET', `/ops/chats/${S.dOrg}`, { token: sup3.token }));
+  assert.equal((await call('GET', `/ops/chats/${S.dOrg}`, { token: S.sup1.token })).status, 403, 'previous manager loses access');
+  const clients = ok(await call('GET', '/admin/clients', { token: S.ops.token }));
+  assert.deepEqual(clients.find((c) => c.id === S.dOrg).managers.map((m) => m.id), [sup3.id]);
+  assert.equal((await call('GET', '/admin/clients', { token: S.sup1.token })).status, 403);
 });
 
 test('security: login brute force is rate limited per IP', async () => {

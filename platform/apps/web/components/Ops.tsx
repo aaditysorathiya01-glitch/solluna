@@ -4,6 +4,7 @@ import { useRouter } from 'next/navigation';
 import { api, ApiError } from '@/lib/api';
 import { Logo } from './Logo';
 import { Status } from './Dashboard';
+import { ChatPanel, DocumentsPanel } from './Chat';
 
 interface QueueTask { id: string; title: string; status: string; priority: string; skill: string; featureKey: string; marketplace: string | null; organization: { legalName: string; brandName: string | null }; request: { title: string } | null; createdAt: string }
 interface Context {
@@ -26,6 +27,7 @@ export function Ops() {
   const [selected, setSelected] = useState<string | null>(null);
   const [ctx, setCtx] = useState<Context | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [view, setView] = useState<'tasks' | 'inbox'>('tasks');
 
   const loadQueue = useCallback(async () => {
     try {
@@ -57,6 +59,12 @@ export function Ops() {
           </div>
         </div>
       </header>
+      <nav className="mx-auto flex max-w-7xl gap-1 px-4 pt-4 sm:px-6" aria-label="Operations">
+        {(['tasks', 'inbox'] as const).map((v) => (
+          <button key={v} onClick={() => setView(v)} className={view === v ? 'btn-primary py-1.5 text-xs' : 'btn-ghost py-1.5 text-xs'}>{v === 'tasks' ? 'Task queue' : 'Client inbox'}</button>
+        ))}
+      </nav>
+      {view === 'inbox' ? <Inbox canAssign={['SUPER_ADMIN', 'OPERATIONS_MANAGER'].includes(me.staffRole)} /> : (
       <main className="mx-auto grid max-w-7xl gap-6 px-4 py-6 sm:px-6 lg:grid-cols-[minmax(0,2fr)_minmax(0,3fr)]">
         <section>
           <div className="mb-3 flex items-center justify-between"><h1 className="font-display text-2xl">Task queue</h1><button className="btn-ghost py-1.5 text-xs" onClick={loadQueue}>Refresh</button></div>
@@ -79,7 +87,108 @@ export function Ops() {
         </section>
         <section>{ctx ? <TaskPanel ctx={ctx} onChanged={async () => { await loadQueue(); setCtx(await api<Context>(`/ops/tasks/${ctx.task.id}/context`)); }} /> : <div className="card p-10 text-center text-sm text-ink-3">Select a task to see its client, skill procedure and completion requirements.</div>}</section>
       </main>
+      )}
     </div>
+  );
+}
+
+interface InboxRow { organizationId: string; name: string; unread: number; waitingMinutes: number; overdue: boolean; managers: { id: string; name: string }[]; last: { body: string; senderType: string; createdAt: string } | null }
+
+function Inbox({ canAssign }: { canAssign: boolean }) {
+  const [rows, setRows] = useState<InboxRow[]>([]);
+  const [org, setOrg] = useState<string | null>(null);
+  const [side, setSide] = useState<'request' | 'documents' | null>(null);
+  const load = useCallback(() => api<InboxRow[]>('/ops/chats').then(setRows).catch(() => {}), []);
+  useEffect(() => { load(); }, [load]);
+  const current = rows.find((r) => r.organizationId === org);
+  const wait = (m: number) => (m < 60 ? `${m} min` : m < 1440 ? `${Math.floor(m / 60)} h` : `${Math.floor(m / 1440)} d`);
+  return (
+    <main className="mx-auto grid max-w-7xl gap-6 px-4 py-6 sm:px-6 lg:grid-cols-[minmax(0,1fr)_minmax(0,2fr)]">
+      <section>
+        <h1 className="mb-3 font-display text-2xl">Client inbox</h1>
+        <ul className="space-y-2">
+          {rows.map((r) => (
+            <li key={r.organizationId}>
+              <button onClick={() => { setOrg(r.organizationId); setSide(null); }} className={`card w-full p-4 text-left hover:border-sun ${org === r.organizationId ? 'border-sun ring-1 ring-sun' : ''}`} data-testid="inbox-row">
+                <div className="flex items-center justify-between gap-2">
+                  <p className="text-sm font-semibold">{r.name}</p>
+                  {r.unread > 0 && <span className={`chip ${r.overdue ? 'bg-red-50 text-red-800' : 'bg-sun text-ink'}`}>{r.unread} new · {wait(r.waitingMinutes)}</span>}
+                </div>
+                <p className="mt-1 line-clamp-1 text-xs text-ink-3">{r.last ? `${r.last.senderType === 'CUSTOMER' ? '' : 'You: '}${r.last.body || 'Attachment'}` : 'No messages yet'}</p>
+                <p className="mt-1 text-[11px] text-ink-3">Manager: {r.managers.map((m) => m.name).join(', ') || 'Unassigned'}</p>
+              </button>
+            </li>
+          ))}
+          {!rows.length && <li className="card p-6 text-sm text-ink-3">No client conversations assigned to you.</li>}
+        </ul>
+      </section>
+      <section className="space-y-4">
+        {org && current ? (
+          <>
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <h2 className="font-display text-xl">{current.name}</h2>
+              <div className="flex flex-wrap gap-2">
+                <button className="btn-ghost py-1.5 text-xs" onClick={() => setSide(side === 'request' ? null : 'request')}>Log request</button>
+                <button className="btn-ghost py-1.5 text-xs" onClick={() => setSide(side === 'documents' ? null : 'documents')}>Documents</button>
+                {canAssign && <AssignManager orgId={org} onDone={load} />}
+              </div>
+            </div>
+            {side === 'request' && <LogRequest orgId={org} onDone={() => setSide(null)} />}
+            {side === 'documents' && <DocumentsPanel orgId={org} staff />}
+            <ChatPanel key={org} mode="staff" orgId={org} onActivity={load} />
+          </>
+        ) : <div className="card p-10 text-center text-sm text-ink-3">Select a client conversation.</div>}
+      </section>
+    </main>
+  );
+}
+
+function AssignManager({ orgId, onDone }: { orgId: string; onDone: () => void }) {
+  const [staff, setStaff] = useState<{ id: string; name: string; staffRole: string }[]>([]);
+  useEffect(() => { api<typeof staff>('/admin/staff').then(setStaff).catch(() => {}); }, []);
+  return (
+    <select aria-label="Assign manager" className="input w-auto py-1.5 text-xs" defaultValue="" onChange={async (e) => {
+      if (!e.target.value) return;
+      await api(`/admin/clients/${orgId}/managers`, { method: 'POST', body: { managerId: e.target.value } });
+      e.target.value = '';
+      onDone();
+    }}>
+      <option value="">Assign manager…</option>
+      {staff.map((s) => <option key={s.id} value={s.id}>{s.name} · {s.staffRole.replace(/_/g, ' ').toLowerCase()}</option>)}
+    </select>
+  );
+}
+
+function LogRequest({ orgId, onDone }: { orgId: string; onDone: () => void }) {
+  const [result, setResult] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [options, setOptions] = useState<{ key: string; label: string }[]>([]);
+  // The 28 services, straight from the API's plan catalog (single source of truth).
+  useEffect(() => { api<{ features: { key: string; label: string }[] }[]>('/plans').then((p) => setOptions(p[0]?.features ?? [])).catch(() => {}); }, []);
+  async function submit(e: React.FormEvent<HTMLFormElement>) {
+    e.preventDefault();
+    const f = new FormData(e.currentTarget);
+    setError(null);
+    try {
+      const r = await api<{ update: { text: string; sections: { status: string } } }>(`/ops/chats/${orgId}/requests`, {
+        method: 'POST', body: { featureKey: f.get('featureKey'), title: f.get('title'), marketplace: f.get('marketplace') || undefined, priority: f.get('priority'), details: { source: 'chat', notes: f.get('notes') } },
+      });
+      setResult(`Logged. Status: ${r.update.sections.status}. The client has been told in chat.`);
+      setTimeout(onDone, 1500);
+    } catch (err) { setError((err as Error).message); }
+  }
+  return (
+    <form onSubmit={submit} className="card grid gap-3 p-5 sm:grid-cols-2" aria-label="Log request from chat">
+      <div className="sm:col-span-2"><label className="label" htmlFor="lr-title">Request</label><input id="lr-title" name="title" className="input" required minLength={3} /></div>
+      <div><label className="label" htmlFor="lr-feature">Service</label><select id="lr-feature" name="featureKey" className="input">{options.map((o) => <option key={o.key} value={o.key}>{o.label}</option>)}</select></div>
+      <div className="grid grid-cols-2 gap-2">
+        <div><label className="label" htmlFor="lr-mp">Marketplace</label><select id="lr-mp" name="marketplace" className="input"><option value="">—</option><option value="AMAZON">Amazon</option><option value="FLIPKART">Flipkart</option></select></div>
+        <div><label className="label" htmlFor="lr-priority">Priority</label><select id="lr-priority" name="priority" className="input" defaultValue="P3"><option>P1</option><option>P2</option><option>P3</option><option>P4</option></select></div>
+      </div>
+      <div className="sm:col-span-2"><label className="label" htmlFor="lr-notes">Details</label><textarea id="lr-notes" name="notes" className="input min-h-16" /></div>
+      {(error || result) && <p role={error ? 'alert' : 'status'} className={`text-sm sm:col-span-2 ${error ? 'text-red-800' : 'text-emerald-800'}`}>{error ?? result}</p>}
+      <button className="btn-primary sm:col-span-2 sm:justify-self-start">Log request</button>
+    </form>
   );
 }
 

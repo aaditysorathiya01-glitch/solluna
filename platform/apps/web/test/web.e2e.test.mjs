@@ -240,6 +240,66 @@ test('staff executes the task in Ops with the skill procedure; client approves t
   await page.locator('.chip', { hasText: 'Queued' }).first().waitFor();
 });
 
+test('Manager Chat Support: live two-way chat, attachments, internal notes, read receipts; documents', async () => {
+  const PDF = Buffer.from('%PDF-1.4\n1 0 obj<<>>endobj\ntrailer<<>>\n%%EOF\n');
+  const c = S.customer, st = S.staff;
+
+  await c.click('nav[aria-label="Dashboard"] >> text=chat');
+  await c.getByText('Manager Chat Support').first().waitFor();
+  await st.getByRole('button', { name: 'Client inbox' }).click();
+  await st.getByRole('heading', { name: 'Client inbox' }).waitFor();
+  await st.click('[data-testid="inbox-row"] >> text=Riya Lifestyle Pvt Ltd');
+  await st.getByText('No messages yet.', { exact: false }).waitFor();
+
+  // Client → staff, live (no reload on the staff side), with an attachment.
+  await c.setInputFiles('[data-testid="chat-file"]', { name: 'listing-brief.pdf', mimeType: 'application/pdf', buffer: PDF });
+  await c.fill('textarea[aria-label="Message"]', 'Please prioritise the jute rug campaign — brief attached.');
+  await c.click('button:has-text("Send")');
+  await c.getByTestId('chat-message').filter({ hasText: 'brief attached' }).getByText('Sent', { exact: false }).waitFor();
+  const onStaff = st.getByTestId('chat-message').filter({ hasText: 'Please prioritise the jute rug campaign' });
+  await onStaff.waitFor();
+  assert.ok(await onStaff.getByText('listing-brief.pdf').isVisible(), 'attachment shown to staff');
+
+  // Staff opened it → client sees "Seen" live.
+  await c.getByTestId('chat-message').filter({ hasText: 'brief attached' }).getByText('Seen', { exact: false }).waitFor();
+
+  // Internal note (staff only) + reply.
+  await st.check('text=Internal note (never shown to the client)');
+  await st.fill('textarea[aria-label="Message"]', 'Margin is thin on SKU JR-02, keep bids low');
+  await st.click('button:has-text("Send")');
+  await st.getByText('Internal note · not visible to client').waitFor();
+  await st.uncheck('text=Internal note (never shown to the client)');
+  await st.fill('textarea[aria-label="Message"]', 'Got it Riya — campaign goes live after your budget approval.');
+  await st.click('button:has-text("Send")');
+
+  await c.getByTestId('chat-message').filter({ hasText: 'campaign goes live after your budget approval' }).waitFor();
+  await new Promise((r) => setTimeout(r, 500));
+  assert.equal(await c.getByText('Margin is thin', { exact: false }).count(), 0, 'internal note never reaches the client UI');
+  await c.reload();
+  await c.click('nav[aria-label="Dashboard"] >> text=chat');
+  await c.getByTestId('chat-message').filter({ hasText: 'campaign goes live' }).waitFor();
+  assert.equal(await c.getByText('Margin is thin', { exact: false }).count(), 0, 'nor its history');
+  await c.screenshot({ path: join(SHOTS, '6-client-chat.png'), fullPage: true });
+  await st.screenshot({ path: join(SHOTS, '7-staff-inbox.png'), fullPage: true });
+
+  // Attachment downloads through the proxy with the original bytes.
+  const href = await c.getByText('listing-brief.pdf').first().getAttribute('href');
+  const res = await c.request.get(webBase + href);
+  assert.equal(res.status(), 200);
+  assert.ok(Buffer.from(await res.body()).equals(PDF));
+
+  // Documents tab: upload, list, unsafe file rejected.
+  await c.click('nav[aria-label="Dashboard"] >> text=documents');
+  await c.setInputFiles('#doc-file', { name: 'GST certificate.pdf', mimeType: 'application/pdf', buffer: PDF });
+  await c.selectOption('#doc-kind', 'GST_CERT');
+  await c.click('button:has-text("Upload")');
+  await c.getByText('Uploaded.').waitFor();
+  await c.getByRole('cell', { name: 'GST_certificate.pdf' }).waitFor();
+  await c.setInputFiles('#doc-file', { name: 'invoice.pdf', mimeType: 'application/pdf', buffer: Buffer.from('MZ fake executable') });
+  await c.click('button:has-text("Upload")');
+  await c.getByRole('alert').getByText('Unsupported or unsafe file', { exact: false }).waitFor();
+});
+
 test('route guards: signed-out users go to login; customers cannot open ops', async () => {
   const { page } = await newPage();
   await page.goto(`${webBase}/dashboard`);

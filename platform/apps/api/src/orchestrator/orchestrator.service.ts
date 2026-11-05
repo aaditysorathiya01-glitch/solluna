@@ -18,7 +18,7 @@ import { STAFF_TRANSITIONS, isTerminal } from './state-machine';
 
 type Tx = Prisma.TransactionClient;
 type Evidence = Record<string, unknown> & {
-  summary?: string; outputUrl?: string; marketplaceRef?: string; outcome?: string; catalogId?: string; confidence?: string;
+  summary?: string; outputUrl?: string; marketplaceRef?: string; documentId?: string; outcome?: string; catalogId?: string; confidence?: string;
   approvalParameters?: Record<string, unknown>;
 };
 
@@ -284,7 +284,13 @@ export class OrchestratorService implements OnModuleInit {
   private async validateEvidence(task: Task, step: Step | undefined, status: TaskStatus, ev: Evidence | undefined) {
     if (!ev || typeof ev.summary !== 'string' || ev.summary.trim().length < 10) throw new BadRequestException('Evidence summary (what was verified) is required');
     if (status === 'PARTIALLY_COMPLETED') return;
-    if (!ev.outputUrl && !ev.marketplaceRef) throw new BadRequestException('Evidence must include outputUrl (approved delivery location) or marketplaceRef (marketplace confirmation)');
+    if (!ev.outputUrl && !ev.marketplaceRef && !ev.documentId) throw new BadRequestException('Evidence must include outputUrl (approved delivery location), documentId (file shared in the client\'s Documents) or marketplaceRef (marketplace confirmation)');
+    if (ev.documentId) {
+      const doc = await this.db.document.findUnique({ where: { id: String(ev.documentId) } });
+      if (!doc || doc.organizationId !== task.organizationId || doc.deletedAt || doc.visibility !== 'CLIENT') {
+        throw new BadRequestException('documentId must be a document shared with this client (visibility CLIENT)');
+      }
+    }
     if (ev.outputUrl) {
       let host: string;
       try { const u = new URL(String(ev.outputUrl)); if (u.protocol !== 'https:') throw new Error(); host = u.hostname; } catch { throw new BadRequestException('outputUrl must be a valid https URL'); }

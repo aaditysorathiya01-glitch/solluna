@@ -6,8 +6,9 @@ import { loadRazorpay } from '@/lib/razorpay';
 import Link from 'next/link';
 import { Logo } from './Logo';
 import { Markdownish } from './Markdownish';
+import { ChatPanel, DocumentsPanel } from './Chat';
 
-interface Me { user: { name: string; email: string; type: string }; organization: { legalName: string; brandName: string | null } | null }
+interface Me { user: { id: string; name: string; email: string; type: string }; organization: { legalName: string; brandName: string | null } | null }
 interface Feature { key: string; label: string; section: string; skill: string; enabled: boolean; limit: number | null; used: number | null; access: string; remaining: number | null; meta: { mode?: string } | null }
 interface Catalog { plan: { code: string; name: string; status: string; currentPeriodEnd: string } | null; subscriptionVerified: boolean | null; features: Feature[] }
 interface TaskLite { id: string; title: string; status: string; skill: string; stepKey: string; blocker: string | null }
@@ -27,7 +28,7 @@ interface Billing {
 interface Plan { code: string; name: string; pricePaise: number; features: { enabled: boolean }[] }
 interface Notification { id: string; title: string; body: string; createdAt: string; readAt: string | null }
 
-const TABS = ['overview', 'services', 'requests', 'approvals', 'billing'] as const;
+const TABS = ['overview', 'services', 'requests', 'approvals', 'chat', 'documents', 'billing'] as const;
 type Tab = (typeof TABS)[number];
 
 const STATUS_STYLE: Record<string, string> = {
@@ -186,6 +187,10 @@ export function Dashboard() {
             {!approvals.length && <p className="card p-6 text-sm text-ink-3">Nothing needs your approval.</p>}
           </div>
         )}
+
+        {tab === 'chat' && <ChatPanel mode="client" />}
+
+        {tab === 'documents' && <div className="space-y-4"><h1 className="font-display text-3xl">Documents</h1><DocumentsPanel myId={me.user.id} /></div>}
 
         {tab === 'billing' && <BillingTab billing={billing} plans={plans} current={catalog.plan?.code} preselect={params.get('plan')} onDone={(m) => { setFlash(m); load(); }} />}
       </main>
