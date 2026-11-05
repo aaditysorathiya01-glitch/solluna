@@ -19,5 +19,8 @@
   },
   "dependencies": {
     "@prisma/client": "^5.22.0"
+  },
+  "overrides": {
+    "multer": "2.5.0"
   }
 }
