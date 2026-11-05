@@ -10,7 +10,12 @@ import { ALLOWED_DESCRIPTION, detectFileType, safeFileName } from './file-type';
 import type { AuthUser } from '../auth/auth.types';
 
 export const MAX_UPLOAD_BYTES = Number(process.env.MAX_UPLOAD_MB ?? 10) * 1024 * 1024;
-export const DOCUMENT_KINDS = ['GST_CERT', 'PAN', 'INVOICE', 'BRAND_AUTH', 'STATEMENT', 'REPORT', 'CA_DOCUMENT', 'LABELS', 'LISTING_ASSETS', 'CHAT_ATTACHMENT', 'OTHER'] as const;
+export const DOCUMENT_KINDS = [
+  'GST_CERT', 'PAN', 'INVOICE', 'BRAND_AUTH', 'STATEMENT', 'REPORT', 'CA_DOCUMENT', 'LABELS', 'LISTING_ASSETS', 'CHAT_ATTACHMENT', 'OTHER',
+  // CA pack (ca-documentation-support §3)
+  'AMAZON_SETTLEMENT', 'AMAZON_FEE_INVOICE', 'AMAZON_TCS', 'FLIPKART_SETTLEMENT', 'FLIPKART_FEE_INVOICE', 'FLIPKART_TCS',
+  'PURCHASE_INVOICE', 'EXPENSE_INVOICE', 'BANK_STATEMENT',
+] as const;
 
 export interface UploadedFile { originalname: string; buffer: Buffer; size: number }
 
@@ -19,9 +24,10 @@ const UploadSchema = z.object({
   title: z.string().trim().max(200).optional(),
   visibility: z.enum(['CLIENT', 'INTERNAL']).default('CLIENT'),
   organizationId: z.string().optional(),
+  period: z.string().regex(/^\d{4}-(0[1-9]|1[0-2])$/).optional(), // accounting month (CA pack)
 });
 
-const PUBLIC_FIELDS = { id: true, organizationId: true, kind: true, title: true, fileName: true, visibility: true, mimeType: true, sizeBytes: true, scanStatus: true, uploadedById: true, messageId: true, createdAt: true } as const;
+const PUBLIC_FIELDS = { id: true, organizationId: true, kind: true, title: true, fileName: true, visibility: true, mimeType: true, sizeBytes: true, scanStatus: true, uploadedById: true, messageId: true, periodMonth: true, caStatus: true, createdAt: true } as const;
 
 @Injectable()
 export class DocumentsService {
@@ -49,7 +55,7 @@ export class DocumentsService {
     const doc = await this.db.$transaction(async (tx) => {
       const fileKey = await this.storage.put(file.buffer, tx);
       return tx.document.create({
-        data: { organizationId: orgId, kind: d.kind, title: d.title || fileName, fileName, visibility: d.visibility, fileKey, sha256, mimeType: type.mime, sizeBytes: file.size, uploadedById: user.id },
+        data: { organizationId: orgId, kind: d.kind, title: d.title || fileName, fileName, visibility: d.visibility, fileKey, sha256, mimeType: type.mime, sizeBytes: file.size, uploadedById: user.id, periodMonth: d.period ? new Date(`${d.period}-01T00:00:00Z`) : null },
         select: PUBLIC_FIELDS,
       });
     });

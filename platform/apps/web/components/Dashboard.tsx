@@ -7,6 +7,7 @@ import Link from 'next/link';
 import { Logo } from './Logo';
 import { Markdownish } from './Markdownish';
 import { ChatPanel, DocumentsPanel } from './Chat';
+import { ClientReporting } from './Reporting';
 
 interface Me { user: { id: string; name: string; email: string; type: string }; organization: { legalName: string; brandName: string | null } | null }
 interface Feature { key: string; label: string; section: string; skill: string; enabled: boolean; limit: number | null; used: number | null; access: string; remaining: number | null; meta: { mode?: string } | null }
@@ -28,7 +29,7 @@ interface Billing {
 interface Plan { code: string; name: string; pricePaise: number; features: { enabled: boolean }[] }
 interface Notification { id: string; title: string; body: string; createdAt: string; readAt: string | null }
 
-const TABS = ['overview', 'services', 'requests', 'approvals', 'chat', 'documents', 'billing'] as const;
+const TABS = ['overview', 'services', 'requests', 'approvals', 'chat', 'reports', 'documents', 'billing'] as const;
 type Tab = (typeof TABS)[number];
 
 const STATUS_STYLE: Record<string, string> = {
@@ -189,6 +190,8 @@ export function Dashboard() {
         )}
 
         {tab === 'chat' && <ChatPanel mode="client" />}
+
+        {tab === 'reports' && <ClientReporting />}
 
         {tab === 'documents' && <div className="space-y-4"><h1 className="font-display text-3xl">Documents</h1><DocumentsPanel myId={me.user.id} /></div>}
 

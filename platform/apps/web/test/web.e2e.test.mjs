@@ -255,7 +255,8 @@ test('Manager Chat Support: live two-way chat, attachments, internal notes, read
   await c.setInputFiles('[data-testid="chat-file"]', { name: 'listing-brief.pdf', mimeType: 'application/pdf', buffer: PDF });
   await c.fill('textarea[aria-label="Message"]', 'Please prioritise the jute rug campaign — brief attached.');
   await c.click('button:has-text("Send")');
-  await c.getByTestId('chat-message').filter({ hasText: 'brief attached' }).getByText('Sent', { exact: false }).waitFor();
+  // Delivered: shows "Sent", or already "Seen" if the manager's open chat marked it read instantly.
+  await c.getByTestId('chat-message').filter({ hasText: 'brief attached' }).getByText(/· (Sent|Seen)$/).waitFor();
   const onStaff = st.getByTestId('chat-message').filter({ hasText: 'Please prioritise the jute rug campaign' });
   await onStaff.waitFor();
   assert.ok(await onStaff.getByText('listing-brief.pdf').isVisible(), 'attachment shown to staff');
@@ -298,6 +299,86 @@ test('Manager Chat Support: live two-way chat, attachments, internal notes, read
   await c.setInputFiles('#doc-file', { name: 'invoice.pdf', mimeType: 'application/pdf', buffer: Buffer.from('MZ fake executable') });
   await c.click('button:has-text("Upload")');
   await c.getByRole('alert').getByText('Unsupported or unsafe file', { exact: false }).waitFor();
+});
+
+test('monthly reporting: staff inputs → client costs & expenses → P&L published → client report, CSV, CA pack', async () => {
+  const admin = (await apiCall('POST', '/auth/login', null, ADMIN)).token;
+  await apiCall('POST', '/admin/users/staff', admin, { name: 'Meera Accounts', email: 'meera@solluna.test', password: 'Meera-Passw0rd-1', staffRole: 'ACCOUNTS_EXECUTIVE' });
+  const { page: st } = await newPage({ width: 1400, height: 900 });
+  await st.goto(`${webBase}/login`);
+  await st.fill('#email', 'meera@solluna.test'); await st.fill('#password', 'Meera-Passw0rd-1');
+  await st.click('button:has-text("Sign in")');
+  await st.waitForURL(/\/ops/);
+  await st.getByRole('button', { name: 'Reporting' }).click();
+  await st.getByRole('heading', { name: 'Monthly reporting' }).waitFor();
+  await st.selectOption('#rep-period', { index: 0 }).catch(() => {});
+  await st.fill('#rep-period', '2026-10');
+  const amazon = st.getByRole('form', { name: 'AMAZON figures' });
+  await amazon.waitFor();
+  const vals = { grossSalesPaise: 100000, discountsPaise: 5000, returnsRefundsPaise: 3000, reimbursementsPaise: 1000, orders: 90, unitsSold: 100, unitsReturned: 5, cancelledOrders: 10, sessions: 3000,
+    commissionPaise: 15000, fixedFeesPaise: 1000, fulfilmentPaise: 3000, shippingPaise: 1000, storagePaise: 0, otherFeesPaise: 0, adSpendPaise: 3000, adSalesPaise: 15000, impressions: 50000, clicks: 1000,
+    settlementPaise: 70000, bankCreditPaise: 69000, reservesPaise: 1000 };
+  for (const [k, v] of Object.entries(vals)) await amazon.locator(`#AMAZON-${k}`).fill(String(v));
+  await amazon.locator('#AMAZON-sku').fill('JR-01,60,60000,12000,2000\nJR-02,40,33000,8000,1000');
+  await amazon.getByRole('button', { name: 'Save Amazon figures' }).click();
+  await st.getByText('Amazon figures saved.').waitFor();
+  await st.getByText('Product cost missing for: JR-01, JR-02', { exact: false }).count(); // detail lives in the preview gaps
+  assert.ok(await st.getByText(/data gap\(s\): .*product cost/i).isVisible(), 'preview says product cost is missing');
+
+  // Client provides costs + expenses, confirms.
+  const c = S.customer;
+  await c.goto(`${webBase}/dashboard?tab=reports`);
+  await c.getByRole('heading', { name: 'Reports' }).waitFor();
+  await c.fill('#period', '2026-10');
+  for (const [sku, cost] of [['JR-01', '400'], ['JR-02', '300']]) {
+    await c.fill('#c-sku', sku); await c.fill('#c-cost', cost); await c.fill('#c-from', '2026-10-01');
+    await c.click('form[aria-label="Add product cost"] button:has-text("Save")');
+    await c.getByText('Cost saved.').waitFor();
+  }
+  await c.selectOption('#x-cat', 'RENT'); await c.fill('#x-desc', 'Warehouse rent'); await c.fill('#x-amt', '10000');
+  await c.click('form[aria-label="Add expense"] button:has-text("Add")');
+  await c.getByRole('cell', { name: /Warehouse rent/ }).waitFor();
+  await c.click('button:has-text("Confirm this list is complete")');
+  await c.getByText('Expenses confirmed as complete for this month.').waitFor();
+
+  // Staff: preview now verified → generate → publish.
+  await st.fill('#rep-period', '2026-09'); await st.fill('#rep-period', '2026-10');
+  await st.getByText('2 SKU cost(s), 1 expense(s), confirmed', { exact: false }).waitFor();
+  await st.click('button:has-text("Generate P&L draft")');
+  await st.getByText('Draft generated. Review it, then publish.').waitFor();
+  const version = st.getByTestId('report-version').filter({ hasText: 'P&L v1' });
+  await version.getByText('Verified').waitFor(); // list reloads after the confirmation message
+  await st.screenshot({ path: join(SHOTS, '8-ops-reporting.png'), fullPage: true });
+  await version.getByRole('button', { name: 'Publish' }).click();
+  await st.getByText('Published. The client has been notified.').waitFor();
+
+  // Client opens the published report.
+  await c.reload();
+  await c.getByTestId('report-row').filter({ hasText: 'October 2026 · P&L report' }).click();
+  await c.waitForURL(/\/reports\//);
+  const rep = c.getByRole('article', { name: 'Monthly report' });
+  await rep.getByRole('heading', { name: 'October 2026' }).waitFor();
+  for (const t of ['₹93,000.00', '₹36,000.00', '₹34,000.00', '₹24,000.00', 'Reconciled']) assert.ok(await rep.getByText(t, { exact: true }).first().isVisible(), `report shows ${t}`);
+  assert.equal(await rep.getByText('Missing data & assumptions').count(), 0, 'complete month has no data gaps');
+  await c.screenshot({ path: join(SHOTS, '9-client-pl.png'), fullPage: true });
+  const csvHref = await c.getByText('Download Excel (CSV)').getAttribute('href');
+  const csv = await c.request.get(webBase + csvHref);
+  assert.equal(csv.status(), 200);
+  assert.match(await csv.text(), /CONSOLIDATED,Operating result,24000\.00,VERIFIED/);
+
+  // CA pack: add the month's Amazon settlement.
+  await c.goto(`${webBase}/dashboard?tab=reports`);
+  await c.fill('#period', '2026-10');
+  const pack = c.getByRole('region', { name: 'CA documentation pack' });
+  await pack.getByRole('listitem').filter({ hasText: 'Amazon settlement report' }).waitFor(); // listed as still needed
+  await c.selectOption('#ca-kind', 'AMAZON_SETTLEMENT');
+  await c.setInputFiles('#ca-file', { name: 'amazon-settlement-oct.csv', mimeType: 'text/csv', buffer: Buffer.from('settlement_id,amount\nS1,70000\n') });
+  await c.click('form[aria-label="Add to CA pack"] button:has-text("Add")');
+  await c.getByText('Added to the CA pack.').waitFor();
+  await pack.getByRole('cell', { name: /amazon-settlement-oct\.csv/ }).waitFor();
+  assert.ok(await pack.getByRole('cell', { name: 'Received' }).first().isVisible());
+  assert.equal(await pack.getByRole('listitem').filter({ hasText: 'Amazon settlement report' }).count(), 0, 'no longer listed as missing');
+  assert.ok(await pack.getByText('Tax filing, audit and certification are not included', { exact: false }).isVisible());
 });
 
 test('route guards: signed-out users go to login; customers cannot open ops', async () => {

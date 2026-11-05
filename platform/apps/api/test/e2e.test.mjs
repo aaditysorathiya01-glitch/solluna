@@ -655,6 +655,134 @@ test('assignment: reassigning a client moves chat access to the new manager', as
   assert.equal((await call('GET', '/admin/clients', { token: S.sup1.token })).status, 403);
 });
 
+
+// ───────────── monthly reporting ─────────────
+const OCT = { salesBasis: 'SHIPPED', grossSalesPaise: 10_000_000, discountsPaise: 500_000, returnsRefundsPaise: 300_000, reimbursementsPaise: 100_000,
+  orders: 90, unitsSold: 100, unitsReturned: 5, cancelledOrders: 10, sessions: 3000,
+  commissionPaise: 1_500_000, fixedFeesPaise: 100_000, fulfilmentPaise: 300_000, shippingPaise: 100_000, storagePaise: 0, otherFeesPaise: 0,
+  adSpendPaise: 300_000, adSalesPaise: 1_500_000, impressions: 50_000, clicks: 1_000, adSpendInFees: false,
+  settlementPaise: 7_000_000, bankCreditPaise: 6_900_000, reservesPaise: 100_000, sourceNote: 'Amazon business report + settlement Oct 2026' };
+const SKU = { lines: [
+  { sku: 'SB-750', units: 60, netSalesPaise: 6_000_000, feesPaise: 1_200_000, adSpendPaise: 200_000 },
+  { sku: 'SB-500', units: 40, netSalesPaise: 3_300_000, feesPaise: 800_000, adSpendPaise: 100_000 },
+] };
+
+test('reports: inputs → draft (hidden from client) → publish → client sees VERIFIED P&L, CSV, notification', async () => {
+  S.acct = await staff('ACCOUNTS_EXECUTIVE', S.admin);
+  const t = S.acct.token;
+  assert.equal((await call('PUT', `/ops/reports/${S.bOrg}/2099-01/marketplaces/AMAZON`, { token: t, body: OCT })).status, 400, 'future period');
+  assert.equal((await call('PUT', `/ops/reports/${S.bOrg}/2026-10/marketplaces/AMAZON`, { token: t, body: { ...OCT, grossSalesPaise: -5 } })).status, 400);
+  ok(await call('PUT', `/ops/reports/${S.bOrg}/2026-10/marketplaces/AMAZON`, { token: t, body: OCT }));
+  assert.equal((await call('PUT', `/ops/reports/${S.bOrg}/2026-10/marketplaces/AMAZON/sku-lines`, { token: t, body: { lines: [SKU.lines[0], SKU.lines[0]] } })).status, 400, 'duplicate SKU');
+  ok(await call('PUT', `/ops/reports/${S.bOrg}/2026-10/marketplaces/AMAZON/sku-lines`, { token: t, body: SKU }));
+
+  // Staff-entered cost is provisional; the client's own (newer) entry is authoritative.
+  ok(await call('POST', `/ops/reports/${S.bOrg}/costs`, { token: t, body: { sku: 'SB-750', costPaise: 35_000, effectiveFrom: '2026-09-01' } }));
+  let wb = ok(await call('GET', `/ops/reports/${S.bOrg}/2026-10`, { token: t }));
+  assert.equal(wb.preview.pl.marketplaces[0].lines.cogs.conf, 'UNAVAILABLE', 'SB-500 has no cost yet');
+  ok(await call('POST', '/costs', { token: S.b, body: { sku: 'SB-750', costPaise: 40_000, effectiveFrom: '2026-10-01' } }));
+  ok(await call('POST', '/costs', { token: S.b, body: { sku: 'SB-500', costPaise: 30_000, effectiveFrom: '2026-10-01' } }));
+  ok(await call('POST', '/costs', { token: S.b, body: { sku: 'SB-500', costPaise: 99_999, effectiveFrom: '2026-11-01' } })); // later month — must not apply to October
+  const exp = ok(await call('POST', '/expenses', { token: S.b, body: { period: '2026-10', category: 'RENT', description: 'Warehouse rent', amountPaise: 1_000_000 } }));
+  assert.equal((await call('POST', '/expenses/confirm', { token: S.acct.token, body: { period: '2026-10' } })).status, 403, 'only the client confirms expenses');
+  ok(await call('POST', '/expenses/confirm', { token: S.b, body: { period: '2026-10' } }));
+  assert.equal((await call('DELETE', `/expenses/${exp.id}`, { token: S.b })).status, 400, 'confirmed months are locked');
+
+  const draft = ok(await call('POST', `/ops/reports/${S.bOrg}/2026-10/generate`, { token: t, body: { kind: 'PL' } }));
+  assert.equal(draft.status, 'DRAFT');
+  assert.equal(draft.confidence, 'VERIFIED');
+  assert.equal(draft.data.marketplaces[0].lines.cogs.paise, 3_600_000, 'October costs used, not the November one');
+  assert.equal(draft.data.operatingResult.paise, 2_400_000);
+  assert.equal((await call('GET', `/reports/${draft.id}`, { token: S.b })).status, 404, 'clients never see drafts');
+  assert.equal(ok(await call('GET', '/reports', { token: S.b })).length, 0);
+
+  ok(await call('POST', `/ops/reports/drafts/${draft.id}/publish`, { token: t }));
+  assert.equal((await call('POST', `/ops/reports/drafts/${draft.id}/publish`, { token: t })).status, 400, 'publish once');
+  const mine = ok(await call('GET', `/reports/${draft.id}`, { token: S.b }));
+  assert.equal(mine.periodLabel, 'October 2026');
+  assert.equal(mine.data.reconciliation.status, 'RECONCILED');
+  assert.ok(ok(await call('GET', '/notifications', { token: S.b })).some((n) => n.type === 'report.published' && /October 2026 P&L report is ready/.test(n.title)));
+  assert.ok(connectorEvents.some((e) => e.body.type === 'report.published'));
+  S.bPl = draft.id;
+
+  const csv = await fetch(`${base}/reports/${draft.id}/export.csv`, { headers: { authorization: `Bearer ${S.b}` } });
+  assert.match(csv.headers.get('content-disposition'), /SOLLUNA_PL_2026-10_v1\.csv/);
+  const bytes = Buffer.from(await csv.arrayBuffer());
+  assert.deepEqual([...bytes.subarray(0, 3)], [0xef, 0xbb, 0xbf], 'UTF-8 BOM so Excel reads ₹ and Indian names correctly');
+  const text = bytes.toString('utf8');
+  assert.match(text, /CONSOLIDATED,Operating result,24000\.00,VERIFIED/);
+  assert.match(text, /AMAZON,SB-750,60,60000\.00,24000\.00,12000\.00,2000\.00,22000\.00/);
+
+  assert.equal((await call('GET', `/reports/${draft.id}`, { token: S.c })).status, 404, 'other tenants cannot read it');
+  assert.equal((await call('GET', `/ops/reports/${S.bOrg}/2026-10`, { token: S.lister.token })).status, 401, 'deactivated earlier');
+  const lister2 = await staff('LISTING_EXECUTIVE', S.admin);
+  assert.equal((await call('GET', `/ops/reports/${S.bOrg}/2026-10`, { token: lister2.token })).status, 403, 'listing team has no reporting access');
+});
+
+test('reports: incomplete data is disclosed — estimated/unavailable, never shown as verified profit', async () => {
+  const t = S.acct.token;
+  ok(await call('PUT', `/ops/reports/${S.bOrg}/2026-09/marketplaces/AMAZON`, { token: t, body: { ...OCT, bankCreditPaise: null, adSpendPaise: null, adSalesPaise: null } }));
+  ok(await call('PUT', `/ops/reports/${S.bOrg}/2026-09/marketplaces/FLIPKART`, { token: t, body: { salesBasis: 'SHIPPED', grossSalesPaise: 2_000_000, commissionPaise: 400_000 } }));
+  ok(await call('PUT', `/ops/reports/${S.bOrg}/2026-09/marketplaces/AMAZON/sku-lines`, { token: t, body: SKU }));
+  const r = ok(await call('POST', `/ops/reports/${S.bOrg}/2026-09/generate`, { token: t, body: { kind: 'PL' } }));
+  assert.equal(r.confidence, 'UNAVAILABLE', 'SB-500 had no October-or-earlier cost in September… and Flipkart has no SKU lines');
+  assert.equal(r.data.consolidated.cogs.paise, null);
+  assert.equal(r.data.operatingResult.paise, null);
+  assert.equal(r.data.reconciliation.status, 'PENDING_SOURCE_DATA');
+  assert.ok(r.data.assumptions.some((a) => /advertising/.test(a.item)));
+  assert.ok(r.data.assumptions.some((a) => a.item === 'Operating expenses' && a.owner === 'Client'));
+  const perf = ok(await call('POST', `/ops/reports/${S.bOrg}/2026-09/generate`, { token: t, body: { kind: 'PERFORMANCE' } }));
+  assert.equal(perf.data.marketplaces.length, 2);
+  // October performance has a September baseline now.
+  const octPerf = ok(await call('POST', `/ops/reports/${S.bOrg}/2026-10/generate`, { token: t, body: { kind: 'PERFORMANCE' } }));
+  assert.equal(octPerf.data.marketplaces.find((m) => m.marketplace === 'AMAZON').momGrossSalesPct, 0);
+  S.bPerfOct = octPerf.id;
+
+  // Clients without the entitlement cannot have reports generated.
+  ok(await call('PUT', `/ops/reports/${S.dOrg}/2026-10/marketplaces/AMAZON`, { token: S.ops.token, body: OCT }));
+  assert.equal((await call('POST', `/ops/reports/${S.dOrg}/2026-10/generate`, { token: S.ops.token, body: { kind: 'PL' } })).status, 403);
+});
+
+test('CA pack: index from the client\'s documents, missing tracker, CA review flags, disclaimer', async () => {
+  let pack = ok(await call('GET', '/ca-pack?period=2026-10', { token: S.b }));
+  assert.deepEqual(pack.marketplaces, ['AMAZON'], 'only marketplaces with activity that month');
+  assert.ok(pack.missing.some((m) => m.required === 'Amazon settlement report'));
+  assert.ok(!pack.missing.some((m) => /Flipkart/.test(m.required)));
+  assert.ok(pack.index.some((i) => /Monthly marketplace P&L/.test(i.document)), 'published P&L included');
+  assert.match(pack.disclaimer, /Tax filing, audit and certification are not included/);
+  assert.equal(pack.complete, false);
+
+  const settle = await upload(S.b, 'amazon-settlement-oct.csv', Buffer.from('settlement_id,amount\nS1,70000\n'), { kind: 'AMAZON_SETTLEMENT', period: '2026-10' });
+  assert.equal(settle.status, 201);
+  const fee = await upload(S.b, 'amazon-fee-invoice.pdf', PDF, { kind: 'AMAZON_FEE_INVOICE', period: '2026-10' });
+  await upload(S.b, 'september-settlement.pdf', PDF, { kind: 'AMAZON_SETTLEMENT', period: '2026-09' }); // other month — not in October's pack
+  ok(await call('PATCH', `/ops/documents/${fee.body.id}/ca`, { token: S.acct.token, body: { caStatus: 'CA_REVIEW_REQUIRED' } }));
+
+  pack = ok(await call('GET', '/ca-pack?period=2026-10', { token: S.b }));
+  const rows = pack.index.filter((i) => i.category !== 'Reconciliation schedules');
+  assert.deepEqual(rows.map((i) => [i.source, i.status]), [['Amazon settlement report', 'Received'], ['Amazon fee / tax invoices', 'CA review required']]);
+  assert.equal(pack.caQuestions.length, 1);
+  assert.ok(!pack.missing.some((m) => m.required === 'Amazon settlement report'));
+  assert.ok(pack.missing.some((m) => m.required === 'Bank statement / payment credits'));
+  assert.equal((await call('GET', '/ca-pack?period=2026-10', { token: S.d })).status, 403, 'needs an active plan with CA documentation');
+});
+
+test('orchestrator: monthly reporting workflow completes only with published reports of the right kind', async () => {
+  const req = ok(await call('POST', '/requests', { token: S.b, body: { featureKey: 'MONTHLY_PL_REPORT', title: 'October reports', details: { includeCaPack: true } } }));
+  let r = await tasksOf(S.b, req.request.id);
+  assert.deepEqual(r.request.tasks.map((x) => x.stepKey), ['performance', 'pl', 'ca-pack']);
+  const perfTask = step(r, 'performance').id;
+  ok(await move(S.acct.token, perfTask, 'IN_PROGRESS'));
+  assert.equal((await move(S.acct.token, perfTask, 'COMPLETED', { evidence: { summary: 'October performance report published', reportId: S.bPl } })).status, 400, 'a P&L is not a performance report');
+  assert.equal((await move(S.acct.token, perfTask, 'COMPLETED', { evidence: { summary: 'October performance report published', reportId: S.bPerfOct } })).status, 400, 'draft not accepted');
+  ok(await call('POST', `/ops/reports/drafts/${S.bPerfOct}/publish`, { token: S.acct.token }));
+  ok(await move(S.acct.token, perfTask, 'COMPLETED', { evidence: { summary: 'October performance report published', reportId: S.bPerfOct } }));
+  r = await tasksOf(S.b, req.request.id);
+  ok(await complete(S.acct.token, step(r, 'pl').id, { summary: 'October P&L v1 published, VERIFIED', reportId: S.bPl }));
+  r = await tasksOf(S.b, req.request.id);
+  assert.equal(step(r, 'ca-pack').status, 'QUEUED');
+});
+
 test('security: login brute force is rate limited per IP', async () => {
   let limited = false;
   for (let i = 0; i < 45 && !limited; i++) {

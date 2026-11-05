@@ -24,6 +24,8 @@ import { StorageService } from './documents/storage.service';
 import { DocumentsService } from './documents/documents.service';
 import { DocumentsController } from './documents/documents.controller';
 import { ChatService } from './chat/chat.service';
+import { ReportsService } from './reports/reports.service';
+import { ClientReportsController, OpsDocumentsCaController, OpsReportsController } from './reports/reports.controller';
 import { AdminClientsController, ChatController, OpsChatController } from './chat/chat.controller';
 
 @Module({
@@ -31,9 +33,9 @@ import { AdminClientsController, ChatController, OpsChatController } from './cha
     JwtModule.register({ global: true, secret: config.jwtSecret, signOptions: { expiresIn: config.jwtTtl as never } }),
     ThrottlerModule.forRoot([{ ttl: 60_000, limit: Number(process.env.RATE_LIMIT_PER_MIN ?? 120) }]),
   ],
-  controllers: [HealthController, AuthController, AdminUsersController, BillingController, FeaturesController, NotificationsController, RequestsController, ApprovalsController, OpsController, DocumentsController, ChatController, OpsChatController, AdminClientsController],
+  controllers: [HealthController, AuthController, AdminUsersController, BillingController, FeaturesController, NotificationsController, RequestsController, ApprovalsController, OpsController, DocumentsController, ChatController, OpsChatController, AdminClientsController, ClientReportsController, OpsReportsController, OpsDocumentsCaController],
   providers: [
-    PrismaService, AuditService, AuthService, RazorpayClient, BillingService, SkillsService, EntitlementsService, DispatcherService, OrchestratorService, AccessService, StorageService, DocumentsService, ChatService,
+    PrismaService, AuditService, AuthService, RazorpayClient, BillingService, SkillsService, EntitlementsService, DispatcherService, OrchestratorService, AccessService, StorageService, DocumentsService, ChatService, ReportsService,
     { provide: APP_GUARD, useClass: ThrottlerGuard },
     { provide: APP_GUARD, useClass: AuthGuard },
   ],

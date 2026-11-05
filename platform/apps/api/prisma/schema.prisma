@@ -230,8 +230,12 @@ model Organization {
   inventoryRecords    InventoryRecord[]
   labelJobs           LabelJob[]
   thankYouTemplates   ThankYouTemplate[]
-  reports             Report[]
-  caDocuments         CaDocument[]
+  marketplaceMonths   MarketplaceMonth[]
+  skuMonthLines       SkuMonthLine[]
+  productCosts        ProductCost[]
+  operatingExpenses   OperatingExpense[]
+  reportMonths        ReportMonth[]
+  monthlyReports      MonthlyReport[]
   conversations       Conversation[]
   supportTickets      SupportTicket[]
   tasks               Task[]
@@ -541,42 +545,7 @@ model ThankYouTemplate {
 
 // ───────────── Reports & documents ─────────────
 
-model Report {
-  id             String           @id @default(cuid())
-  organizationId String
-  organization   Organization     @relation(fields: [organizationId], references: [id])
-  periodMonth    DateTime
-  marketplace    Marketplace?     // null = combined
-  grossSalesPaise   Int?
-  returnsPaise      Int?
-  netSalesPaise     Int?
-  feesPaise         Int?
-  adSpendPaise      Int?
-  cogsPaise         Int?
-  otherExpensesPaise Int?
-  netProfitPaise    Int?
-  profitConfidence  FigureConfidence @default(UNAVAILABLE)
-  breakdown      Json?            // product-wise / marketplace-wise
-  pdfKey         String?
-  xlsxKey        String?
-  publishedAt    DateTime?
-  createdAt      DateTime         @default(now())
 
-  @@unique([organizationId, periodMonth, marketplace])
-}
-
-model CaDocument {
-  id             String       @id @default(cuid())
-  organizationId String
-  organization   Organization @relation(fields: [organizationId], references: [id])
-  periodMonth    DateTime
-  title          String
-  fileKey        String
-  uploadedById   String
-  createdAt      DateTime     @default(now())
-
-  @@index([organizationId, periodMonth])
-}
 
 /// A client file (business documents, deliverables, chat attachments). Bytes live in storage (fileKey).
 model Document {
@@ -595,6 +564,8 @@ model Document {
   uploadedById   String
   messageId      String?
   message        Message?     @relation(fields: [messageId], references: [id])
+  periodMonth    DateTime?    // accounting month the document belongs to (CA pack)
+  caStatus       String?      // ca-documentation-support §8: VERIFIED_READABLE | DUPLICATE | INCOMPLETE | OUTSIDE_PERIOD | CA_REVIEW_REQUIRED
   deletedAt      DateTime?
   createdAt      DateTime     @default(now())
 
@@ -809,4 +780,125 @@ model AuditLog {
 
   @@index([organizationId, createdAt])
   @@index([actorId, createdAt])
+}
+
+// ───────────── Monthly reporting (skills: monthly-business-performance-report, monthly-pl-report, ca-documentation-support) ─────────────
+
+/// Monthly marketplace figures entered by SOLLUNA from marketplace reports (manual-assisted until APIs are approved).
+/// All amounts in paise, GST-exclusive. NULL = not provided (never treated as zero).
+model MarketplaceMonth {
+  id                   String       @id @default(cuid())
+  organizationId       String
+  organization         Organization @relation(fields: [organizationId], references: [id])
+  periodMonth          DateTime     // first day of the month (UTC)
+  marketplace          Marketplace
+  salesBasis           String       @default("SHIPPED") // SHIPPED | ORDERED — never mixed
+  grossSalesPaise      Int?
+  discountsPaise       Int?
+  returnsRefundsPaise  Int?
+  reimbursementsPaise  Int?
+  orders               Int?
+  unitsSold            Int?
+  unitsReturned        Int?
+  cancelledOrders      Int?
+  sessions             Int?
+  commissionPaise      Int?
+  fixedFeesPaise       Int?
+  fulfilmentPaise      Int?
+  shippingPaise        Int?
+  storagePaise         Int?
+  otherFeesPaise       Int?
+  adSpendPaise         Int?
+  adSalesPaise         Int?
+  impressions          Int?
+  clicks               Int?
+  adSpendInFees        Boolean      @default(false) // ad spend already deducted inside marketplace fees (avoid double count)
+  settlementPaise      Int?
+  bankCreditPaise      Int?         // verified bank credit for the settlement
+  reservesPaise        Int?
+  sourceNote           String?      // which reports were used
+  enteredById          String
+  updatedAt            DateTime     @updatedAt
+
+  @@unique([organizationId, periodMonth, marketplace])
+}
+
+/// SKU-level lines for product-wise profitability.
+model SkuMonthLine {
+  id             String       @id @default(cuid())
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id])
+  periodMonth    DateTime
+  marketplace    Marketplace
+  sku            String
+  units          Int
+  netSalesPaise  Int
+  feesPaise      Int?
+  adSpendPaise   Int?
+
+  @@unique([organizationId, periodMonth, marketplace, sku])
+}
+
+/// Landed cost per unit (purchase + inbound freight + packaging + prep), effective-dated.
+model ProductCost {
+  id              String       @id @default(cuid())
+  organizationId  String
+  organization    Organization @relation(fields: [organizationId], references: [id])
+  sku             String
+  costPaise       Int
+  includesGst     Boolean      @default(false)
+  effectiveFrom   DateTime
+  clientConfirmed Boolean      @default(false) // true when entered/confirmed by the client
+  enteredById     String
+  createdAt       DateTime     @default(now())
+
+  @@index([organizationId, sku, effectiveFrom])
+}
+
+model OperatingExpense {
+  id             String       @id @default(cuid())
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id])
+  periodMonth    DateTime
+  category       String       // STAFF | RENT | SOFTWARE | PROFESSIONAL | TRANSPORT | OTHER
+  description    String
+  amountPaise    Int
+  documentId     String?      // supporting invoice
+  enteredById    String
+  createdAt      DateTime     @default(now())
+
+  @@index([organizationId, periodMonth])
+}
+
+/// Per-month client confirmations.
+model ReportMonth {
+  id                String       @id @default(cuid())
+  organizationId    String
+  organization      Organization @relation(fields: [organizationId], references: [id])
+  periodMonth       DateTime
+  expensesConfirmed Boolean      @default(false)
+  confirmedById     String?
+  confirmedAt       DateTime?
+
+  @@unique([organizationId, periodMonth])
+}
+
+/// Immutable generated report snapshot. Clients only see PUBLISHED versions.
+model MonthlyReport {
+  id                String           @id @default(cuid())
+  organizationId    String
+  organization      Organization     @relation(fields: [organizationId], references: [id])
+  periodMonth       DateTime
+  kind              String           // PERFORMANCE | PL
+  version           Int
+  status            String           @default("DRAFT") // DRAFT | PUBLISHED | SUPERSEDED
+  confidence        FigureConfidence
+  data              Json
+  generatedById     String
+  publishedById     String?
+  publishedAt       DateTime?
+  createdAt         DateTime         @default(now())
+
+  @@unique([organizationId, periodMonth, kind, version])
+  @@index([organizationId, status])
 }

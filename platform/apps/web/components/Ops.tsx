@@ -5,6 +5,7 @@ import { api, ApiError } from '@/lib/api';
 import { Logo } from './Logo';
 import { Status } from './Dashboard';
 import { ChatPanel, DocumentsPanel } from './Chat';
+import { OpsReporting } from './Reporting';
 
 interface QueueTask { id: string; title: string; status: string; priority: string; skill: string; featureKey: string; marketplace: string | null; organization: { legalName: string; brandName: string | null }; request: { title: string } | null; createdAt: string }
 interface Context {
@@ -27,7 +28,7 @@ export function Ops() {
   const [selected, setSelected] = useState<string | null>(null);
   const [ctx, setCtx] = useState<Context | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [view, setView] = useState<'tasks' | 'inbox'>('tasks');
+  const [view, setView] = useState<'tasks' | 'inbox' | 'reports'>('tasks');
 
   const loadQueue = useCallback(async () => {
     try {
@@ -60,11 +61,11 @@ export function Ops() {
         </div>
       </header>
       <nav className="mx-auto flex max-w-7xl gap-1 px-4 pt-4 sm:px-6" aria-label="Operations">
-        {(['tasks', 'inbox'] as const).map((v) => (
-          <button key={v} onClick={() => setView(v)} className={view === v ? 'btn-primary py-1.5 text-xs' : 'btn-ghost py-1.5 text-xs'}>{v === 'tasks' ? 'Task queue' : 'Client inbox'}</button>
+        {(['tasks', 'inbox', ...(['SUPER_ADMIN', 'OPERATIONS_MANAGER', 'ACCOUNTS_EXECUTIVE'].includes(me.staffRole) ? ['reports'] as const : [])] as const).map((v) => (
+          <button key={v} onClick={() => setView(v)} className={view === v ? 'btn-primary py-1.5 text-xs' : 'btn-ghost py-1.5 text-xs'}>{v === 'tasks' ? 'Task queue' : v === 'inbox' ? 'Client inbox' : 'Reporting'}</button>
         ))}
       </nav>
-      {view === 'inbox' ? <Inbox canAssign={['SUPER_ADMIN', 'OPERATIONS_MANAGER'].includes(me.staffRole)} /> : (
+      {view === 'reports' ? <OpsReporting /> : view === 'inbox' ? <Inbox canAssign={['SUPER_ADMIN', 'OPERATIONS_MANAGER'].includes(me.staffRole)} /> : (
       <main className="mx-auto grid max-w-7xl gap-6 px-4 py-6 sm:px-6 lg:grid-cols-[minmax(0,2fr)_minmax(0,3fr)]">
         <section>
           <div className="mb-3 flex items-center justify-between"><h1 className="font-display text-2xl">Task queue</h1><button className="btn-ghost py-1.5 text-xs" onClick={loadQueue}>Refresh</button></div>

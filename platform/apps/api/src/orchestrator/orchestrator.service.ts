@@ -18,7 +18,7 @@ import { STAFF_TRANSITIONS, isTerminal } from './state-machine';
 
 type Tx = Prisma.TransactionClient;
 type Evidence = Record<string, unknown> & {
-  summary?: string; outputUrl?: string; marketplaceRef?: string; documentId?: string; outcome?: string; catalogId?: string; confidence?: string;
+  summary?: string; outputUrl?: string; marketplaceRef?: string; documentId?: string; reportId?: string; outcome?: string; catalogId?: string; confidence?: string;
   approvalParameters?: Record<string, unknown>;
 };
 
@@ -284,6 +284,15 @@ export class OrchestratorService implements OnModuleInit {
   private async validateEvidence(task: Task, step: Step | undefined, status: TaskStatus, ev: Evidence | undefined) {
     if (!ev || typeof ev.summary !== 'string' || ev.summary.trim().length < 10) throw new BadRequestException('Evidence summary (what was verified) is required');
     if (status === 'PARTIALLY_COMPLETED') return;
+    if (ev.reportId) {
+      // monthly-reporting workflow: a PUBLISHED report of the matching kind is the deliverable.
+      const kindFor: Record<string, string> = { MONTHLY_PERFORMANCE_REPORT: 'PERFORMANCE', MONTHLY_PL_REPORT: 'PL' };
+      const rep = await this.db.monthlyReport.findUnique({ where: { id: String(ev.reportId) } });
+      if (!rep || rep.organizationId !== task.organizationId || rep.status !== 'PUBLISHED' || (kindFor[task.featureKey] && rep.kind !== kindFor[task.featureKey])) {
+        throw new BadRequestException('reportId must be a PUBLISHED report of the right kind for this client');
+      }
+      return;
+    }
     if (!ev.outputUrl && !ev.marketplaceRef && !ev.documentId) throw new BadRequestException('Evidence must include outputUrl (approved delivery location), documentId (file shared in the client\'s Documents) or marketplaceRef (marketplace confirmation)');
     if (ev.documentId) {
       const doc = await this.db.document.findUnique({ where: { id: String(ev.documentId) } });
