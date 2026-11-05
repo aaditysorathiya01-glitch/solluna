@@ -9,7 +9,11 @@
     "db:migrate": "prisma migrate dev --schema apps/api/prisma/schema.prisma",
     "db:seed": "tsx apps/api/prisma/seed-plans.ts",
     "verify:skills": "tsx scripts/verify-skill-map.ts",
-    "typecheck": "tsc -p tsconfig.base.json"
+    "typecheck": "tsc -p tsconfig.base.json",
+    "build": "npm run build -w @solluna/api && npm run build -w @solluna/web",
+    "test": "npm run verify:skills && npm run test:e2e -w @solluna/api && npm run test:e2e -w @solluna/web",
+    "dev:api": "npm run build -w @solluna/api && node --env-file=.env apps/api/dist/apps/api/src/main.js",
+    "dev:web": "npm run dev -w @solluna/web"
   },
   "devDependencies": {
     "@types/node": "^26.6.6",
@@ -21,6 +25,7 @@
     "@prisma/client": "^5.22.0"
   },
   "overrides": {
-    "multer": "2.5.0"
+    "multer": "2.5.0",
+    "postcss": "8.5.30"
   }
 }

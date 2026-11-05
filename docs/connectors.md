@@ -24,3 +24,13 @@ Verified on 2026-11-05. Recheck before relying on it, because connections change
 
 ## Gaps (none of the connectors cover these)
 Razorpay, Amazon SP-API, Amazon Ads API, Flipkart Seller API. These are the only new integrations the MVP needs.
+
+## Platform wiring (built)
+- **Events → Zapier:** the API POSTs every client event (request created/updated, approval requested, subscription activated, payment failed, renewal reminder, grace, past due) to `CONNECTOR_WEBHOOK_URL`, signed with `x-solluna-signature` (HMAC-SHA256 of the body using `CONNECTOR_WEBHOOK_SECRET`). Payload: `type, organizationId, title, body, data, organization{legalName, brandName, contactEmail}`.
+- **Delivery channel enforcement:** a task can be completed only with an `outputUrl` on `APPROVED_OUTPUT_HOSTS` (default Google Drive / Docs) or a marketplace confirmation reference.
+- **Per-skill connector hints:** `platform/packages/permissions/src/connectors.ts`, shown to operators on every task.
+
+## One-time setup in Zapier (not automatable from here)
+1. Create a Zap with trigger **Webhooks by Zapier → Catch Hook**, then copy the URL into `CONNECTOR_WEBHOOK_URL`.
+2. Action **Gmail → Send Email** to `organization.contactEmail` with subject `title` and body `body`, from a **SOLLUNA** Gmail account (not fitin15india).
+3. Optional action: **Google Sheets → Create Spreadsheet Row** in an "Ops event log" sheet.

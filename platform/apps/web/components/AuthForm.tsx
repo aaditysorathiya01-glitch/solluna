@@ -1,0 +1,67 @@
+'use client';
+import { useState } from 'react';
+import { useRouter } from 'next/navigation';
+import Link from 'next/link';
+import { api, ApiError } from '@/lib/api';
+import { Logo } from './Logo';
+
+type Field = { name: string; label: string; type?: string; required?: boolean; placeholder?: string; autoComplete?: string };
+
+export function AuthForm({ mode, plan }: { mode: 'login' | 'register'; plan?: string }) {
+  const router = useRouter();
+  const [error, setError] = useState<string | null>(null);
+  const [issues, setIssues] = useState<Record<string, string>>({});
+  const [busy, setBusy] = useState(false);
+
+  const fields: Field[] = mode === 'login'
+    ? [{ name: 'email', label: 'Email', type: 'email', required: true, autoComplete: 'email' }, { name: 'password', label: 'Password', type: 'password', required: true, autoComplete: 'current-password' }]
+    : [
+        { name: 'name', label: 'Your name', required: true, autoComplete: 'name' },
+        { name: 'email', label: 'Work email', type: 'email', required: true, autoComplete: 'email' },
+        { name: 'phone', label: 'Mobile', type: 'tel', required: true, placeholder: '98XXXXXXXX', autoComplete: 'tel' },
+        { name: 'legalName', label: 'Registered business name', required: true },
+        { name: 'brandName', label: 'Brand name (optional)' },
+        { name: 'gstin', label: 'GSTIN (optional)', placeholder: '24ABCDE1234F1Z5' },
+        { name: 'password', label: 'Password (10+ characters)', type: 'password', required: true, autoComplete: 'new-password' },
+      ];
+
+  async function submit(e: React.FormEvent<HTMLFormElement>) {
+    e.preventDefault();
+    setBusy(true); setError(null); setIssues({});
+    const body = Object.fromEntries([...new FormData(e.currentTarget).entries()].filter(([, v]) => String(v).trim() !== ''));
+    try {
+      await api(`/auth/${mode}`, { method: 'POST', body });
+      const me = await api<{ user: { type: string } }>('/auth/me');
+      router.push(me.user.type === 'STAFF' ? '/ops' : plan ? `/dashboard?tab=billing&plan=${plan}` : '/dashboard');
+    } catch (err) {
+      const a = err as ApiError;
+      setError(a.message);
+      if (a.issues) setIssues(Object.fromEntries(a.issues.map((i) => [i.path, i.message])));
+      setBusy(false);
+    }
+  }
+
+  return (
+    <main className="flex min-h-screen items-center justify-center px-4 py-10">
+      <div className="w-full max-w-md">
+        <div className="mb-8 flex justify-center"><Logo /></div>
+        <form onSubmit={submit} className="card space-y-4 p-7" noValidate>
+          <h1 className="font-display text-2xl">{mode === 'login' ? 'Sign in' : 'Create your seller account'}</h1>
+          {plan && mode === 'register' && <p className="text-sm text-ink-3">You chose the <strong>{plan.charAt(0) + plan.slice(1).toLowerCase()}</strong> plan. You'll pay after creating your account.</p>}
+          {fields.map((f) => (
+            <div key={f.name}>
+              <label className="label" htmlFor={f.name}>{f.label}</label>
+              <input className="input" id={f.name} name={f.name} type={f.type ?? 'text'} required={f.required} placeholder={f.placeholder} autoComplete={f.autoComplete} />
+              {issues[f.name] && <p className="mt-1 text-xs text-red-700">{issues[f.name]}</p>}
+            </div>
+          ))}
+          {error && <p role="alert" className="rounded-xl bg-red-50 px-3 py-2 text-sm text-red-800">{error}</p>}
+          <button className="btn-primary w-full" disabled={busy}>{busy ? 'Please wait…' : mode === 'login' ? 'Sign in' : 'Create account'}</button>
+          <p className="text-center text-sm text-ink-3">
+            {mode === 'login' ? <>New to SOLLUNA? <Link className="font-semibold text-ink underline" href="/register">Create an account</Link></> : <>Already registered? <Link className="font-semibold text-ink underline" href="/login">Sign in</Link></>}
+          </p>
+        </form>
+      </div>
+    </main>
+  );
+}
