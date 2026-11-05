@@ -62,7 +62,7 @@ before(async () => {
   const a = start('node', ['dist/apps/api/src/main.js'], apiDir, {
     DATABASE_URL, PORT: String(apiPort), JWT_SECRET: 'web-e2e-secret-web-e2e-secret-123', COOKIE_SECURE: 'false',
     RAZORPAY_KEY_ID: KEY_ID, RAZORPAY_KEY_SECRET: KEY_SECRET, RAZORPAY_WEBHOOK_SECRET: 'wh', RAZORPAY_API_BASE: `http://127.0.0.1:${rzpPort}`, RATE_LIMIT_PER_MIN: '10000', AUTH_RATE_LIMIT_PER_MIN: '100',
-    SUPPLIER_LEGAL_NAME: 'SOLLUNA Marketplace Services', SUPPLIER_GSTIN: '24AAJCS1234M1ZA', SUPPLIER_ADDRESS: 'B-220 Supath-2 Complex, Ahmedabad, Gujarat 380013', SUPPLIER_EMAIL: 'solluna.play@gmail.com',
+    SUPPLIER_LEGAL_NAME: 'Aaditya Jitendrabhai Sorathia', SUPPLIER_TRADE_NAME: 'Solluna', SUPPLIER_GSTIN: '24OPVPS8924H1ZQ', SUPPLIER_ADDRESS: 'Survey No 135, Plot No 9, Shreeji Nagar, Meghpar Kumbhardi Sim, Anjar, Kachchh, Gujarat 370110', SUPPLIER_EMAIL: 'solluna.play@gmail.com',
   });
   apiProc = a.p;
   await waitFor(`${apiBase}/health`, 'API', a.logs);
@@ -162,7 +162,7 @@ test('register → billing details → GST total → Razorpay checkout → verif
   await page.waitForURL(/\/invoices\//);
   const invoice = page.getByRole('article', { name: 'Tax invoice' });
   await invoice.getByText('SOL/26-27/00001').waitFor();
-  for (const t of ['Tax Invoice', '24AAJCS1234M1ZA', 'Maharashtra (27)', 'IGST @ 18%', '₹5,898.82', 'Rupees Five Thousand Eight Hundred Ninety Eight and Eighty Two Paise Only', 'Unregistered recipient', '998399']) {
+  for (const t of ['Tax Invoice', '24OPVPS8924H1ZQ', 'Aaditya Jitendrabhai Sorathia', 'PAN OPVPS8924H', 'Maharashtra (27)', 'IGST @ 18%', '₹5,898.82', 'Rupees Five Thousand Eight Hundred Ninety Eight and Eighty Two Paise Only', 'Unregistered recipient', '998399']) {
     assert.ok(await invoice.getByText(t, { exact: false }).first().isVisible(), `invoice shows ${t}`);
   }
   assert.equal(await invoice.getByText('CGST', { exact: false }).count(), 0, 'inter-state invoice has no CGST/SGST');

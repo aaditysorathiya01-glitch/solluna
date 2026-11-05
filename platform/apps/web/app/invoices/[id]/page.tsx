@@ -39,15 +39,15 @@ export default function InvoicePage({ params }: { params: Promise<{ id: string }
         <button className="btn-primary py-1.5 text-xs" onClick={() => window.print()}>Download PDF / Print</button>
       </div>
       <article className="card p-8 text-sm print:border-0 print:shadow-none" aria-label="Tax invoice">
-        <header className="flex flex-wrap items-start justify-between gap-6 border-b border-ink/15 pb-6">
-          <div>
-            <p className="font-display text-2xl tracking-[0.15em]">{s.tradeName ?? 'SOLLUNA'}</p>
-            <p className="mt-1 font-semibold">{s.legalName}</p>
+        <header className="flex flex-col gap-6 border-b border-ink/15 pb-6 sm:flex-row sm:items-start sm:justify-between print:flex-row">
+          <div className="min-w-0 flex-1">
+            <p className="font-display text-2xl tracking-[0.15em] uppercase">{s.tradeName ?? 'SOLLUNA'}</p>
+            <p className="mt-1 font-semibold">{s.legalName}{s.tradeName ? <span className="font-normal text-ink-3"> (Proprietor, trade name {s.tradeName})</span> : null}</p>
             <p className="text-ink-3">{s.address}</p>
             <p className="text-ink-3">GSTIN <strong className="text-ink">{s.gstin}</strong> · PAN {s.pan}</p>
             <p className="text-ink-3">State: {s.stateName} ({s.stateCode}){s.email ? ` · ${s.email}` : ''}</p>
           </div>
-          <div className="text-right">
+          <div className="shrink-0 sm:text-right print:text-right">
             <h1 className="text-lg font-bold uppercase tracking-wider">Tax Invoice</h1>
             <p className="text-xs text-ink-3">Original for recipient</p>
             <dl className="mt-3 space-y-0.5">
@@ -93,7 +93,7 @@ export default function InvoicePage({ params }: { params: Promise<{ id: string }
 
         <footer className="mt-10 flex flex-wrap items-end justify-between gap-6 border-t border-ink/15 pt-5 text-xs text-ink-3">
           <p className="max-w-md">Service period {new Date(inv.periodStart).toLocaleDateString('en-IN')} to {new Date(inv.periodEnd).toLocaleDateString('en-IN')}. Paid online via Razorpay. This is a computer-generated invoice and does not require a physical signature.</p>
-          <p className="text-right">For <strong className="text-ink">{s.legalName}</strong><br /><br />Authorised Signatory</p>
+          <p className="text-right">For <strong className="text-ink">{s.tradeName ?? s.legalName}</strong><br /><br />Authorised Signatory</p>
         </footer>
       </article>
     </main>

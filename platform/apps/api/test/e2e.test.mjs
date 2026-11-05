@@ -25,7 +25,7 @@ const KEY_ID = 'rzp_test_e2e';
 const KEY_SECRET = 'e2e_key_secret';
 const WEBHOOK_SECRET = 'e2e_webhook_secret';
 const CONNECTOR_SECRET = 'e2e_connector_secret';
-const SUPPLIER_GSTIN = '24AAJCS1234M1ZA'; // Gujarat (valid check digit)
+const SUPPLIER_GSTIN = '24OPVPS8924H1ZQ'; // Solluna (GST REG-06), Gujarat
 const ADMIN = { email: 'admin@solluna.test', password: 'Admin-Passw0rd-123' };
 
 let api, base, db, rzpServer, sinkServer;
@@ -66,7 +66,7 @@ before(async () => {
       ...process.env, DATABASE_URL, PORT: String(port), JWT_SECRET: 'e2e-jwt-secret-e2e-jwt-secret-1234', COOKIE_SECURE: 'false',
       RAZORPAY_KEY_ID: KEY_ID, RAZORPAY_KEY_SECRET: KEY_SECRET, RAZORPAY_WEBHOOK_SECRET: WEBHOOK_SECRET, RAZORPAY_API_BASE: `http://127.0.0.1:${rzpPort}`,
       CONNECTOR_WEBHOOK_URL: `http://127.0.0.1:${sinkPort}/hook`, CONNECTOR_WEBHOOK_SECRET: CONNECTOR_SECRET, RATE_LIMIT_PER_MIN: '10000', AUTH_RATE_LIMIT_PER_MIN: '40',
-      SUPPLIER_LEGAL_NAME: 'SOLLUNA Marketplace Services', SUPPLIER_GSTIN: SUPPLIER_GSTIN, SUPPLIER_ADDRESS: 'B-220 Supath-2 Complex, Ahmedabad, Gujarat 380013', INVOICE_SAC: '998399',
+      SUPPLIER_LEGAL_NAME: 'Aaditya Jitendrabhai Sorathia', SUPPLIER_TRADE_NAME: 'Solluna', SUPPLIER_GSTIN: SUPPLIER_GSTIN, SUPPLIER_ADDRESS: 'Survey No 135, Plot No 9, Shreeji Nagar, Meghpar Kumbhardi Sim, Anjar, Kachchh, Gujarat 370110', INVOICE_SAC: '998399',
     },
     stdio: ['ignore', 'pipe', 'pipe'],
   });
@@ -229,7 +229,9 @@ test('billing: verified checkout activates once, issues GST invoice, resumes wai
   const full = ok(await call('GET', `/billing/invoices/${inv.id}`, { token: S.a }));
   assert.equal(full.amountInWords, 'Rupees Two Thousand Three Hundred Fifty Eight and Eighty Two Paise Only');
   assert.equal(full.supplier.gstin, SUPPLIER_GSTIN);
-  assert.equal(full.supplier.pan, 'AAJCS1234M');
+  assert.equal(full.supplier.pan, 'OPVPS8924H');
+  assert.equal(full.supplier.legalName, 'Aaditya Jitendrabhai Sorathia');
+  assert.equal(full.supplier.tradeName, 'Solluna');
   assert.equal(full.buyer.gstin, '24ABCDE1234F1Z6');
   assert.equal(full.buyer.stateName, 'Gujarat');
   assert.equal(full.placeOfSupplyName, 'Gujarat');
