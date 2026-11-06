@@ -311,7 +311,7 @@ export class BillingService {
       await this.audit.log({ actor: user, action: 'preview.demo_subscription', entity: 'Subscription', entityId: created.id, after: { plan: plan.code, note: 'Preview test activation — no payment, no invoice' } }, tx);
       return created;
     });
-    await this.dispatch.emit({ type: 'subscription.activated', organizationId: orgId, title: `${plan.name} plan active (test)`, body: `Test activation in the preview environment — no payment was taken. Active until ${end.toDateString()}.` });
+    await this.dispatch.emit({ type: 'subscription.activated', organizationId: orgId, title: `${plan.name} plan active`, body: `Test activation in the preview environment — no payment was taken. Active until ${end.toDateString()}.` });
     await this.runActivationListeners(orgId, { planCode: plan.code, planName: plan.name, kind: previous ? 'change' : 'new', previousPlanCode: previous?.plan.code ?? null, preview: true });
     return { status: sub.status, plan: { code: plan.code, name: plan.name }, currentPeriodEnd: end };
   }

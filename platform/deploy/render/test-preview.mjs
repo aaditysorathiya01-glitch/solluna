@@ -241,12 +241,12 @@ await check('UI', 'New sign-up: plans only → test activation → plan dashboar
   await p.getByRole('button', { name: 'Select Growth' }).click();
   await p.getByRole('button', { name: 'Activate Growth for testing (no payment)' }).click();
   const mgr = p.getByRole('region', { name: 'Your account manager' });
-  await mgr.getByText('Growth plan is active', { exact: false }).waitFor({ timeout: 30000 });
+  await mgr.getByText('Assigned within 1 hour', { exact: false }).waitFor({ timeout: 30000 });
   const tabs = (await p.locator('nav[aria-label="Dashboard"] button').allInnerTexts()).map((t) => t.trim().toLowerCase());
   assert(tabs.includes('labels') && tabs.includes('low stock'), `Growth tabs: ${tabs}`);
   await shot(p, 'signup-growth-overview');
   await ctx.close();
-  return 'manager assigned + welcome sent';
+  return 'plan dashboard + manager promised within 1 hour';
 });
 await check('UI', 'Reseller dashboard hides Growth-only tabs (labels, low stock)', async () => {
   const p = await asUser('amit@demo.solluna.co.in', E.CLIENT_PASSWORD);

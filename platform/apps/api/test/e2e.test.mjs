@@ -65,7 +65,7 @@ before(async () => {
     env: {
       ...process.env, DATABASE_URL, PORT: String(port), JWT_SECRET: 'e2e-jwt-secret-e2e-jwt-secret-1234', COOKIE_SECURE: 'false',
       RAZORPAY_KEY_ID: KEY_ID, RAZORPAY_KEY_SECRET: KEY_SECRET, RAZORPAY_WEBHOOK_SECRET: WEBHOOK_SECRET, RAZORPAY_API_BASE: `http://127.0.0.1:${rzpPort}`,
-      CONNECTOR_WEBHOOK_URL: `http://127.0.0.1:${sinkPort}/hook`, CONNECTOR_WEBHOOK_SECRET: CONNECTOR_SECRET, RATE_LIMIT_PER_MIN: '10000', AUTH_RATE_LIMIT_PER_MIN: '40', MAX_UPLOAD_MB: '1',
+      CONNECTOR_WEBHOOK_URL: `http://127.0.0.1:${sinkPort}/hook`, CONNECTOR_WEBHOOK_SECRET: CONNECTOR_SECRET, RATE_LIMIT_PER_MIN: '10000', AUTH_RATE_LIMIT_PER_MIN: '40', MAX_UPLOAD_MB: '1', MANAGER_ASSIGN_DELAY_MIN: '0', MANAGER_MESSAGE_GAP_SEC: '0',
       SUPPLIER_LEGAL_NAME: 'Aaditya Jitendrabhai Sorathia', SUPPLIER_TRADE_NAME: 'Solluna', SUPPLIER_GSTIN: SUPPLIER_GSTIN, SUPPLIER_ADDRESS: 'Survey No 135, Plot No 9, Shreeji Nagar, Meghpar Kumbhardi Sim, Anjar, Kachchh, Gujarat 370110', INVOICE_SAC: '998399',
     },
     stdio: ['ignore', 'pipe', 'pipe'],
@@ -603,20 +603,32 @@ test('chat: auto-assigned manager, live delivery both ways, internal notes stay 
   const eHist = ok(await call('GET', '/chat', { token: esha }));
   assert.equal(eHist.managers.length, 1, 'a manager is assigned when the plan starts');
   const eManager = eHist.managers[0];
-  const welcome = eHist.messages.find((m) => m.senderType === 'STAFF' && m.sender.id === eManager.id);
-  assert.ok(welcome, 'the manager welcomes the client in Manager Chat');
-  assert.match(welcome.body, /Growth plan is active/);
-  assert.match(welcome.body, /New listings: Amazon 25 per month, Flipkart 25 per month/);
-  assert.match(welcome.body, /Growth: Ads Management/);
-  assert.doesNotMatch(welcome.body, /Product Research/, 'only services in the plan are listed');
+  const hello = eHist.messages.filter((m) => m.senderType === 'STAFF' && m.sender.id === eManager.id).map((m) => m.body);
+  assert.equal(hello.length, 3, 'the manager says hello in a few short messages');
+  assert.match(hello[0], /^Hi Esha! I'm \S+ from SOLLUNA/);
+  assert.match(hello[1], /Growth plan is all set/);
+  assert.match(hello[2], /ads plan/);
+  assert.ok(hello.every((b) => b.length <= 140), 'chat-length messages, no benefit dumps');
   assert.ok(await db.notification.findFirst({ where: { userId: eManager.id, type: 'manager.new_client' } }), 'manager told about the new client');
+  assert.ok(await db.notification.findFirst({ where: { organizationId: eHist.organizationId, type: 'manager.pending', body: { contains: 'within 1 hour' } } }), 'client promised a manager within 1 hour');
+  assert.equal(eHist.managerPending, null, 'nothing pending once the manager has written');
   await pay(esha, 'GROWTH');
   await pay(esha, 'PREMIUM');
   const after = ok(await call('GET', '/chat', { token: esha })).messages.filter((m) => m.senderType === 'STAFF');
-  assert.equal(after.length, 2, 'renewal sends nothing; plan change sends one update');
-  assert.match(after[1].body, /Your plan is now Premium/);
-  assert.match(after[1].body, /Product Research & Suggestions/);
-  assert.doesNotMatch(after[1].body, /Ads Management/, 'only newly included services');
+  assert.equal(after.length, 5, 'renewal sends nothing; plan change sends a short note');
+  assert.match(after[3].body, /moved to Premium/);
+  assert.equal(after[3].sender.id, eManager.id, 'same manager after a plan change');
+  // Queued hand-off: client sees the 1-hour promise; nothing is sent before it is due.
+  const fay = await registerCustomer('Fay');
+  const fayOrg = ok(await call('GET', '/chat', { token: fay })).organizationId;
+  await db.managerWelcome.create({ data: { organizationId: fayOrg, planCode: 'RESELLER', kind: 'NEW', dueAt: new Date(Date.now() + 3_600_000) } });
+  const fayChat = ok(await call('GET', '/chat', { token: fay }));
+  assert.ok(fayChat.managerPending?.assignBy, 'pending hand-off is visible to the client');
+  assert.equal(fayChat.managers.length + fayChat.messages.length, 0, 'no manager or message before it is due');
+  await db.managerWelcome.update({ where: { organizationId: fayOrg }, data: { dueAt: new Date(Date.now() - 1000) } });
+  const fayLater = ok(await call('GET', '/chat', { token: fay }));
+  assert.equal(fayLater.managers.length, 1, 'due hand-off runs when the client opens chat');
+  assert.equal(fayLater.messages.length, 3);
   assert.equal((await call('POST', '/billing/preview-activate', { token: esha, body: { planCode: 'RESELLER' } })).status, 404, 'test activation exists only in preview environments');
   ok(await call('POST', `/admin/clients/${S.dOrg}/managers`, { token: S.admin, body: { managerId: S.sup1.id } }));
   const dHist = ok(await call('GET', '/chat', { token: S.d }));

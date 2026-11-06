@@ -34,7 +34,7 @@ interface Billing {
 }
 interface PlanFeatureRow { key: string; label: string; section: string; enabled: boolean; limit: number | null; meta: { mode?: string } | null }
 interface Plan { code: string; name: string; pricePaise: number; features: PlanFeatureRow[] }
-interface ChatSummary { managers: { id: string; name: string; staffRole: string }[]; messages: { id: string; body: string; senderType: string; createdAt: string; sender: { id: string; name: string } }[] }
+interface ChatSummary { managerPending: { assignBy: string } | null; managers: { id: string; name: string; staffRole: string }[]; messages: { id: string; body: string; senderType: string; createdAt: string; sender: { id: string; name: string } }[] }
 interface Notification { id: string; title: string; body: string; createdAt: string; readAt: string | null }
 
 const TABS = ['overview', 'services', 'requests', 'approvals', 'catalog', 'labels', 'inventory', 'tickets', 'chat', 'reports', 'documents', 'billing', 'settings'] as const;
@@ -166,7 +166,13 @@ export function Dashboard() {
                     <button className="btn-primary mt-4" onClick={() => go('chat')}>{managerNote ? `Reply to ${manager.name.split(' ')[0]}` : `Message ${manager.name.split(' ')[0]}`}</button>
                   </>
                 ) : (
-                  <><p className="label">Your account manager</p><p className="font-display text-xl">Being assigned</p><p className="mt-1 text-sm text-ink-3">Your dedicated manager will message you in Manager chat shortly.</p></>
+                  <>
+                    <p className="label">Your account manager</p>
+                    <p className="font-display text-xl">Assigned within 1 hour</p>
+                    <p className="mt-1 text-sm text-ink-3">
+                      Your dedicated manager is being assigned{chat?.managerPending ? ` (by ${new Date(chat.managerPending.assignBy).toLocaleTimeString('en-IN', { hour: 'numeric', minute: '2-digit' })})` : ''} and will message you in Manager chat. We will notify you here.
+                    </p>
+                  </>
                 )}
               </section>
               <section className="card p-6" aria-label="Your plan">
@@ -352,7 +358,7 @@ function PlanPicker({ firstName, billing, plans, preselect, lapsed, verifying, o
     setBusy(code);
     try {
       const r = await api<{ plan: { name: string } }>('/billing/preview-activate', { method: 'POST', body: { planCode: code } });
-      onDone({ kind: 'ok', text: `${r.plan.name} plan activated for testing (no payment). Your manager has sent you a welcome message.` }, true);
+      onDone({ kind: 'ok', text: `${r.plan.name} plan activated for testing (no payment). Your dedicated manager will be assigned within 1 hour.` }, true);
     } catch (e) { onDone({ kind: 'err', text: (e as Error).message }); }
     setBusy(null);
   }

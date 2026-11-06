@@ -988,3 +988,19 @@ model MonthlyReport {
   @@unique([organizationId, periodMonth, kind, version])
   @@index([organizationId, status])
 }
+
+/// Manager hand-off after a plan starts: the client is promised a manager within 1 hour; the manager is assigned
+/// after MANAGER_ASSIGN_DELAY_MIN and sends a few short messages, one step at a time (chat.service.ts).
+model ManagerWelcome {
+  id               String   @id @default(cuid())
+  organizationId   String   @unique
+  planCode         String
+  previousPlanCode String?
+  kind             String // NEW | CHANGE
+  preview          Boolean  @default(false)
+  step             Int      @default(0)
+  dueAt            DateTime
+  createdAt        DateTime @default(now())
+
+  @@index([dueAt])
+}
