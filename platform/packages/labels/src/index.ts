@@ -46,8 +46,12 @@ function flipkartItems(p: PageText): LineItem[] {
   const rows: { desc: string[]; qty: number }[] = [];
   for (const line of lines(p.items.filter((i) => i.y < header.y - 1 && i.y > bottom + 1))) {
     const first = line[0];
-    const isNew = /^\d+$/.test(first.str.trim()) && first.x < header.x - 20;
-    const desc = line.filter((i) => i !== (isNew ? first : null) && i.x < qtyX).map((i) => i.str.trim()).join(' ');
+    const isNumberCell = /^\d+$/.test(first.str.trim()) && first.x < header.x - 20;
+    // Some PDFs merge the row number into the SKU text ("1 1L - 14"): strip it when it is the next row number.
+    const merged = !isNumberCell ? /^(\d{1,2})\s+(\S.*)$/.exec(first.str.trim()) : null;
+    const isMergedRow = Boolean(merged && Number(merged[1]) === rows.length + 1 && first.x < header.x - 20);
+    const isNew = isNumberCell || isMergedRow;
+    const desc = line.filter((i) => i !== (isNumberCell ? first : null) && i.x < qtyX).map((i) => (isMergedRow && i === first ? merged![2] : i.str).trim()).join(' ');
     const qty = Number(line.filter((i) => i.x >= qtyX).map((i) => i.str.trim()).join('')) || 0;
     if (isNew || !rows.length) rows.push({ desc: [desc], qty });
     else { rows[rows.length - 1].desc.push(desc); if (qty) rows[rows.length - 1].qty = qty; }
