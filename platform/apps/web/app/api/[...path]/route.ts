@@ -22,21 +22,22 @@ async function proxy(req: NextRequest, { params }: { params: Promise<{ path: str
   if (ip) headers.set('x-forwarded-for', ip);
 
   // Live streams (Server-Sent Events) stay open; everything else times out. Client disconnects propagate upstream.
+  // 100 s covers an API cold start on free hosting (~50–60 s). Connection failures (API not accepting yet) are retried.
   const isStream = path[path.length - 1] === 'stream';
-  const signal = isStream ? req.signal : AbortSignal.any([req.signal, AbortSignal.timeout(30_000)]);
+  const signal = isStream ? req.signal : AbortSignal.any([req.signal, AbortSignal.timeout(100_000)]);
+  const body = ['GET', 'HEAD'].includes(req.method) ? undefined : Buffer.from(await req.arrayBuffer());
 
-  let upstream: Response;
-  try {
-    upstream = await fetch(url, {
-      method: req.method,
-      headers,
-      body: ['GET', 'HEAD'].includes(req.method) ? undefined : Buffer.from(await req.arrayBuffer()),
-      redirect: 'manual',
-      cache: 'no-store',
-      signal,
-    });
-  } catch {
-    return Response.json({ statusCode: 502, message: 'Service temporarily unavailable. Please try again.' }, { status: 502 });
+  let upstream: Response | undefined;
+  for (let attempt = 0; !upstream; attempt++) {
+    try {
+      upstream = await fetch(url, { method: req.method, headers, body, redirect: 'manual', cache: 'no-store', signal });
+    } catch {
+      // Timed out: the API may have processed the request, so the browser must not replay it automatically.
+      if (signal.aborted) return Response.json({ statusCode: 504, message: 'The server took too long to respond. Please check and try again.' }, { status: 504 });
+      // Never connected: safe for the browser to retry (waking: true).
+      if (attempt >= 5) return Response.json({ statusCode: 502, waking: true, message: 'Our server is starting up — this can take up to a minute. Please try again shortly.' }, { status: 502 });
+      await new Promise((r) => setTimeout(r, 3000));
+    }
   }
 
   const out = new Headers();
