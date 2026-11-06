@@ -105,7 +105,8 @@ export function detect(pages: PageText[]): Detection {
       const cut = tax.y + tax.h;
       const top = p.items.filter((i) => i.y > cut + 2);
       const xs = top.map((i) => i.x), xe = top.map((i) => i.x + (i.rotated ? i.h : i.w));
-      const ys = top.map((i) => i.y), ye = top.map((i) => i.y + (i.rotated ? i.w : i.h));
+      // Rotated text (e.g. the vertical AWB number) can run up or down from its anchor; it always sits inside the label, so use the anchor only.
+      const ys = top.map((i) => i.y), ye = top.map((i) => i.y + (i.rotated ? 0 : i.h));
       const pad = 4;
       const x = Math.max(0, Math.min(...xs) - pad), right = Math.min(p.width, Math.max(...xe) + pad);
       const y = Math.max(cut + 8, Math.min(...ys) - 8), upper = Math.min(p.height, Math.max(...ye) + pad);
