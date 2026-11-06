@@ -212,7 +212,7 @@ await check('UI', 'Client dashboard: overview, listings, labels, stock, reports,
 await check('UI', 'Premium client: thank-you design review', async () => {
   const p = await asUser('kavya@demo.solluna.co.in', E.CLIENT_PASSWORD);
   await p.waitForURL(/\/dashboard/, { timeout: 20000 });
-  await p.goto(`${BASE}/dashboard?tab=labels`); await p.getByRole('tab', { name: 'Thank-you notes' }).click(); await p.getByText('Everyday insert', { exact: false }).first().waitFor({ timeout: 15000 }); await shot(p, 'premium-thank-you');
+  await p.goto(`${BASE}/dashboard?tab=labels`); await p.getByText('Thank-you notes', { exact: true }).click(); await p.getByText('Everyday insert', { exact: false }).first().waitFor({ timeout: 15000 }); await shot(p, 'premium-thank-you');
   await p.context().close();
 });
 await check('UI', 'Staff console: task queue and client workspace (Kabir, operations manager)', async () => {
