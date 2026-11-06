@@ -1,6 +1,6 @@
 'use client';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { compose, manualPieces, type Box, type Layout } from '../../../packages/labels/src';
+import { compose, detect, manualPieces, type Box, type Layout, type PageText } from '../../../packages/labels/src';
 import { SubTabs } from './ui';
 import { api, ApiError } from '@/lib/api';
 import { Status } from './ui';
@@ -19,7 +19,7 @@ const MARKETS: Record<Market, { name: string; how: string; layouts: Layout[]; sp
 const MODE_INFO: Record<Mode, { title: string; body: (m: Market) => string; plan: string }> = {
   AUTO: { title: 'Auto crop', body: (m) => (m === 'AMAZON' ? 'We find every label, drop the invoices and add the item name, SKU and qty line on each label.' : 'We find every label, drop the invoices and lay the labels out to print.'), plan: 'Growth' },
   SPECIAL: { title: 'Auto + specialised', body: (m) => (m === 'AMAZON' ? 'Auto crop with the item line, labels sorted by SKU, plus a picklist page.' : 'Auto crop plus a product description & qty box under each label, sorted by SKU, with a picklist page.'), plan: 'Premium' },
-  MANUAL: { title: 'Manual crop', body: () => 'Adjust the label box on the preview once; it is applied to every label page.', plan: 'All plans' },
+  MANUAL: { title: 'Manual crop', body: (m) => (m === 'AMAZON' ? 'Adjust the label box once; the item name, SKU and qty line is added from each invoice.' : 'Adjust the label box on the preview once; it is applied to every label page.'), plan: 'All plans' },
 };
 const LAYOUT_NAME: Record<Layout, string> = { A4_4UP: '4 labels per A4', A4_6UP: '6 labels per A4', SINGLE: 'Single labels (one per page)', THERMAL_4X6: '1 label per page (4×6 thermal)' };
 
@@ -101,7 +101,7 @@ export function LabelCropper() {
           </>
         )}
         {mode === 'MANUAL' && !file && <p className="rounded-xl bg-ivory px-3 py-2 text-sm text-ink-2">Choose the PDF above — a preview opens with the label area already marked.</p>}
-        {mode === 'MANUAL' && file && <ManualCrop key={`${market}:${file.name}:${file.size}`} file={file} layout={layout} preset={cfg.preset} onDone={(t) => setMsg({ ok: t })} onError={(t) => setMsg({ err: t })} />}
+        {mode === 'MANUAL' && file && <ManualCrop key={`${market}:${file.name}:${file.size}`} file={file} layout={layout} preset={cfg.preset} amazon={market === 'AMAZON'} onDone={(t) => setMsg({ ok: t })} onError={(t) => setMsg({ err: t })} />}
         {msg.ok && <p role="status" className="rounded-xl bg-emerald-50 px-3 py-2 text-sm text-emerald-900">{msg.ok}</p>}
         {msg.err && <p role="alert" className="rounded-xl bg-red-50 px-3 py-2 text-sm text-red-800">{msg.err}</p>}
       </section>
@@ -135,11 +135,26 @@ export function LabelCropper() {
 
 const PREVIEW_W = 520;
 
+/** Text layer of every page, in PDF points (same shape the server uses). */
+async function readPages(doc: { pages: number; get: (n: number) => Promise<unknown> }): Promise<PageText[]> {
+  const out: PageText[] = [];
+  for (let n = 1; n <= doc.pages; n++) {
+    const page = (await doc.get(n)) as { view: number[]; getTextContent: () => Promise<{ items: { str?: string; transform?: number[]; width?: number; height?: number }[] }> };
+    const [x0, y0, x1, y1] = page.view;
+    const tc = await page.getTextContent();
+    out.push({
+      width: x1 - x0, height: y1 - y0,
+      items: tc.items.flatMap((it) => (it.str?.trim() && it.transform ? [{ str: it.str, x: it.transform[4] - x0, y: it.transform[5] - y0, w: it.width ?? 0, h: it.height ?? 0, rotated: Math.abs(it.transform[1]) > 0.01 }] : [])),
+    });
+  }
+  return out;
+}
+
 /** Browser-only manual crop: preview with pdf.js, draw the label box, lay out with the shared composer. */
 /** Standard Flipkart label position on the A4 "invoice_labels" page (points, bottom-left origin). */
 const FLIPKART_LABEL: Box = { x: 186, y: 458, w: 221, h: 359 };
 
-function ManualCrop({ file, layout, preset, onDone, onError }: { file: File; layout: Layout; preset: { box: 'FLIPKART' | 'FULL' | 'TOP_HALF'; apply: Apply }; onDone: (m: string) => void; onError: (m: string) => void }) {
+function ManualCrop({ file, layout, preset, amazon, onDone, onError }: { file: File; layout: Layout; preset: { box: 'FLIPKART' | 'FULL' | 'TOP_HALF'; apply: Apply }; amazon: boolean; onDone: (m: string) => void; onError: (m: string) => void }) {
   const canvas = useRef<HTMLCanvasElement>(null);
   const [doc, setDoc] = useState<{ pages: number; get: (n: number) => Promise<unknown> } | null>(null);
   const [pageNo, setPageNo] = useState(1);
@@ -195,12 +210,19 @@ function ManualCrop({ file, layout, preset, onDone, onError }: { file: File; lay
       // Preview pixels (top-left origin) → PDF points (bottom-left origin).
       const box: Box = { x: view.ox + sel.x / view.scale, y: view.oy + (view.h - sel.y - sel.h) / view.scale, w: sel.w / view.scale, h: sel.h / view.scale };
       const pieces = manualPieces(doc.pages, box, apply);
-      const out = await compose(new Uint8Array(await file.arrayBuffer()), pieces, [], { layout, specialised: false, includeInvoices: false });
+      let withLine = 0;
+      if (amazon) {
+        // Amazon: read each label's invoice page (in the browser) for the item name, SKU and qty line.
+        const found = detect(await readPages(doc));
+        const items = new Map(found.labels.filter((l) => l.marketplace === 'AMAZON').map((l) => [l.page, l.items]));
+        for (const p of pieces) { p.items = items.get(p.page) ?? []; if (p.items.length) withLine++; }
+      }
+      const out = await compose(new Uint8Array(await file.arrayBuffer()), pieces, [], { layout, specialised: false, includeInvoices: false, style: amazon ? 'AMAZON' : 'GENERIC', itemBox: amazon });
       const url = URL.createObjectURL(new Blob([out as BlobPart], { type: 'application/pdf' }));
       const a = document.createElement('a');
       a.href = url; a.download = `${file.name.replace(/\.pdf$/i, '')}-cropped.pdf`; document.body.appendChild(a); a.click(); a.remove();
       setTimeout(() => URL.revokeObjectURL(url), 30_000);
-      onDone(`Done — ${pieces.length} labels cropped. Your download has started.`);
+      onDone(`Done — ${pieces.length} labels cropped${amazon ? ` (item line on ${withLine})` : ''}. Your download has started.`);
     } catch { onError('Could not build the PDF. Try a smaller box or another file.'); }
     setBusy(false);
   }

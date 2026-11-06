@@ -204,6 +204,9 @@ export async function compose(src: Uint8Array | ArrayBuffer, labelsIn: LabelPiec
     if (!withBox) return;
     if (style === 'AMAZON') {
       // Box drawn in the label page's blank band (original cropper: x 50, y 170.2, 520 x 29.8 on the A4 label page).
+      // A manual crop that leaves that band out gets no box rather than one drawn outside the label.
+      const inside = AMZ_BOX.x >= l.box.x - 1 && AMZ_BOX.y >= l.box.y - 1 && AMZ_BOX.x + AMZ_BOX.w <= l.box.x + l.box.w + 1 && AMZ_BOX.y + AMZ_BOX.h <= l.box.y + l.box.h + 1;
+      if (!inside) return;
       const bx = x + (AMZ_BOX.x - l.box.x) * s, by = y + (AMZ_BOX.y - l.box.y) * s, bw = AMZ_BOX.w * s, bh = AMZ_BOX.h * s;
       page.drawRectangle({ x: bx, y: by, width: bw, height: bh, borderColor: rgb(0, 0, 0), borderWidth: Math.max(0.5, s) });
       if (!text) return;

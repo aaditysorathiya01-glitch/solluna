@@ -704,6 +704,26 @@ test('label cropper: Growth auto-crops a Flipkart PDF on the server; manual crop
   const manual = await PDFDocument.load(await (await import('node:fs/promises')).readFile(await mdl.path()));
   assert.equal(manual.getPageCount(), 1, '6 labels → 1 A4 page (6-up)');
   await c.getByText('Done — 6 labels cropped', { exact: false }).waitFor();
+
+  // Amazon manual: label pages + invoice pages; the item line is read from each invoice in the browser.
+  const amz = await PDFDocument.create(); const af = await amz.embedFont(StandardFonts.Helvetica);
+  for (let i = 0; i < 2; i++) {
+    const lp = amz.addPage([595, 842]); lp.drawRectangle({ x: 40, y: 400, width: 500, height: 400, borderWidth: 2 });
+    const ip = amz.addPage([595, 842]); const t = (s, x, y, size = 9) => ip.drawText(s, { x, y, size, font: af });
+    t('Tax Invoice/Bill of Supply/Cash Memo', 310, 814, 14); t('Order Number:', 43, 503, 11); t(`404-123456${i}-1234567`, 126, 503, 11);
+    t('Sl.', 44, 446); t('Description', 58, 440); t('Unit', 345, 446); t('1', 48, 420, 13);
+    t(`Test Floor Cleaner 500 ml Pack of ${i + 1}`, 58, 422); t(`| B0TESTASIN${i} ( AMZ-SKU-${i} )`, 58, 412); t('HSN:38249900', 58, 391); t('TOTAL:', 44, 376);
+  }
+  await c.getByRole('tab', { name: 'Amazon' }).click();
+  await c.check('input[name="crop-mode"][value="MANUAL"]');
+  await c.setInputFiles('#crop-file', { name: 'amazon-labels.pdf', mimeType: 'application/pdf', buffer: Buffer.from(await amz.save()) });
+  await c.getByTestId('crop-surface').waitFor({ timeout: 15000 });
+  assert.equal(await c.locator('#crop-apply').inputValue(), 'ODD', 'Amazon: label pages are the odd pages');
+  await c.waitForTimeout(800);
+  const [adl] = await Promise.all([c.waitForEvent('download'), c.click('button:has-text("Crop and download")')]);
+  await c.getByText('Done — 2 labels cropped (item line on 2)', { exact: false }).waitFor();
+  const amzOut = await PDFDocument.load(await (await import('node:fs/promises')).readFile(await adl.path()));
+  assert.equal(amzOut.getPageCount(), 1, '2 Amazon labels on one A4 page');
 });
 
 test('route guards: signed-out users go to login; customers cannot open ops', async () => {
