@@ -200,10 +200,10 @@ async function asUser(email, password, secret) {
   return p;
 }
 const shot = async (p, name) => { if (SHOTS) await p.screenshot({ path: join(SHOTS, `${name}.png`), fullPage: false }); };
-await check('UI', 'Client dashboard: overview, listings, labels, stock, reports, billing (Riya, Growth)', async () => {
+await check('UI', 'Client dashboard: chat, listings, labels, notifications + approval, reports, billing (Riya, Growth)', async () => {
   const p = await asUser('riya@demo.solluna.co.in', E.CLIENT_PASSWORD);
-  await p.waitForURL(/\/dashboard/, { timeout: 20000 }); await p.locator('main h1').first().waitFor(); await shot(p, 'client-overview');
-  for (const [tab, text, sub] of [['catalog', 'Brass Diya Set of 4', 'Products & listings'], ['labels', '18 orders'], ['inventory', 'RH-JTR-72'], ['reports', 'P&L report'], ['billing', 'GSTIN 24ABCDE1234F1Z6']]) {
+  await p.waitForURL(/\/dashboard/, { timeout: 20000 }); await p.getByRole('region', { name: 'Your account manager' }).waitFor(); await shot(p, 'client-chat');
+  for (const [tab, text, sub] of [['listings', 'Brass Diya Set of 4', 'Products & listings'], ['labels', '18 orders'], ['notifications', 'Needs your approval'], ['reports', 'P&L report'], ['billing', 'GSTIN 24ABCDE1234F1Z6']]) {
     await p.goto(`${BASE}/dashboard?tab=${tab}`); if (sub) await p.getByRole('tab', { name: sub }).click();
     await p.getByText(text, { exact: false }).first().waitFor({ timeout: 15000 }); await shot(p, `client-${tab}`);
   }
@@ -243,16 +243,17 @@ await check('UI', 'New sign-up: plans only → test activation → plan dashboar
   const mgr = p.getByRole('region', { name: 'Your account manager' });
   await mgr.getByText('Assigned within 1 hour', { exact: false }).waitFor({ timeout: 30000 });
   const tabs = (await p.locator('nav[aria-label="Dashboard"] button').allInnerTexts()).map((t) => t.trim().toLowerCase());
-  assert(tabs.includes('labels') && tabs.includes('low stock'), `Growth tabs: ${tabs}`);
+  assert(tabs.join('|') === 'manager chat|listings & mapping|labels|reports|notifications', `Growth tabs: ${tabs}`);
   await shot(p, 'signup-growth-overview');
   await ctx.close();
   return 'plan dashboard + manager promised within 1 hour';
 });
-await check('UI', 'Reseller dashboard hides Growth-only tabs (labels, low stock)', async () => {
+await check('UI', 'Reseller: same five areas; Labels shows the upgrade note', async () => {
   const p = await asUser('amit@demo.solluna.co.in', E.CLIENT_PASSWORD);
   await p.waitForURL(/\/dashboard/, { timeout: 20000 }); await p.locator('nav[aria-label="Dashboard"]').waitFor();
   const tabs = (await p.locator('nav[aria-label="Dashboard"] button').allInnerTexts()).map((t) => t.trim().toLowerCase());
-  assert(!tabs.includes('labels') && !tabs.includes('low stock'), `Reseller tabs: ${tabs}`);
+  assert(tabs.join('|') === 'manager chat|listings & mapping|labels|reports|notifications', `Reseller tabs: ${tabs}`);
+  await p.click('nav[aria-label="Dashboard"] >> text=Labels'); await p.getByText('Shipping labels are included from the Growth plan').waitFor();
   await p.context().close();
 });
 await check('UI', 'Public site shows the preview banner and is hidden from search engines', async () => {

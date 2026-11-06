@@ -123,6 +123,11 @@ async function adminToken() {
 // Emailed links point at APP_URL; open them on the test server instead.
 const local = (link) => link.replace('http://web.invalid', webBase);
 
+async function accountMenu(page, item) {
+  await page.getByRole('button', { name: 'Account menu' }).click();
+  await page.getByRole('menuitem', { name: item }).click();
+}
+
 test('landing page renders live plans and the 28-service comparison', async () => {
   const { page, errors } = await newPage();
   await page.goto(webBase);
@@ -220,10 +225,10 @@ test('register → billing details → GST total → Razorpay checkout → verif
   const opts = await page.evaluate(() => ({ amount: window.__rzpOptions.amount, key: window.__rzpOptions.key, currency: window.__rzpOptions.currency }));
   assert.deepEqual(opts, { amount: 589882, key: KEY_ID, currency: 'INR' }, 'Razorpay charged ₹4,999 + 18% IGST');
 
-  // The plan dashboard opens on the overview with the manager card.
+  // The plan dashboard opens on Manager Chat; only the five work areas are in the menu.
   await page.getByRole('region', { name: 'Your account manager' }).waitFor();
-  assert.equal(await page.locator('nav[aria-label="Dashboard"] >> text=Low stock').count(), 1, 'Growth shows plan tabs');
-  await page.click('nav[aria-label="Dashboard"] >> text=billing');
+  assert.deepEqual(await page.locator('nav[aria-label="Dashboard"] button').allInnerTexts(), ['Manager Chat', 'Listings & Mapping', 'Labels', 'Reports', 'Notifications']);
+  await accountMenu(page, 'Plan & billing');
   await page.click('text=View tax invoice');
   await page.waitForURL(/\/invoices\//);
   const invoice = page.getByRole('article', { name: 'Tax invoice' });
@@ -235,30 +240,23 @@ test('register → billing details → GST total → Razorpay checkout → verif
   await page.screenshot({ path: join(SHOTS, '5-tax-invoice.png'), fullPage: true });
   await page.goBack();
 
-  await page.click('nav[aria-label="Dashboard"] >> text=overview');
-  await page.getByText('Renews').waitFor();
-  assert.ok(await page.getByText('20 / 28').isVisible(), 'Growth includes 20 of 28 services');
+  await page.click('nav[aria-label="Dashboard"] >> text=Manager Chat');
+  await page.getByText('Growth plan · renews', { exact: false }).waitFor();
   assert.deepEqual(errors, []);
 });
 
-test('customer raises an Ads request; out-of-plan services are visibly not included', async () => {
+test('an Ads request (logged for the client) shows up as an update in Notifications', async () => {
   const page = S.customer;
-  await page.click('nav[aria-label="Dashboard"] >> text=services');
-  const premiumCard = page.locator('.card', { hasText: 'Product Research & Suggestions' });
-  assert.ok(await premiumCard.getByText('Not in plan').isVisible());
-  const ads = page.locator('.card', { hasText: 'Ads Management' }).first();
-  assert.ok(await ads.getByText('Included').isVisible());
-  await ads.getByRole('button', { name: 'Request' }).click();
-  await page.fill('#title', 'Launch Sponsored Products for jute rugs');
-  await page.selectOption('#marketplace', 'AMAZON');
-  await page.fill('#notes', 'Focus on 3 hero SKUs, target ACOS under 30%');
-  await page.click('button:has-text("Submit request")');
-  await page.getByText('Request received. Your manager has been notified.').waitFor();
-  await page.click('text=Launch Sponsored Products for jute rugs');
-  await page.getByText('Review eligibility, prepare campaign structure, budget and targeting').waitFor();
-  await page.getByText('**Request:**', { exact: false }).count(); // raw markdown must not leak
-  assert.equal(await page.getByText('**', { exact: false }).count(), 0);
-  await page.screenshot({ path: join(SHOTS, '2-dashboard-request.png'), fullPage: true });
+  const r = await page.request.post(`${webBase}/api/requests`, { data: { featureKey: 'ADS_MANAGEMENT', title: 'Launch Sponsored Products for jute rugs', marketplace: 'AMAZON', details: { notes: 'Focus on 3 hero SKUs, target ACOS under 30%' } } });
+  assert.equal(r.status(), 201);
+  await page.click('nav[aria-label="Dashboard"] >> text=Notifications');
+  await page.getByText('Request received: Launch Sponsored Products for jute rugs').waitFor();
+  await page.getByRole('tab', { name: 'Tickets' }).click();
+  assert.equal(await page.getByText('Request received: Launch Sponsored Products').count(), 0, 'filters by category');
+  await page.getByRole('tab', { name: 'Ads, promotions & requests' }).click();
+  await page.getByText('Request received: Launch Sponsored Products for jute rugs').waitFor();
+  assert.equal(await page.getByText('**', { exact: false }).count(), 0, 'raw markdown must not leak');
+  await page.screenshot({ path: join(SHOTS, '2-notifications.png'), fullPage: true });
 });
 
 test('staff executes the task in Ops with the skill procedure; client approves the budget', async () => {
@@ -294,9 +292,10 @@ test('staff executes the task in Ops with the skill procedure; client approves t
 
   const c = S.customer;
   await c.reload();
-  await c.click('nav[aria-label="Dashboard"] >> text=approvals');
-  await c.getByText('dailyBudgetInr').waitFor();
-  assert.ok(await c.getByText('750').isVisible());
+  await c.click('nav[aria-label="Dashboard"] >> text=Notifications');
+  const approval = c.getByRole('region', { name: 'Needs your approval' });
+  await approval.getByText('Daily budget (₹)').waitFor();
+  assert.ok(await approval.getByText('750').isVisible());
   await c.screenshot({ path: join(SHOTS, '4-approval.png'), fullPage: true });
   await c.click('button:has-text("Approve")');
   await c.getByText('Approved. Your manager has been notified.').waitFor();
@@ -356,7 +355,7 @@ test('Manager Chat Support: live two-way chat, attachments, internal notes, read
   assert.ok(Buffer.from(await res.body()).equals(PDF));
 
   // Documents tab: upload, list, unsafe file rejected.
-  await c.click('nav[aria-label="Dashboard"] >> text=documents');
+  await accountMenu(c, 'Documents');
   await c.setInputFiles('#doc-file', { name: 'GST certificate.pdf', mimeType: 'application/pdf', buffer: PDF });
   await c.selectOption('#doc-kind', 'GST_CERT');
   await c.click('button:has-text("Upload")');
@@ -394,7 +393,7 @@ test('monthly reporting: staff inputs → client costs & expenses → P&L publis
   // Client provides costs + expenses, confirms.
   const c = S.customer;
   await c.goto(`${webBase}/dashboard?tab=reports`);
-  await c.getByRole('heading', { name: 'Reports' }).waitFor();
+  await c.getByRole('heading', { name: 'Reports', exact: true }).waitFor();
   await c.fill('#period', '2026-10');
   for (const [sku, cost] of [['JR-01', '400'], ['JR-02', '300']]) {
     await c.fill('#c-sku', sku); await c.fill('#c-cost', cost); await c.fill('#c-from', '2026-10-01');
@@ -514,11 +513,7 @@ test('forgot password → emailed link → new password → old password stops w
 test('client: onboarding checklist, marketplace details (no passwords), product → listing request, support ticket, email verification', async () => {
   const c = S.customer;
   await c.goto(`${webBase}/dashboard`);
-  const checklist = c.getByRole('region', { name: 'Onboarding checklist' });
-  await checklist.waitFor();
-  assert.ok(await checklist.getByText('Amazon / Flipkart seller details').isVisible());
-
-  await c.click('nav[aria-label="Dashboard"] >> text=catalog');
+  await c.click('nav[aria-label="Dashboard"] >> text=Listings & Mapping');
   await c.getByText('We never need your password or OTP.').waitFor();
   await c.fill('#AMAZON-store', 'Riya Lifestyle'); await c.fill('#AMAZON-sid', 'A2RIYA12345');
   await c.locator('form:has(#AMAZON-store) button:has-text("Save")').click();
@@ -541,17 +536,21 @@ test('client: onboarding checklist, marketplace details (no passwords), product 
   await c.getByText('Flipkart: request received', { exact: false }).waitFor();
   await c.screenshot({ path: join(SHOTS, '10-catalog.png'), fullPage: true });
 
-  await c.click('nav[aria-label="Dashboard"] >> text=tickets');
-  await c.click('button:has-text("New ticket")');
-  await c.selectOption('#t-cat', 'SHIPPING_LABELS');
-  await c.fill('#t-sub', 'Label missing for order 171-001');
-  await c.fill('#t-desc', 'Order 171-0011223 has no label in today’s batch.');
-  await c.selectOption('#t-pri', 'P2');
-  await c.click('button:has-text("Create ticket")');
-  await c.getByText('Ticket #', { exact: false }).first().waitFor();
-  await c.getByText('Label missing for order 171-001').waitFor();
+  // Tickets are raised with the manager; their updates arrive in Notifications.
+  const tk = await c.request.post(`${webBase}/api/tickets`, { data: { category: 'SHIPPING_LABELS', subject: 'Label missing for order 171-001', description: 'Order 171-0011223 has no label in today’s batch.', priority: 'P2' } });
+  assert.equal(tk.status(), 201);
+  await c.click('nav[aria-label="Dashboard"] >> text=Notifications');
+  await c.getByRole('tab', { name: 'Tickets' }).click();
+  await c.getByText(/Ticket #\d+ received/).first().waitFor();
 
-  await c.click('nav[aria-label="Dashboard"] >> text=settings');
+  // Reports: ask SOLLUNA to send the month's pack to the client's CA.
+  await c.click('nav[aria-label="Dashboard"] >> text=Reports');
+  await c.click('button:has-text("Request CA pack")');
+  await c.fill('#caEmail', 'ca@firm.test');
+  await c.click('button:has-text("Send request")');
+  await c.getByText('Request sent. Your manager will prepare the', { exact: false }).waitFor();
+
+  await accountMenu(c, 'Settings');
   await c.click('button:has-text("Send verification email")');
   const vlink = await c.getByRole('link', { name: 'open verification link' }).getAttribute('href');
   await c.goto(webBase + vlink);
@@ -614,8 +613,8 @@ test('ops workspace: verify marketplace with evidence, mark listing live, publis
   await c.goto(`${webBase}/dashboard?tab=catalog`);
   await c.click('button[role="tab"]:has-text("Products & listings")');
   await c.getByRole('link', { name: 'View live' }).first().waitFor();
-  await c.goto(`${webBase}/dashboard?tab=tickets`);
-  await c.locator('button:has-text("Label missing for order 171-001")').getByText('Resolved').waitFor();
+  await c.goto(`${webBase}/dashboard?tab=notifications`);
+  await c.getByText(/Ticket #\d+: Resolved/).first().waitFor();
   assert.deepEqual(errors, []);
 });
 

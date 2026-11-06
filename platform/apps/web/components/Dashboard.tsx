@@ -5,20 +5,15 @@ import { api, ApiError, inr, SECTIONS, SECTION_LABEL } from '@/lib/api';
 import { loadRazorpay } from '@/lib/razorpay';
 import Link from 'next/link';
 import { Logo } from './Logo';
-import { Markdownish } from './Markdownish';
 import { ChatPanel, DocumentsPanel } from './Chat';
 import { ClientReporting } from './Reporting';
 import { ClientCatalog } from './ClientCatalog';
-import { ClientFulfilment, ClientInventory } from './Fulfilment';
-import { ClientTickets } from './Tickets';
+import { ClientFulfilment } from './Fulfilment';
 import { AccountSettings, type MeFull } from './Settings';
 
 type Me = MeFull;
-interface Onboarding { complete: boolean; steps: { key: string; label: string; done: boolean; tab: string }[] }
 interface Feature { key: string; label: string; section: string; skill: string; enabled: boolean; limit: number | null; used: number | null; access: string; remaining: number | null; meta: { mode?: string } | null }
 interface Catalog { plan: { code: string; name: string; status: string; currentPeriodEnd: string } | null; subscriptionVerified: boolean | null; features: Feature[] }
-interface TaskLite { id: string; title: string; status: string; skill: string; stepKey: string; blocker: string | null }
-interface Req { id: string; title: string; featureKey: string; status: string; entitlement: string; marketplace: string | null; createdAt: string; tasks: TaskLite[] }
 interface Approval { id: string; actionType: string; parameters: Record<string, unknown>; status: string; createdAt: string; task: { title: string; requestId: string } | null }
 interface BillingProfile { legalName: string; gstin: string | null; address: string | null; city: string | null; pincode: string | null; stateCode: string | null }
 interface Billing {
@@ -37,49 +32,53 @@ interface Plan { code: string; name: string; pricePaise: number; features: PlanF
 interface ChatSummary { managerPending: { assignBy: string } | null; managers: { id: string; name: string; staffRole: string }[]; messages: { id: string; body: string; senderType: string; createdAt: string; sender: { id: string; name: string } }[] }
 interface Notification { id: string; title: string; body: string; createdAt: string; readAt: string | null }
 
-const TABS = ['overview', 'services', 'requests', 'approvals', 'catalog', 'labels', 'inventory', 'tickets', 'chat', 'reports', 'documents', 'billing', 'settings'] as const;
-type Tab = (typeof TABS)[number];
+/** Client navigation: five work areas. Settings, plan & billing and documents live in the account menu (top right). */
+const TABS = ['chat', 'listings', 'labels', 'reports', 'notifications'] as const;
+const MENU = ['settings', 'billing', 'documents'] as const;
+type Tab = (typeof TABS)[number] | (typeof MENU)[number];
+const ALL: readonly string[] = [...TABS, ...MENU];
+/** Older links (?tab=overview, catalog, approvals …) still land somewhere sensible. */
+const ALIAS: Record<string, Tab> = { overview: 'chat', services: 'chat', requests: 'notifications', approvals: 'notifications', tickets: 'notifications', inventory: 'notifications', catalog: 'listings' };
+const TAB_LABEL: Record<Tab, string> = { chat: 'Manager Chat', listings: 'Listings & Mapping', labels: 'Labels', reports: 'Reports', notifications: 'Notifications', settings: 'Settings', billing: 'Plan & billing', documents: 'Documents' };
+const toTab = (p: string | null): Tab => (p && ALL.includes(p) ? (p as Tab) : (p && ALIAS[p]) || 'chat');
 
 export { Status, human } from './ui';
-import { Status, human, NotificationBell } from './ui';
+import { Status, human } from './ui';
 import { CONTACT } from './Site';
 
 export function Dashboard() {
   const router = useRouter();
   const params = useSearchParams();
-  const [tab, setTab] = useState<Tab>((TABS as readonly string[]).includes(params.get('tab') ?? '') ? (params.get('tab') as Tab) : 'overview');
+  const [tab, setTab] = useState<Tab>(toTab(params.get('tab')));
   const [me, setMe] = useState<Me | null>(null);
   const [catalog, setCatalog] = useState<Catalog | null>(null);
-  const [requests, setRequests] = useState<Req[]>([]);
   const [approvals, setApprovals] = useState<Approval[]>([]);
   const [billing, setBilling] = useState<Billing | null>(null);
   const [plans, setPlans] = useState<Plan[]>([]);
-  const [notes, setNotes] = useState<Notification[]>([]);
   const [flash, setFlash] = useState<{ kind: 'ok' | 'err'; text: string } | null>(null);
-  const [requestFor, setRequestFor] = useState<Feature | null>(null);
-  const [onboarding, setOnboarding] = useState<Onboarding | null>(null);
   const [chat, setChat] = useState<ChatSummary | null>(null);
+  const [unread, setUnread] = useState(0);
 
+  const refreshUnread = useCallback(() => api<{ count: number }>('/notifications/unread-count').then((r) => setUnread(r.count)).catch(() => undefined), []);
   const load = useCallback(async () => {
     try {
       const m = await api<Me>('/auth/me');
       if (m.user.type === 'STAFF') { router.replace('/ops'); return; }
       setMe(m);
-      const [c, r, a, b, p, n, o] = await Promise.all([
-        api<Catalog>('/features'), api<Req[]>('/requests'), api<Approval[]>('/approvals'), api<Billing>('/billing'), api<Plan[]>('/plans'), api<Notification[]>('/notifications'), api<Onboarding>('/onboarding'),
-      ]);
-      setCatalog(c); setRequests(r); setApprovals(a); setBilling(b); setPlans(p); setNotes(n); setOnboarding(o);
+      const [c, a, b, p] = await Promise.all([api<Catalog>('/features'), api<Approval[]>('/approvals'), api<Billing>('/billing'), api<Plan[]>('/plans')]);
+      setCatalog(c); setApprovals(a); setBilling(b); setPlans(p);
       if (c.plan) setChat(await api<ChatSummary>('/chat').catch(() => null));
+      refreshUnread();
     } catch (e) {
       if ((e as ApiError).status === 401) router.replace('/login');
       else setFlash({ kind: 'err', text: (e as Error).message });
     }
-  }, [router]);
+  }, [router, refreshUnread]);
 
   useEffect(() => { load(); }, [load]);
+  useEffect(() => { const t = setInterval(refreshUnread, 60_000); return () => clearInterval(t); }, [refreshUnread]);
 
   const pendingApprovals = approvals.filter((a) => a.status === 'REQUESTED');
-  const openRequests = requests.filter((r) => !['COMPLETED', 'CANCELLED', 'PARTIALLY_COMPLETED'].includes(r.status));
 
   async function logout() { await api('/auth/logout', { method: 'POST' }); router.replace('/login'); }
 
@@ -89,28 +88,25 @@ export function Dashboard() {
 
   const hasPlan = Boolean(catalog.plan);
   const allowed = (k: string) => catalog.features.some((f) => f.key === k && (f.access === 'ALLOWED' || f.access === 'LIMIT_REACHED'));
-  // Before the first plan: plans only. After a plan has lapsed: renew, plus read access to past work.
+  // Before the first plan: plans only. After a plan has lapsed: renew, plus read access to past reports and updates.
   const lapsed = !hasPlan && billing.subscriptions.some((x) => ['ACTIVE', 'GRACE_PERIOD', 'PAST_DUE', 'EXPIRED', 'CANCELLED'].includes(x.status) && x.currentPeriodEnd);
-  const visible: Tab[] = hasPlan
-    ? TABS.filter((t) => (t === 'labels' ? allowed('SHIPPING_LABEL_GENERATION') || allowed('PERSONALIZED_THANK_YOU_NOTES') : t === 'inventory' ? allowed('LOW_STOCK_ALERTS') : true))
-    : lapsed ? ['overview', 'chat', 'reports', 'documents', 'billing', 'settings'] : [];
-  const current: Tab = visible.includes(tab) ? tab : 'overview';
-  const go = (t: Tab) => { setTab(t); window.history.replaceState(null, '', `?tab=${t}`); };
+  const visible: Tab[] = hasPlan ? [...TABS] : lapsed ? ['reports', 'notifications'] : [];
+  const menu: Tab[] = hasPlan || lapsed ? [...MENU] : [];
+  const reachable = [...visible, ...menu];
+  const current: Tab | null = reachable.includes(tab) ? tab : hasPlan ? 'chat' : null;
+  const go = (t: Tab) => { setTab(t); window.history.replaceState(null, '', `?tab=${t}`); if (t === 'notifications') refreshUnread(); };
   const header = (
     <header className="border-b border-ink/10 bg-white">
       <div className="mx-auto flex max-w-6xl items-center justify-between px-4 py-4 sm:px-6">
         <Logo />
-        <div className="flex items-center gap-3 text-sm">
-          <span className="hidden text-ink-3 sm:inline">{me.organization?.brandName ?? me.organization?.legalName}</span>
-          {visible.length > 0 && <NotificationBell />}
-          <button className="btn-ghost py-1.5" onClick={logout}>Sign out</button>
-        </div>
+        <AccountMenu name={me.organization?.brandName ?? me.organization?.legalName ?? me.user.name} items={menu} labels={TAB_LABEL} onPick={go} onLogout={logout} />
       </div>
       {visible.length > 0 && (
         <nav className="mx-auto flex max-w-6xl gap-1 overflow-x-auto px-4 sm:px-6" aria-label="Dashboard">
           {visible.map((t) => (
-            <button key={t} onClick={() => go(t)} className={`relative whitespace-nowrap px-3 py-3 text-sm font-medium capitalize ${current === t ? 'text-ink' : 'text-ink-3 hover:text-ink'}`}>
-              {TAB_LABEL[t] ?? t}{t === 'approvals' && pendingApprovals.length > 0 && <span className="ml-1.5 chip bg-sun text-ink">{pendingApprovals.length}</span>}
+            <button key={t} onClick={() => go(t)} aria-current={current === t ? 'page' : undefined} className={`relative whitespace-nowrap px-3 py-3 text-sm font-medium ${current === t ? 'text-ink' : 'text-ink-3 hover:text-ink'}`}>
+              {TAB_LABEL[t]}
+              {t === 'notifications' && unread + pendingApprovals.length > 0 && <span className="ml-1.5 chip bg-sun text-ink">{unread + pendingApprovals.length}</span>}
               {current === t && <span className="absolute inset-x-2 bottom-0 h-0.5 rounded bg-sun" />}
             </button>
           ))}
@@ -124,7 +120,7 @@ export function Dashboard() {
     </div>
   );
 
-  if (!hasPlan && (current === 'overview' || !lapsed)) {
+  if (!current) {
     return (
       <div className="min-h-screen">
         {header}
@@ -133,7 +129,7 @@ export function Dashboard() {
           <PlanPicker
             firstName={me.user.name.split(' ')[0]} billing={billing} plans={plans} preselect={params.get('plan')} lapsed={lapsed}
             verifying={catalog.subscriptionVerified === null}
-            onDone={(m, activated) => { setFlash(m); if (activated) go('overview'); load(); }}
+            onDone={(m, activated) => { setFlash(m); if (activated) go('chat'); load(); }}
           />
         </main>
       </div>
@@ -141,9 +137,6 @@ export function Dashboard() {
   }
 
   const manager = chat?.managers[0] ?? null;
-  const managerNote = manager ? [...(chat?.messages ?? [])].reverse().find((x) => x.senderType === 'STAFF' && x.sender.id === manager.id) : undefined;
-  const included = catalog.features.filter((f) => f.access === 'ALLOWED' || f.access === 'LIMIT_REACHED');
-  const locked = catalog.features.filter((f) => !(f.access === 'ALLOWED' || f.access === 'LIMIT_REACHED'));
 
   return (
     <div className="min-h-screen">
@@ -151,157 +144,43 @@ export function Dashboard() {
       <main className="mx-auto max-w-6xl px-4 py-8 sm:px-6">
         {flashBox}
 
-        {current === 'overview' && catalog.plan && (
-          <div className="space-y-6">
-            <h1 className="font-display text-3xl">Welcome, {me.user.name.split(' ')[0]}</h1>
-            <div className="grid gap-4 lg:grid-cols-3">
-              <section className="card p-6 lg:col-span-2" aria-label="Your account manager">
-                {manager ? (
-                  <>
-                    <div className="flex items-center gap-4">
-                      <span className="flex h-12 w-12 shrink-0 items-center justify-center rounded-full bg-ink font-display text-lg text-sun-2" aria-hidden>{manager.name.split(' ').map((w) => w[0]).slice(0, 2).join('')}</span>
-                      <div><p className="label !mb-0">Your account manager</p><p className="font-display text-xl">{manager.name}</p><p className="text-xs text-ink-3">{human(manager.staffRole)} · Mon–Sat, 10 AM–7 PM IST</p></div>
-                    </div>
-                    {managerNote && <p className="mt-4 line-clamp-6 whitespace-pre-line rounded-xl bg-ivory p-4 text-sm text-ink-2">{managerNote.body}</p>}
-                    <button className="btn-primary mt-4" onClick={() => go('chat')}>{managerNote ? `Reply to ${manager.name.split(' ')[0]}` : `Message ${manager.name.split(' ')[0]}`}</button>
-                  </>
-                ) : (
-                  <>
-                    <p className="label">Your account manager</p>
-                    <p className="font-display text-xl">Assigned within 1 hour</p>
-                    <p className="mt-1 text-sm text-ink-3">
-                      Your dedicated manager is being assigned{chat?.managerPending ? ` (by ${new Date(chat.managerPending.assignBy).toLocaleTimeString('en-IN', { hour: 'numeric', minute: '2-digit' })})` : ''} and will message you in Manager chat. We will notify you here.
-                    </p>
-                  </>
-                )}
-              </section>
-              <section className="card p-6" aria-label="Your plan">
-                <p className="label">Your plan</p>
-                <p className="font-display text-2xl">{catalog.plan.name}</p>
-                <p className="mt-1 text-xs text-ink-3">Renews {new Date(catalog.plan.currentPeriodEnd).toLocaleDateString('en-IN', { dateStyle: 'medium' })}</p>
-                <p className="mt-4 text-sm">Services included <strong>{included.length} / 28</strong></p>
-                {['NEW_LISTING_AMAZON', 'NEW_LISTING_FLIPKART'].map((k) => {
-                  const f = catalog.features.find((x) => x.key === k)!;
-                  return <p key={k} className="mt-1 text-sm text-ink-2">{f.label.replace('New ', '').replace(' / Month', '')}: <strong>{f.limit === null ? `${f.used ?? 0} used · Unlimited` : `${f.used ?? 0} of ${f.limit} used`}</strong></p>;
-                })}
-                <button className="btn-ghost mt-4 py-1.5 text-xs" onClick={() => go('billing')}>Manage plan</button>
-              </section>
-            </div>
-            {pendingApprovals.length > 0 && (
-              <button className="card flex w-full items-center justify-between gap-4 p-5 text-left ring-2 ring-sun" onClick={() => go('approvals')}>
-                <span><span className="font-semibold">{pendingApprovals.length} item{pendingApprovals.length > 1 ? 's' : ''} need{pendingApprovals.length > 1 ? '' : 's'} your approval</span><span className="block text-xs text-ink-3">Nothing is spent or changed until you approve.</span></span>
-                <span className="btn-gold py-1.5 text-xs">Review</span>
-              </button>
-            )}
-            {onboarding && !onboarding.complete && (
-              <section className="card p-6" aria-label="Onboarding checklist">
-                <div className="flex flex-wrap items-center justify-between gap-2"><h2 className="font-semibold">Finish setting up</h2><span className="text-sm text-ink-3">{onboarding.steps.filter((x) => x.done).length} of {onboarding.steps.length} done</span></div>
-                <div className="mt-3 h-1.5 overflow-hidden rounded-full bg-ink/5"><div className="h-full bg-sun" style={{ width: `${(onboarding.steps.filter((x) => x.done).length / onboarding.steps.length) * 100}%` }} /></div>
-                <ul className="mt-4 grid gap-2 sm:grid-cols-2">
-                  {onboarding.steps.map((st) => (
-                    <li key={st.key}>
-                      <button className="flex w-full items-center gap-3 rounded-xl px-3 py-2 text-left text-sm hover:bg-ivory" onClick={() => go((visible.includes(st.tab as Tab) ? st.tab : 'overview') as Tab)} disabled={st.done}>
-                        <span className={`flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-[11px] ${st.done ? 'bg-emerald-600 text-white' : 'border border-ink/25'}`}>{st.done ? '✓' : ''}</span>
-                        <span className={st.done ? 'text-ink-3 line-through' : ''}>{st.label}</span>
-                      </button>
-                    </li>
-                  ))}
-                </ul>
-              </section>
-            )}
-            <div className="grid gap-4 sm:grid-cols-2">
-              <Stat label="Open requests" value={String(openRequests.length)} />
-              <Stat label="Awaiting your approval" value={String(pendingApprovals.length)} highlight={pendingApprovals.length > 0} />
-            </div>
-            <section className="card p-6">
-              <h2 className="font-semibold">Recent updates</h2>
-              <ul className="mt-4 divide-y divide-ink/5">
-                {notes.slice(0, 6).map((n) => (
-                  <li key={n.id} className="py-3"><p className="text-sm font-medium">{n.title}</p><p className="mt-0.5 line-clamp-2 whitespace-pre-line text-xs text-ink-3">{n.body.replace(/\*\*/g, '')}</p></li>
-                ))}
-                {!notes.length && <li className="py-3 text-sm text-ink-3">No updates yet.</li>}
-              </ul>
+        {current === 'chat' && (
+          <div className="space-y-4">
+            <section className="card flex flex-wrap items-center justify-between gap-4 p-5" aria-label="Your account manager">
+              {manager ? (
+                <div className="flex items-center gap-4">
+                  <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-ink font-display text-base text-sun-2" aria-hidden>{manager.name.split(' ').map((w) => w[0]).slice(0, 2).join('')}</span>
+                  <div><p className="label !mb-0">Your account manager</p><p className="font-display text-lg">{manager.name}</p><p className="text-xs text-ink-3">{human(manager.staffRole)} · Mon–Sat, 10 AM–7 PM IST</p></div>
+                </div>
+              ) : (
+                <div>
+                  <p className="label !mb-0">Your account manager</p>
+                  <p className="font-display text-lg">Assigned within 1 hour</p>
+                  <p className="text-xs text-ink-3">Your dedicated manager is being assigned{chat?.managerPending ? ` (by ${new Date(chat.managerPending.assignBy).toLocaleTimeString('en-IN', { hour: 'numeric', minute: '2-digit' })})` : ''} and will message you here.</p>
+                </div>
+              )}
+              {catalog.plan && <button className="chip bg-ivory px-3 py-1 text-ink-2" onClick={() => go('billing')}>{catalog.plan.name} plan · renews {new Date(catalog.plan.currentPeriodEnd).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })}</button>}
+            </section>
+            <ChatPanel mode="client" />
+          </div>
+        )}
+        {current === 'listings' && <ClientCatalog />}
+        {current === 'labels' && (allowed('SHIPPING_LABEL_GENERATION') || allowed('PERSONALIZED_THANK_YOU_NOTES') ? <ClientFulfilment /> : (
+          <div className="space-y-4">
+            <h1 className="font-display text-3xl">Labels</h1>
+            <section className="card p-6" aria-label="Labels not in plan">
+              <p className="font-semibold">Shipping labels are included from the Growth plan</p>
+              <p className="mt-1 text-sm text-ink-3">On Growth, your manager generates your Amazon and Flipkart labels every day and you download print-ready files here.</p>
+              <button className="btn-gold mt-4" onClick={() => go('billing')}>See plans</button>
             </section>
           </div>
-        )}
-
-        {current === 'services' && (
-          <div className="space-y-8">
-            <div><h1 className="font-display text-3xl">Your services</h1><p className="mt-1 text-sm text-ink-3">Everything in your {catalog.plan?.name} plan. Each service is delivered by a SOLLUNA specialist following a documented operating procedure.</p></div>
-            {SECTIONS.map((sec) => {
-              const list = included.filter((f) => f.section === sec);
-              if (!list.length) return null;
-              return (
-                <section key={sec}>
-                  <h2 className="label">{SECTION_LABEL[sec]}</h2>
-                  <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-                    {list.map((f) => (
-                      <div key={f.key} className="card flex flex-col p-5">
-                        <div className="flex items-start justify-between gap-2">
-                          <h3 className="text-sm font-semibold">{f.label}</h3>
-                          {f.access === 'ALLOWED' ? <span className="chip bg-emerald-50 text-emerald-800">Included</span> : <span className="chip bg-amber-50 text-amber-800">Limit used</span>}
-                        </div>
-                        {f.limit !== null && f.enabled && <p className="mt-1 text-xs text-ink-3">{f.used ?? 0} of {f.limit} used this month</p>}
-                        {f.meta?.mode && <p className="mt-1 text-xs text-ink-3">{human(f.meta.mode)}</p>}
-                        <button className="btn-ghost mt-4 self-start py-1.5 text-xs" onClick={() => setRequestFor(f)}>Request</button>
-                      </div>
-                    ))}
-                  </div>
-                </section>
-              );
-            })}
-            {locked.length > 0 && (
-              <section aria-label="Available on higher plans">
-                <div className="flex flex-wrap items-end justify-between gap-2"><h2 className="label">Available on higher plans</h2><button className="text-xs font-semibold underline" onClick={() => go('billing')}>Compare plans</button></div>
-                <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-                  {locked.map((f) => (
-                    <div key={f.key} className="card flex items-start justify-between gap-2 p-5 opacity-70">
-                      <h3 className="text-sm font-semibold">{f.label}</h3><span className="chip bg-ink/5 text-ink-3">Not in plan</span>
-                    </div>
-                  ))}
-                </div>
-              </section>
-            )}
-          </div>
-        )}
-
-        {current === 'requests' && <Requests requests={requests} onNew={() => go('services')} />}
-
-        {current === 'approvals' && (
-          <div className="space-y-4">
-            <h1 className="font-display text-3xl">Approvals</h1>
-            <p className="text-sm text-ink-3">SOLLUNA never spends your money, changes prices or shares your data without your explicit approval of the exact parameters below.</p>
-            {approvals.map((a) => (
-              <div key={a.id} className="card p-5">
-                <div className="flex flex-wrap items-center justify-between gap-2"><h3 className="font-semibold">{a.task?.title ?? human(a.actionType)}</h3><Status s={a.status} /></div>
-                <p className="mt-1 text-xs uppercase tracking-wider text-ink-3">{human(a.actionType)}</p>
-                <dl className="mt-3 grid gap-x-6 gap-y-1 text-sm sm:grid-cols-2">
-                  {Object.entries(a.parameters).map(([k, v]) => <div key={k} className="flex justify-between gap-3 border-b border-ink/5 py-1"><dt className="text-ink-3">{k}</dt><dd className="font-medium">{String(v)}</dd></div>)}
-                </dl>
-                {a.status === 'REQUESTED' && (
-                  <div className="mt-4 flex gap-2">
-                    <button className="btn-primary" onClick={() => decide(a.id, 'APPROVED')}>Approve</button>
-                    <button className="btn-ghost" onClick={() => decide(a.id, 'DECLINED')}>Decline</button>
-                  </div>
-                )}
-              </div>
-            ))}
-            {!approvals.length && <p className="card p-6 text-sm text-ink-3">Nothing needs your approval.</p>}
-          </div>
-        )}
-
-        {current === 'catalog' && <ClientCatalog />}
-        {current === 'labels' && <ClientFulfilment />}
-        {current === 'inventory' && <ClientInventory />}
-        {current === 'tickets' && <ClientTickets />}
+        ))}
+        {current === 'reports' && <div className="space-y-8">{hasPlan && <CaRequest onDone={setFlash} />}<ClientReporting /></div>}
+        {current === 'notifications' && <NotificationsCenter approvals={pendingApprovals} onDecide={decide} onRead={refreshUnread} />}
         {current === 'settings' && <AccountSettings me={me} onDone={(m) => { setFlash(m); api<Me>('/auth/me').then(setMe).catch(() => undefined); }} />}
-        {current === 'chat' && <ChatPanel mode="client" />}
-        {current === 'reports' && <ClientReporting />}
         {current === 'documents' && <div className="space-y-4"><h1 className="font-display text-3xl">Documents</h1><DocumentsPanel myId={me.user.id} /></div>}
         {current === 'billing' && <BillingTab billing={billing} plans={plans} current={catalog.plan?.code} preselect={params.get('plan')} onDone={(m) => { setFlash(m); load(); }} />}
       </main>
-
-      {requestFor && <RequestModal feature={requestFor} onClose={() => setRequestFor(null)} onCreated={(msg) => { setRequestFor(null); setFlash({ kind: 'ok', text: msg }); go('requests'); load(); }} />}
     </div>
   );
 
@@ -314,7 +193,127 @@ export function Dashboard() {
   }
 }
 
-const TAB_LABEL: Partial<Record<Tab, string>> = { chat: 'Manager chat', inventory: 'Low stock', labels: 'Labels' };
+function AccountMenu({ name, items, labels, onPick, onLogout }: { name: string; items: Tab[]; labels: Record<Tab, string>; onPick: (t: Tab) => void; onLogout: () => void }) {
+  const [open, setOpen] = useState(false);
+  useEffect(() => {
+    if (!open) return;
+    const close = () => setOpen(false);
+    window.addEventListener('click', close);
+    return () => window.removeEventListener('click', close);
+  }, [open]);
+  return (
+    <div className="relative" onClick={(e) => e.stopPropagation()}>
+      <button className="btn-ghost gap-2 py-1.5" aria-haspopup="menu" aria-expanded={open} aria-label="Account menu" onClick={() => setOpen(!open)}>
+        <span className="max-w-[40vw] truncate">{name}</span>
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden><path d="m6 9 6 6 6-6" /></svg>
+      </button>
+      {open && (
+        <div role="menu" className="absolute right-0 z-40 mt-2 w-52 overflow-hidden rounded-2xl border border-ink/10 bg-white py-1 shadow-xl">
+          {items.map((t) => <button key={t} role="menuitem" className="block w-full px-4 py-2.5 text-left text-sm hover:bg-ivory" onClick={() => { setOpen(false); onPick(t); }}>{labels[t]}</button>)}
+          <button role="menuitem" className="block w-full border-t border-ink/10 px-4 py-2.5 text-left text-sm hover:bg-ivory" onClick={onLogout}>Sign out</button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+const NOTE_GROUPS: [string, string, (type: string) => boolean][] = [
+  ['all', 'All', () => true],
+  ['tickets', 'Tickets', (t) => t.startsWith('ticket.')],
+  ['work', 'Ads, promotions & requests', (t) => /^(request|task|approval)\./.test(t)],
+  ['listings', 'Listings', (t) => /^(listing|mapping|marketplace)\./.test(t)],
+  ['labels', 'Labels & stock', (t) => /^(labels|stock|thank_you)\./.test(t)],
+  ['account', 'Plan & account', (t) => /^(subscription|payment|manager|chat|report|announcement|account)\./.test(t)],
+];
+
+function NotificationsCenter({ approvals, onDecide, onRead }: { approvals: Approval[]; onDecide: (id: string, d: 'APPROVED' | 'DECLINED') => void; onRead: () => void }) {
+  const [items, setItems] = useState<(Notification & { type: string })[] | null>(null);
+  const [group, setGroup] = useState('all');
+  const load = useCallback(() => api<(Notification & { type: string })[]>('/notifications').then(setItems).catch(() => setItems([])), []);
+  useEffect(() => { load(); }, [load]);
+  const test = NOTE_GROUPS.find((g) => g[0] === group)![2];
+  const shown = (items ?? []).filter((n) => test(n.type));
+  async function readAll() { await api('/notifications/read-all', { method: 'POST' }); await load(); onRead(); }
+  async function readOne(n: Notification) { if (n.readAt) return; await api(`/notifications/${n.id}/read`, { method: 'POST' }); await load(); onRead(); }
+  return (
+    <div className="space-y-6">
+      <div className="flex flex-wrap items-end justify-between gap-3">
+        <div><h1 className="font-display text-3xl">Notifications</h1><p className="mt-1 text-sm text-ink-3">Updates on your tickets, ads, promotions, listings and labels.</p></div>
+        {(items ?? []).some((n) => !n.readAt) && <button className="btn-ghost py-1.5 text-xs" onClick={readAll}>Mark all read</button>}
+      </div>
+      {approvals.length > 0 && (
+        <section className="space-y-3" aria-label="Needs your approval">
+          <h2 className="label">Needs your approval</h2>
+          {approvals.map((a) => (
+            <div key={a.id} className="card p-5 ring-2 ring-sun">
+              <div className="flex flex-wrap items-center justify-between gap-2"><h3 className="font-semibold">{a.task?.title ?? human(a.actionType)}</h3><span className="text-xs uppercase tracking-wider text-ink-3">{human(a.actionType)}</span></div>
+              <dl className="mt-3 grid gap-x-6 gap-y-1 text-sm sm:grid-cols-2">
+                {Object.entries(a.parameters).map(([k, v]) => <div key={k} className="flex justify-between gap-3 border-b border-ink/5 py-1"><dt className="text-ink-3">{human(k.replace(/([a-z])([A-Z])/g, '$1_$2')).replace(/ inr$/, ' (₹)')}</dt><dd className="font-medium">{String(v)}</dd></div>)}
+              </dl>
+              <p className="mt-3 text-xs text-ink-3">Nothing is spent or changed until you approve.</p>
+              <div className="mt-3 flex gap-2"><button className="btn-primary" onClick={() => onDecide(a.id, 'APPROVED')}>Approve</button><button className="btn-ghost" onClick={() => onDecide(a.id, 'DECLINED')}>Decline</button></div>
+            </div>
+          ))}
+        </section>
+      )}
+      <div className="flex flex-wrap gap-1" role="tablist" aria-label="Filter notifications">
+        {NOTE_GROUPS.map(([k, label]) => <button key={k} role="tab" aria-selected={group === k} className={group === k ? 'btn-primary py-1.5 text-xs' : 'btn-ghost py-1.5 text-xs'} onClick={() => setGroup(k)}>{label}</button>)}
+      </div>
+      <ul className="card divide-y divide-ink/5">
+        {shown.map((n) => (
+          <li key={n.id}>
+            <button className="flex w-full gap-3 p-4 text-left hover:bg-ivory" onClick={() => readOne(n)}>
+              <span className={`mt-1.5 h-2 w-2 shrink-0 rounded-full ${n.readAt ? 'bg-transparent' : 'bg-sun'}`} aria-label={n.readAt ? undefined : 'Unread'} />
+              <span className="min-w-0 flex-1">
+                <span className="flex flex-wrap items-baseline justify-between gap-2"><span className={`text-sm ${n.readAt ? '' : 'font-semibold'}`}>{n.title}</span><span className="text-xs text-ink-3">{new Date(n.createdAt).toLocaleString('en-IN', { day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit' })}</span></span>
+                <span className="mt-0.5 block whitespace-pre-line text-xs text-ink-3">{n.body.replace(/\*\*/g, '')}</span>
+              </span>
+            </button>
+          </li>
+        ))}
+        {items && !shown.length && <li className="p-4 text-sm text-ink-3">No updates here yet.</li>}
+        {!items && <li className="p-4 text-sm text-ink-3">Loading…</li>}
+      </ul>
+    </div>
+  );
+}
+
+/** Asks SOLLUNA to prepare the month's CA documentation pack and share it with the client's Chartered Accountant. */
+function CaRequest({ onDone }: { onDone: (m: { kind: 'ok' | 'err'; text: string }) => void }) {
+  const [open, setOpen] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const last = new Date(); last.setMonth(last.getMonth() - 1);
+  async function submit(e: React.FormEvent<HTMLFormElement>) {
+    e.preventDefault();
+    const f = new FormData(e.currentTarget);
+    const period = String(f.get('caPeriod'));
+    const month = new Date(`${period}-01T00:00:00`).toLocaleDateString('en-IN', { month: 'long', year: 'numeric' });
+    setBusy(true);
+    try {
+      await api('/requests', { method: 'POST', body: { featureKey: 'CA_DOCUMENTATION', title: `Send ${month} documents to my CA`, priority: 'P3', details: { period, caName: f.get('caName') || undefined, caEmail: f.get('caEmail') || undefined, notes: f.get('caNotes') || undefined } } });
+      onDone({ kind: 'ok', text: `Request sent. Your manager will prepare the ${month} CA pack and share it with your CA.` });
+      setOpen(false);
+    } catch (err) { onDone({ kind: 'err', text: (err as Error).message }); }
+    setBusy(false);
+  }
+  return (
+    <section className="card p-6" aria-label="Send to my CA">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div><h2 className="font-semibold">Send reports to your CA</h2><p className="text-xs text-ink-3">We prepare the month&apos;s reports, settlements and invoices as one pack for your Chartered Accountant.</p></div>
+        {!open && <button className="btn-gold" onClick={() => setOpen(true)}>Request CA pack</button>}
+      </div>
+      {open && (
+        <form onSubmit={submit} className="mt-4 grid gap-3 sm:grid-cols-2">
+          <div><label className="label" htmlFor="caPeriod">Month</label><input id="caPeriod" name="caPeriod" type="month" className="input" required defaultValue={last.toISOString().slice(0, 7)} max={new Date().toISOString().slice(0, 7)} /></div>
+          <div><label className="label" htmlFor="caName">CA name (optional)</label><input id="caName" name="caName" className="input" /></div>
+          <div><label className="label" htmlFor="caEmail">CA email (optional)</label><input id="caEmail" name="caEmail" type="email" className="input" placeholder="ca@firm.in" /></div>
+          <div><label className="label" htmlFor="caNotes">Anything specific?</label><input id="caNotes" name="caNotes" className="input" placeholder="e.g. GSTR-1 filing this week" /></div>
+          <div className="flex gap-2 sm:col-span-2"><button className="btn-primary" disabled={busy}>{busy ? 'Sending…' : 'Send request'}</button><button type="button" className="btn-ghost" onClick={() => setOpen(false)}>Cancel</button></div>
+        </form>
+      )}
+    </section>
+  );
+}
 
 const PLAN_PITCH: Record<string, string> = {
   RESELLER: 'For sellers starting out: catalog, listings, reports and a dedicated manager.',
@@ -438,98 +437,6 @@ function PlanPicker({ firstName, billing, plans, preselect, lapsed, verifying, o
           </div>
         </section>
       )}
-    </div>
-  );
-}
-
-function Stat({ label, value, sub, highlight }: { label: string; value: string; sub?: string; highlight?: boolean }) {
-  return (
-    <div className={`card p-5 ${highlight ? 'ring-2 ring-sun' : ''}`}>
-      <p className="label">{label}</p>
-      <p className="font-display text-2xl">{value}</p>
-      {sub && <p className="mt-1 text-xs text-ink-3">{sub}</p>}
-    </div>
-  );
-}
-
-function Requests({ requests, onNew }: { requests: Req[]; onNew: () => void }) {
-  const [open, setOpen] = useState<string | null>(null);
-  const [update, setUpdate] = useState<Record<string, string>>({});
-  async function toggle(id: string) {
-    setOpen(open === id ? null : id);
-    if (!update[id]) {
-      const r = await api<{ update: { text: string } }>(`/requests/${id}`);
-      setUpdate((u) => ({ ...u, [id]: r.update.text }));
-    }
-  }
-  return (
-    <div className="space-y-4">
-      <div className="flex items-center justify-between"><h1 className="font-display text-3xl">Requests</h1><button className="btn-primary" onClick={onNew}>New request</button></div>
-      {requests.map((r) => (
-        <div key={r.id} className="card">
-          <button className="flex w-full flex-wrap items-center justify-between gap-3 p-5 text-left" onClick={() => toggle(r.id)} aria-expanded={open === r.id}>
-            <div>
-              <p className="font-semibold">{r.title}</p>
-              <p className="text-xs text-ink-3">{human(r.featureKey)}{r.marketplace ? ` · ${human(r.marketplace)}` : ''} · {new Date(r.createdAt).toLocaleDateString('en-IN')}</p>
-            </div>
-            <Status s={r.status} />
-          </button>
-          {open === r.id && (
-            <div className="border-t border-ink/10 p-5">
-              {r.tasks.length > 0 && (
-                <ol className="mb-5 space-y-2">
-                  {r.tasks.map((t, i) => (
-                    <li key={t.id} className="flex flex-wrap items-center justify-between gap-2 text-sm">
-                      <span><span className="mr-2 text-ink-3">{i + 1}.</span>{t.title}</span><Status s={t.status} />
-                    </li>
-                  ))}
-                </ol>
-              )}
-              <div className="rounded-xl bg-ivory p-4">{update[r.id] ? <Markdownish text={update[r.id]} /> : 'Loading…'}</div>
-            </div>
-          )}
-        </div>
-      ))}
-      {!requests.length && <p className="card p-6 text-sm text-ink-3">No requests yet. Open Services to raise your first request.</p>}
-    </div>
-  );
-}
-
-const MARKETPLACE_FIXED: Record<string, string> = { NEW_LISTING_AMAZON: 'AMAZON', NEW_LISTING_FLIPKART: 'FLIPKART' };
-
-function RequestModal({ feature, onClose, onCreated }: { feature: Feature; onClose: () => void; onCreated: (msg: string) => void }) {
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const fixed = MARKETPLACE_FIXED[feature.key];
-  async function submit(e: React.FormEvent<HTMLFormElement>) {
-    e.preventDefault();
-    setBusy(true); setError(null);
-    const f = new FormData(e.currentTarget);
-    try {
-      const res = await api<{ request: { status: string } }>('/requests', {
-        method: 'POST',
-        body: {
-          featureKey: feature.key, title: f.get('title'), marketplace: fixed ?? (f.get('marketplace') || undefined), priority: f.get('priority'),
-          details: { notes: f.get('notes'), ...(f.get('includeCaPack') ? { includeCaPack: true } : {}) },
-        },
-      });
-      onCreated(res.request.status === 'QUEUED' ? 'Request received. Your manager has been notified.' : 'Request recorded. See the request for what happens next.');
-    } catch (err) { setError((err as Error).message); setBusy(false); }
-  }
-  return (
-    <div className="fixed inset-0 z-50 flex items-end justify-center bg-ink/40 p-4 sm:items-center" role="dialog" aria-modal aria-labelledby="req-title">
-      <form onSubmit={submit} className="card w-full max-w-lg space-y-4 p-6">
-        <h2 id="req-title" className="font-display text-xl">Request: {feature.label}</h2>
-        <div><label className="label" htmlFor="title">What do you need?</label><input id="title" name="title" className="input" required minLength={3} placeholder="e.g. List our new jute table runner" /></div>
-        {!fixed && <div><label className="label" htmlFor="marketplace">Marketplace</label>
-          <select id="marketplace" name="marketplace" className="input"><option value="">Both / not specific</option><option value="AMAZON">Amazon</option><option value="FLIPKART">Flipkart</option></select></div>}
-        <div><label className="label" htmlFor="priority">Urgency</label>
-          <select id="priority" name="priority" className="input" defaultValue="P3"><option value="P1">Critical: business stopped</option><option value="P2">High</option><option value="P3">Normal</option><option value="P4">Low</option></select></div>
-        <div><label className="label" htmlFor="notes">Details</label><textarea id="notes" name="notes" className="input min-h-24" placeholder="SKUs, links, deadlines…" /></div>
-        {(feature.key === 'MONTHLY_PERFORMANCE_REPORT' || feature.key === 'MONTHLY_PL_REPORT') && <label className="flex items-center gap-2 text-sm"><input type="checkbox" name="includeCaPack" /> Also prepare the CA documentation pack</label>}
-        {error && <p role="alert" className="rounded-xl bg-red-50 px-3 py-2 text-sm text-red-800">{error}</p>}
-        <div className="flex justify-end gap-2"><button type="button" className="btn-ghost" onClick={onClose}>Cancel</button><button className="btn-primary" disabled={busy}>{busy ? 'Sending…' : 'Submit request'}</button></div>
-      </form>
     </div>
   );
 }
