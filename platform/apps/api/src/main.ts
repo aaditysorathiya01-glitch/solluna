@@ -15,6 +15,9 @@ async function bootstrap() {
   app.enableShutdownHooks();
   await app.listen(config.port);
   Logger.log(`SOLLUNA API listening on :${config.port}`, 'Bootstrap');
+  // Free-hosting previews only: an inbound request through the public URL every 10 minutes keeps the service awake.
+  const keepAlive = process.env.KEEP_ALIVE_URL;
+  if (keepAlive) setInterval(() => { fetch(`${keepAlive.replace(/\/$/, '')}/api/health`).catch(() => undefined); }, 10 * 60_000).unref();
 
   if (config.sweepIntervalMs > 0) {
     const billing = app.get(BillingService);

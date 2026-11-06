@@ -9,7 +9,7 @@ const WAKING_MESSAGE = 'Our server is starting up — this can take up to a minu
 /**
  * Browser-side API client. Same-origin (/api is proxied), session in an httpOnly cookie.
  * Gateway errors without a JSON body come from the hosting edge, before the app saw the request, so they are
- * retried for up to ~40 s; an app-level 503 (JSON, e.g. "payments not configured") is returned immediately.
+ * retried for up to ~90 s; an app-level 503 (JSON, e.g. "payments not configured") is returned immediately.
  */
 export async function api<T = unknown>(path: string, init: { method?: string; body?: unknown } = {}): Promise<T> {
   for (let attempt = 0; ; attempt++) {
@@ -25,7 +25,7 @@ export async function api<T = unknown>(path: string, init: { method?: string; bo
     let json = true;
     try { data = text ? JSON.parse(text) : null; } catch { json = false; }
     const waking = WAKING.includes(res.status) && (!json || data?.waking === true);
-    if (waking && attempt < 8) { await new Promise((r) => setTimeout(r, 5000)); continue; }
+    if (waking && attempt < 18) { await new Promise((r) => setTimeout(r, 5000)); continue; }
     if (!json) data = { message: res.ok ? undefined : waking ? WAKING_MESSAGE : 'Something went wrong. Please try again.' };
     if (!res.ok) {
       const msg = Array.isArray(data?.message) ? data.message.join(', ') : data?.message ?? `Request failed (${res.status})`;
