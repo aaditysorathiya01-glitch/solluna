@@ -36,4 +36,12 @@ export const config = {
   approvedOutputHosts: (process.env.APPROVED_OUTPUT_HOSTS ?? 'drive.google.com,docs.google.com').split(',').map((s) => s.trim()),
   skillsDir: opt('SKILLS_DIR'),
   sweepIntervalMs: Number(process.env.SWEEP_INTERVAL_MS ?? 0),
+  /** AES-256-GCM key material for secrets at rest (TOTP seeds). Set a dedicated value in production. */
+  dataEncryptionKey: process.env.DATA_ENCRYPTION_KEY || req('JWT_SECRET'),
+  /** Public site URL used in emailed links (password reset, email verification). */
+  appUrl: (process.env.APP_URL ?? 'http://localhost:3000').replace(/\/$/, ''),
+  /** Super admins must enable TOTP 2FA before using the console (plan §16). */
+  requireAdmin2fa: process.env.REQUIRE_ADMIN_2FA !== 'false',
+  /** DEV/PREVIEW ONLY: return emailed links in API responses when no email connector is configured. */
+  exposeAuthLinks: process.env.EXPOSE_AUTH_LINKS === 'true',
 };

@@ -7,7 +7,15 @@ import { PrismaService } from './common/prisma.service';
 import { AuditService } from './common/audit.service';
 import { AuthGuard } from './auth/auth.guard';
 import { AuthService } from './auth/auth.service';
-import { AdminUsersController, AuthController } from './auth/auth.controller';
+import { AccountController, AdminUsersController, AuthController } from './auth/auth.controller';
+import { TicketsService } from './support/tickets.service';
+import { OpsTicketsController, TicketsController } from './support/tickets.controller';
+import { CatalogService } from './catalog/catalog.service';
+import { CatalogController, OpsCatalogController } from './catalog/catalog.controller';
+import { FulfilmentService } from './fulfilment/fulfilment.service';
+import { FulfilmentController, OpsFulfilmentController } from './fulfilment/fulfilment.controller';
+import { AdminService } from './admin/admin.service';
+import { AdminController, AdminPaymentsController, PublicController } from './admin/admin.controller';
 import { RazorpayClient } from './billing/razorpay.client';
 import { BillingService } from './billing/billing.service';
 import { BillingController } from './billing/billing.controller';
@@ -33,9 +41,9 @@ import { AdminClientsController, ChatController, OpsChatController } from './cha
     JwtModule.register({ global: true, secret: config.jwtSecret, signOptions: { expiresIn: config.jwtTtl as never } }),
     ThrottlerModule.forRoot([{ ttl: 60_000, limit: Number(process.env.RATE_LIMIT_PER_MIN ?? 120) }]),
   ],
-  controllers: [HealthController, AuthController, AdminUsersController, BillingController, FeaturesController, NotificationsController, RequestsController, ApprovalsController, OpsController, DocumentsController, ChatController, OpsChatController, AdminClientsController, ClientReportsController, OpsReportsController, OpsDocumentsCaController],
+  controllers: [HealthController, AuthController, AccountController, AdminUsersController, PublicController, AdminController, AdminPaymentsController, TicketsController, OpsTicketsController, CatalogController, OpsCatalogController, FulfilmentController, OpsFulfilmentController, BillingController, FeaturesController, NotificationsController, RequestsController, ApprovalsController, OpsController, DocumentsController, ChatController, OpsChatController, AdminClientsController, ClientReportsController, OpsReportsController, OpsDocumentsCaController],
   providers: [
-    PrismaService, AuditService, AuthService, RazorpayClient, BillingService, SkillsService, EntitlementsService, DispatcherService, OrchestratorService, AccessService, StorageService, DocumentsService, ChatService, ReportsService,
+    PrismaService, AuditService, AuthService, RazorpayClient, BillingService, SkillsService, EntitlementsService, DispatcherService, OrchestratorService, AccessService, StorageService, DocumentsService, ChatService, ReportsService, TicketsService, CatalogService, FulfilmentService, AdminService,
     { provide: APP_GUARD, useClass: ThrottlerGuard },
     { provide: APP_GUARD, useClass: AuthGuard },
   ],

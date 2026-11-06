@@ -108,6 +108,17 @@ async function registerCustomer(name) {
   return ok(r).token;
 }
 async function login(email, password) { return ok(await call('POST', '/auth/login', { body: { email, password } })).token; }
+// RFC 6238 TOTP, independent of the API implementation.
+function totp(secretB32, at = Date.now()) {
+  const A = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567';
+  let bits = '';
+  for (const c of secretB32) bits += A.indexOf(c).toString(2).padStart(5, '0');
+  const key = Buffer.from(bits.match(/.{8}/g).map((b) => parseInt(b, 2)));
+  const msg = Buffer.alloc(8); msg.writeBigUInt64BE(BigInt(Math.floor(at / 30000)));
+  const h = createHmac('sha1', key).update(msg).digest();
+  const o = h[19] & 15;
+  return String((h.readUInt32BE(o) & 0x7fffffff) % 1e6).padStart(6, '0');
+}
 const sign = (secret, data) => createHmac('sha256', secret).update(data).digest('hex');
 const PROFILE = { address: '12 MG Road, Andheri East', city: 'Mumbai', pincode: '400069', stateCode: '27' };
 async function pay(token, planCode, profile = PROFILE) {
@@ -155,7 +166,24 @@ test('auth: registration validation, duplicates, login, session cookie, me', asy
   const badGstin = await call('POST', '/auth/register', { body: { name: 'Bad Gst', email: 'bad@gst.test', phone: '9876500011', password: 'Seller-Pass-123', legalName: 'Bad GST Co', gstin: '24ABCDE1234F1Z5' } });
   assert.equal(badGstin.status, 400, 'GSTIN with wrong check digit rejected');
   assert.equal((await call('GET', '/auth/me')).status, 401);
-  S.admin = await login(ADMIN.email, ADMIN.password);
+  // Super admins must enroll TOTP before the console opens (plan §16).
+  const pending = await login(ADMIN.email, ADMIN.password);
+  const gated = await call('POST', '/admin/users/staff', { token: pending, body: { name: 'X', email: 'x@solluna.test', password: 'Staff-Passw0rd-1', staffRole: 'LISTING_EXECUTIVE' } });
+  assert.equal(gated.status, 403);
+  assert.equal(gated.body.twoFactorSetupRequired, true);
+  assert.equal(ok(await call('GET', '/auth/me', { token: pending })).user.twoFactorRequired, true);
+  const setup = ok(await call('POST', '/auth/2fa/setup', { token: pending }));
+  assert.match(setup.otpauthUrl, /^otpauth:\/\/totp\/SOLLUNA/);
+  assert.equal((await call('POST', '/auth/2fa/enable', { token: pending, body: { code: '000000' } })).status, 400);
+  ok(await call('POST', '/auth/2fa/enable', { token: pending, body: { code: totp(setup.secret) } }));
+  S.adminTotp = setup.secret;
+  const noCode = await call('POST', '/auth/login', { body: ADMIN });
+  assert.equal(noCode.status, 401);
+  assert.equal(noCode.body.twoFactorRequired, true);
+  assert.equal((await call('POST', '/auth/login', { body: { ...ADMIN, code: '123456' } })).status, 401);
+  S.admin = ok(await call('POST', '/auth/login', { body: { ...ADMIN, code: totp(setup.secret) } })).token;
+  assert.equal(ok(await call('GET', '/auth/me', { token: S.admin })).user.twoFactorEnabled, true);
+  assert.equal((await call('POST', '/auth/2fa/disable', { token: S.admin, body: { code: totp(setup.secret) } })).status, 403, 'super admins cannot turn 2FA off');
 });
 
 test('features: all 28 services are linked to installed skills; no plan = no access', async () => {
@@ -781,6 +809,351 @@ test('orchestrator: monthly reporting workflow completes only with published rep
   ok(await complete(S.acct.token, step(r, 'pl').id, { summary: 'October P&L v1 published, VERIFIED', reportId: S.bPl }));
   r = await tasksOf(S.b, req.request.id);
   assert.equal(step(r, 'ca-pack').status, 'QUEUED');
+});
+
+// ───────────── Full-platform modules ─────────────
+const sinkOf = (type) => connectorEvents.filter((e) => e.body.type === type);
+const tokenFrom = (link) => new URL(link).searchParams.get('token');
+
+test('account: email verification, password reset (single use, ends old sessions), change password, profile', async () => {
+  const t = await registerCustomer('Ekta');
+  const me = ok(await call('GET', '/auth/me', { token: t }));
+  assert.equal(me.user.emailVerified, false);
+  const verifyMail = sinkOf('auth.verify_email').find((e) => e.body.to === me.user.email);
+  assert.ok(verifyMail, 'verification email sent through the connector');
+  ok(await call('POST', '/auth/email/verify', { body: { token: tokenFrom(verifyMail.body.link) } }));
+  assert.equal((await call('POST', '/auth/email/verify', { body: { token: tokenFrom(verifyMail.body.link) } })).status, 400, 'single use');
+  assert.equal(ok(await call('GET', '/auth/me', { token: t })).user.emailVerified, true);
+
+  // Unknown email gets the same answer (no enumeration) and no email.
+  const before = sinkOf('auth.password_reset').length;
+  const unknown = ok(await call('POST', '/auth/password/forgot', { body: { email: 'nobody@nowhere.test' } }));
+  assert.equal(unknown.ok, true);
+  assert.equal(unknown.devLink, undefined, 'links never returned when a connector delivers them');
+  assert.equal(sinkOf('auth.password_reset').length, before);
+  ok(await call('POST', '/auth/password/forgot', { body: { email: me.user.email } }));
+  const reset = sinkOf('auth.password_reset').at(-1);
+  assert.equal(reset.body.to, me.user.email);
+  assert.ok(reset.signature, 'connector payload is signed');
+  const token = tokenFrom(reset.body.link);
+  assert.equal((await db.authToken.findFirst({ where: { purpose: 'RESET_PASSWORD' }, orderBy: { createdAt: 'desc' } })).tokenHash.length, 64, 'only a hash is stored');
+  assert.equal((await call('POST', '/auth/password/reset', { body: { token, password: 'short' } })).status, 400);
+  await new Promise((r) => setTimeout(r, 1100)); // old session must be strictly older than the reset
+  ok(await call('POST', '/auth/password/reset', { body: { token, password: 'Brand-New-Pass-1' } }));
+  assert.equal((await call('POST', '/auth/password/reset', { body: { token, password: 'Another-Pass-12' } })).status, 400, 'reset links are single use');
+  assert.equal((await call('GET', '/auth/me', { token: t })).status, 401, 'sessions from before the reset are ended');
+  assert.equal((await call('POST', '/auth/login', { body: { email: me.user.email, password: 'Seller-Pass-123' } })).status, 401);
+  let t2 = await login(me.user.email, 'Brand-New-Pass-1');
+
+  assert.equal((await call('POST', '/auth/password/change', { token: t2, body: { currentPassword: 'wrong', newPassword: 'Changed-Pass-123' } })).status, 400);
+  await new Promise((r) => setTimeout(r, 1100));
+  const changed = ok(await call('POST', '/auth/password/change', { token: t2, body: { currentPassword: 'Brand-New-Pass-1', newPassword: 'Changed-Pass-123' } }));
+  assert.equal((await call('GET', '/auth/me', { token: t2 })).status, 401, 'other sessions end on password change');
+  ok(await call('GET', '/auth/me', { token: changed.token })); // this session continues with a fresh token
+  t2 = changed.token;
+
+  ok(await call('PATCH', '/auth/profile', { token: t2, body: { name: 'Ekta Shah' } }));
+  assert.equal((await call('PATCH', '/auth/profile', { token: t2, body: { email: 'take@over.test' } })).status, 400, 'email cannot be changed via profile');
+  assert.equal((await call('PATCH', '/account/organization', { token: t2, body: { pan: 'BADPAN' } })).status, 400);
+  const org = ok(await call('PATCH', '/account/organization', { token: t2, body: { category: 'Home & Kitchen', pan: 'ABCDE1234F', brandName: 'Ekta Home' } }));
+  assert.equal(org.pan, 'ABCDE1234F');
+  assert.ok(await db.auditLog.findFirst({ where: { action: 'auth.password_reset' } }));
+  S.e = t2;
+});
+
+test('tickets: client raises → staff notified → status lifecycle with notes → client sees only public thread → close/reopen', async () => {
+  const support = await staff('SUPPORT_EXECUTIVE', S.admin);
+  assert.equal((await call('POST', '/tickets', { token: S.b, body: { category: 'NOPE', subject: 'x', description: 'y' } })).status, 400);
+  const tk = ok(await call('POST', '/tickets', { token: S.b, body: { category: 'SHIPPING_LABELS', marketplace: 'AMAZON', subject: 'Labels missing for 3 orders', description: 'Orders 402-111, 402-112, 402-113 have no labels today.', priority: 'P2' } }));
+  assert.equal(tk.status, 'NEW');
+  assert.equal(new Date(tk.ackDueAt) - new Date(tk.createdAt), 2 * 3600_000, 'P2 = 2h acknowledgement');
+  assert.ok(await db.notification.findFirst({ where: { userId: support.id, type: 'ticket.created' } }), 'support team notified');
+  const queue = ok(await call('GET', '/ops/tickets', { token: support.token }));
+  assert.ok(queue.some((q) => q.id === tk.id));
+  assert.equal((await call('GET', `/tickets/${tk.id}`, { token: S.c })).status, 404, 'other tenants cannot see it');
+  assert.equal((await call('GET', '/ops/tickets', { token: S.b })).status, 403);
+
+  assert.equal((await call('PATCH', `/ops/tickets/${tk.id}`, { token: support.token, body: { status: 'CLOSED' } })).status, 200, 'NEW can be closed (e.g. duplicate)');
+  ok(await call('PATCH', `/ops/tickets/${tk.id}`, { token: support.token, body: { status: 'IN_PROGRESS' } }));
+  ok(await call('PATCH', `/ops/tickets/${tk.id}`, { token: support.token, body: { assigneeId: support.id } }));
+  assert.equal((await call('PATCH', `/ops/tickets/${tk.id}`, { token: support.token, body: { status: 'WAITING_FOR_CLIENT' } })).status, 400, 'must say what is needed');
+  ok(await call('PATCH', `/ops/tickets/${tk.id}`, { token: support.token, body: { status: 'WAITING_FOR_CLIENT', note: 'Please confirm the orders are not cancelled.' } }));
+  ok(await call('POST', `/ops/tickets/${tk.id}/comments`, { token: support.token, body: { body: 'Internal: Seller Central shows 402-113 cancelled.', internal: true } }));
+  assert.equal((await call('POST', `/tickets/${tk.id}/comments`, { token: S.b, body: { body: 'x', internal: true } })).status, 403);
+  ok(await call('POST', `/tickets/${tk.id}/comments`, { token: S.b, body: { body: 'Confirmed — none cancelled.' } }));
+  let view = ok(await call('GET', `/tickets/${tk.id}`, { token: S.b }));
+  assert.equal(view.status, 'IN_PROGRESS', 'client reply moves it back to SOLLUNA');
+  assert.ok(!view.comments.some((c) => c.internal || c.body.startsWith('Internal')), 'internal notes hidden from client');
+  assert.ok(ok(await call('GET', `/ops/tickets/${tk.id}`, { token: support.token })).comments.some((c) => c.internal));
+  assert.equal((await call('POST', `/tickets/${tk.id}/action`, { token: S.b, body: { action: 'CLOSE' } })).status, 400, 'only resolved tickets can be closed by client');
+  assert.equal((await call('PATCH', `/ops/tickets/${tk.id}`, { token: support.token, body: { status: 'RESOLVED' } })).status, 400, 'resolution note required');
+  ok(await call('PATCH', `/ops/tickets/${tk.id}`, { token: support.token, body: { status: 'RESOLVED', note: 'Labels regenerated and shared in today’s batch.' } }));
+  view = ok(await call('POST', `/tickets/${tk.id}/action`, { token: S.b, body: { action: 'REOPEN', note: 'One label still blank' } }));
+  assert.equal(view.status, 'IN_PROGRESS');
+  ok(await call('PATCH', `/ops/tickets/${tk.id}`, { token: support.token, body: { status: 'RESOLVED', note: 'Fixed the blank label.' } }));
+  view = ok(await call('POST', `/tickets/${tk.id}/action`, { token: S.b, body: { action: 'CLOSE' } }));
+  assert.equal(view.status, 'CLOSED');
+  assert.ok(view.firstResponseAt);
+  const notes = ok(await call('GET', '/notifications', { token: S.b })).filter((n) => n.type === 'ticket.status_changed');
+  assert.ok(notes.length >= 4, 'client notified on every status change');
+  assert.ok(ok(await call('GET', '/notifications/unread-count', { token: S.b })).count > 0);
+  ok(await call('POST', '/notifications/read-all', { token: S.b }));
+  assert.equal(ok(await call('GET', '/notifications/unread-count', { token: S.b })).count, 0);
+});
+
+test('onboarding + marketplaces: checklist, no passwords accepted, CONNECTED only with staff evidence', async () => {
+  let ob = ok(await call('GET', '/onboarding', { token: S.b }));
+  assert.equal(ob.steps.find((s) => s.key === 'PLAN').done, true);
+  assert.equal(ob.steps.find((s) => s.key === 'MARKETPLACES').done, false);
+  assert.equal((await call('PUT', '/marketplaces/AMAZON', { token: S.b, body: { hasAccount: true, storeName: 'Bharat Store', password: 'hunter2' } })).status, 400, 'passwords are rejected outright');
+  assert.equal((await call('PUT', '/marketplaces/AMAZON', { token: S.b, body: { hasAccount: true } })).status, 400);
+  const acct = ok(await call('PUT', '/marketplaces/AMAZON', { token: S.b, body: { hasAccount: true, storeName: 'Bharat Store', sellerId: 'A1B2C3D4E5', contactEmail: 'seller@bharat.test' } }));
+  assert.equal(acct.status, 'PENDING', 'clients cannot self-certify a connection');
+  ok(await call('PUT', '/marketplaces/FLIPKART', { token: S.b, body: { hasAccount: false } }));
+  assert.equal((await call('PATCH', `/ops/clients/${S.bOrg}/marketplaces/AMAZON`, { token: S.ops.token, body: { status: 'CONNECTED' } })).status, 400, 'evidence required');
+  assert.equal((await call('PATCH', `/ops/clients/${S.bOrg}/marketplaces/AMAZON`, { token: S.ads.token, body: { status: 'CONNECTED', note: 'User permission accepted in Seller Central' } })).status, 403, 'ads role cannot verify accounts');
+  ok(await call('PATCH', `/ops/clients/${S.bOrg}/marketplaces/AMAZON`, { token: S.ops.token, body: { status: 'CONNECTED', note: 'User permission accepted in Seller Central on 6 Nov' } }));
+  const mps = ok(await call('GET', '/marketplaces', { token: S.b }));
+  assert.equal(mps.find((m) => m.marketplace === 'AMAZON').status, 'CONNECTED');
+  assert.equal(mps.find((m) => m.marketplace === 'FLIPKART').hasAccount, false);
+  // Changing the seller identity resets verification.
+  const changed = ok(await call('PUT', '/marketplaces/AMAZON', { token: S.b, body: { hasAccount: true, storeName: 'Bharat Store 2', sellerId: 'Z9Y8X7W6V5' } }));
+  assert.equal(changed.status, 'PENDING');
+  ob = ok(await call('GET', '/onboarding', { token: S.b }));
+  assert.equal(ob.steps.find((s) => s.key === 'MARKETPLACES').done, true);
+  if (!ob.steps.find((s) => s.key === 'MANAGER').done) {
+    ok(await call('POST', `/admin/clients/${S.bOrg}/managers`, { token: S.admin, body: { managerId: S.ops.id } }));
+    ob = ok(await call('GET', '/onboarding', { token: S.b }));
+  }
+  assert.equal(ob.steps.find((s) => s.key === 'MANAGER').done, true);
+  assert.equal(ob.complete, false, 'email not verified and no GST/PAN document yet');
+});
+
+test('products + listings: validated product, plan/quota via orchestrator, per-marketplace tracking, marketplace evidence for LIVE', async () => {
+  assert.equal((await call('POST', '/products', { token: S.b, body: { name: 'Brass Diya', mrp: 500, sellingPrice: 600 } })).status, 400, 'selling price above MRP rejected');
+  const p = ok(await call('POST', '/products', { token: S.b, body: { name: 'Brass Diya Set of 4', sku: 'BD-4', category: 'Home Decor', mrp: 999, sellingPrice: 749, gstRate: 12 } }));
+  assert.equal(p.mrpPaise, 99900);
+  assert.equal((await call('POST', '/products', { token: S.b, body: { name: 'Dup', sku: 'BD-4' } })).status, 400, 'duplicate SKU');
+  assert.equal((await call('POST', '/listings', { token: S.b, body: { productId: p.id, marketplaces: ['AMAZON'] } })).status, 400, 'brand + HSN required first');
+  ok(await call('PATCH', `/products/${p.id}`, { token: S.b, body: { name: 'Brass Diya Set of 4', sku: 'BD-4', brand: 'Bharat', hsn: '7418', category: 'Home Decor', mrp: 999, sellingPrice: 749, gstRate: 12 } }));
+  const sub = ok(await call('POST', '/listings', { token: S.b, body: { productId: p.id, marketplaces: ['AMAZON', 'FLIPKART'] } }));
+  assert.equal(sub.results.length, 2);
+  assert.ok(sub.results.every((r) => r.created), JSON.stringify(sub.results));
+  const again = ok(await call('POST', '/listings', { token: S.b, body: { productId: p.id, marketplaces: ['AMAZON'] } }));
+  assert.equal(again.results[0].created, false, 'no duplicate listing per product + marketplace');
+  const listings = ok(await call('GET', '/listings', { token: S.b }));
+  const amz = listings.find((l) => l.marketplace === 'AMAZON' && l.productId === p.id);
+  const fk = listings.find((l) => l.marketplace === 'FLIPKART' && l.productId === p.id);
+  assert.ok(amz.serviceRequestId && fk.serviceRequestId, 'each listing is an orchestrator request (plan + quota checked)');
+  assert.equal((await call('PATCH', `/ops/listings/${amz.id}`, { token: S.lister.token, body: { status: 'ACTIVE' } })).status.toString().startsWith('4'), true);
+  assert.equal((await call('PATCH', `/ops/listings/${amz.id}`, { token: S.ops.token, body: { status: 'ACTIVE', catalogId: 'B0CXYZ1234' } })).status, 400, 'live needs the marketplace URL');
+  assert.equal((await call('PATCH', `/ops/listings/${amz.id}`, { token: S.ops.token, body: { status: 'CATALOG_ID_CREATED' } })).status, 400, 'needs the ASIN');
+  assert.equal((await call('PATCH', `/ops/listings/${amz.id}`, { token: S.ops.token, body: { status: 'ACTIVE', catalogId: 'B0CXYZ1234', liveUrl: 'https://evil.example.com/dp/B0CXYZ1234' } })).status, 400, 'only marketplace URLs');
+  ok(await call('PATCH', `/ops/listings/${amz.id}`, { token: S.ops.token, body: { status: 'CONTENT_IN_PROGRESS', note: 'Drafting title and bullets' } }));
+  const live = ok(await call('PATCH', `/ops/listings/${amz.id}`, { token: S.ops.token, body: { status: 'ACTIVE', catalogId: 'B0CXYZ1234', liveUrl: 'https://www.amazon.in/dp/B0CXYZ1234' } }));
+  assert.equal(live.status, 'ACTIVE');
+  assert.equal((await db.product.findUnique({ where: { id: p.id } })).asin, 'B0CXYZ1234');
+  assert.equal((await call('PATCH', `/ops/listings/${fk.id}`, { token: S.ops.token, body: { status: 'REJECTED' } })).status, 400, 'rejection needs a reason');
+  ok(await call('PATCH', `/ops/listings/${fk.id}`, { token: S.ops.token, body: { status: 'REJECTED', note: 'Flipkart needs brand approval first' } }));
+  const after = ok(await call('GET', '/listings', { token: S.b }));
+  assert.equal(after.find((l) => l.id === amz.id).status, 'ACTIVE');
+  assert.equal(after.find((l) => l.id === fk.id).status, 'REJECTED', 'marketplaces tracked separately');
+  assert.ok(after.find((l) => l.id === amz.id).history.length >= 3);
+  assert.equal((await call('GET', '/listings', { token: S.c })).body.some?.((l) => l.id === amz.id), false, 'tenant isolation');
+  assert.ok(ok(await call('GET', '/notifications', { token: S.b })).some((n) => n.type === 'listing.status_changed' && n.body.includes('amazon.in')));
+});
+
+test('quota via listings: Reseller limit of 3 per marketplace per month blocks the 4th listing', async () => {
+  const r = await registerCustomer('Farhan');
+  await pay(r, 'RESELLER');
+  const results = [];
+  for (let i = 1; i <= 4; i++) {
+    const p = ok(await call('POST', '/products', { token: r, body: { name: `Steel Bottle ${i}`, sku: `SB-${i}`, brand: 'Farhan', category: 'Kitchen', hsn: '7323', mrp: 499, sellingPrice: 399 } }));
+    results.push(ok(await call('POST', '/listings', { token: r, body: { productId: p.id, marketplaces: ['AMAZON'] } })).results[0]);
+  }
+  assert.deepEqual(results.map((x) => x.created), [true, true, true, false]);
+  assert.match(results[3].reason, /limit/i);
+  assert.equal(ok(await call('GET', '/listings', { token: r })).length, 3);
+  S.reseller = r;
+});
+
+test('catalog mapping: client submits identifiers, staff record confidence results with evidence, client notified', async () => {
+  const sub = ok(await call('POST', '/mappings', { token: S.b, body: { marketplace: 'AMAZON', items: [{ identifier: 'B07ABC1234', sellerSku: 'LAMP-1' }, { identifier: 'Brass Lamp 12 inch', sellerSku: 'LAMP-2' }] } }));
+  assert.equal(sub.created, 2);
+  const rows = ok(await call('GET', '/mappings', { token: S.b })).filter((m) => m.serviceRequestId === sub.requestId);
+  assert.equal((await call('PATCH', `/ops/mappings/${rows[0].id}`, { token: S.ops.token, body: { status: 'EXACT_VERIFIED' } })).status, 400, 'match needs the ASIN');
+  ok(await call('PATCH', `/ops/mappings/${rows[0].id}`, { token: S.ops.token, body: { status: 'EXACT_VERIFIED', candidateId: 'B07ABC1234' } }));
+  assert.equal((await call('PATCH', `/ops/mappings/${rows[1].id}`, { token: S.ops.token, body: { status: 'NO_MATCH_FOUND' } })).status, 400, 'explanation needed');
+  ok(await call('PATCH', `/ops/mappings/${rows[1].id}`, { token: S.ops.token, body: { status: 'NO_MATCH_FOUND', note: 'No existing ASIN — needs a new listing' } }));
+  assert.ok(ok(await call('GET', '/notifications', { token: S.b })).some((n) => n.type === 'mapping.updated'));
+});
+
+test('labels: Growth gets official labels (unaltered, delivered on download); Reseller blocked; Premium adds approved thank-you inserts', async () => {
+  const pdf = Buffer.from('%PDF-1.4\n1 0 obj<<>>endobj\ntrailer<<>>\n%%EOF\n');
+  const upload = (token, orgId, fields, buf = pdf, name = 'labels.pdf') => {
+    const fd = new FormData();
+    fd.append('file', new Blob([buf]), name);
+    for (const [k, v] of Object.entries(fields)) fd.append(k, String(v));
+    return fetch(`${base}/ops/clients/${orgId}/labels`, { method: 'POST', headers: { authorization: `Bearer ${token}` }, body: fd }).then(async (r) => ({ status: r.status, body: await r.json() }));
+  };
+  const fields = { marketplace: 'AMAZON', batchDate: '2026-11-06', orderCount: 12, dispatchBy: '2026-11-06T13:00:00+05:30' };
+  const resellerOrg = ok(await call('GET', '/auth/me', { token: S.reseller })).organization.id;
+  assert.equal((await upload(S.ops.token, resellerOrg, fields)).status, 403, 'labels are Growth+');
+  assert.equal((await upload(S.ops.token, S.bOrg, fields, Buffer.from('not a pdf at all'), 'labels.pdf')).status, 400);
+  const job = ok(await upload(S.ops.token, S.bOrg, { ...fields, skippedOrders: '402-999 cancelled' }));
+  assert.equal(job.status, 'READY');
+  assert.equal(job.noteCount, 0, 'no thank-you notes below Premium');
+  const list = ok(await call('GET', '/labels', { token: S.b }));
+  assert.ok(list.some((j) => j.id === job.id));
+  const dl = await fetch(`${base}/labels/${job.id}/download`, { headers: { authorization: `Bearer ${S.b}` } });
+  assert.equal(dl.status, 200);
+  assert.deepEqual(Buffer.from(await dl.arrayBuffer()), pdf, 'official label delivered byte-for-byte unaltered');
+  assert.equal((await db.labelJob.findUnique({ where: { id: job.id } })).status, 'DELIVERED');
+  assert.equal((await fetch(`${base}/labels/${job.id}/download`, { headers: { authorization: `Bearer ${S.c}` } })).status, 404, 'other clients cannot download');
+  assert.ok(ok(await call('GET', '/notifications', { token: S.b })).some((n) => n.type === 'labels.ready'));
+
+  // Premium: thank-you design → compliance check → client approval → inserts with the batch.
+  const cOrg = ok(await call('GET', '/auth/me', { token: S.c })).organization.id;
+  const design = { brandName: 'Chandra Living', message: 'Thank you for choosing Chandra Living. We hope it brightens your home.', supportContact: 'care@chandra.test', website: 'https://chandra.test', colors: { primary: '#C9962B', background: '#FFFFFF', text: '#12131C' }, widthMm: 100, heightMm: 150 };
+  assert.equal((await call('POST', '/thank-you', { token: S.b, body: design })).status, 403, 'custom design is Premium only');
+  assert.equal((await call('POST', '/thank-you', { token: S.c, body: { ...design, message: 'Leave us a 5-star review and get a free gift!' } })).status, 400, 'review incentives blocked');
+  assert.equal((await call('POST', '/thank-you', { token: S.c, body: { ...design, message: 'Please leave a positive review on Amazon for us today.' } })).status, 400);
+  const draft = ok(await call('POST', `/ops/clients/${cOrg}/thank-you`, { token: S.ops.token, body: design }));
+  assert.equal(draft.status, 'DRAFT');
+  assert.equal((await call('POST', `/thank-you/${draft.id}/decision`, { token: S.c, body: { decision: 'APPROVE' } })).status, 400, 'only designs sent for review can be approved');
+  ok(await call('POST', `/ops/thank-you/${draft.id}/submit`, { token: S.ops.token }));
+  assert.equal((await call('POST', `/thank-you/${draft.id}/decision`, { token: S.c, body: { decision: 'REQUEST_CHANGES' } })).status, 400, 'say what to change');
+  ok(await call('POST', `/thank-you/${draft.id}/decision`, { token: S.c, body: { decision: 'REQUEST_CHANGES', note: 'Use our green' } }));
+  ok(await call('PATCH', `/ops/clients/${cOrg}/thank-you/${draft.id}`, { token: S.ops.token, body: { ...design, colors: { ...design.colors, primary: '#2F6B4F' } } }));
+  ok(await call('POST', `/ops/thank-you/${draft.id}/submit`, { token: S.ops.token }));
+  const approved = ok(await call('POST', `/thank-you/${draft.id}/decision`, { token: S.c, body: { decision: 'APPROVE' } }));
+  assert.equal(approved.status, 'APPROVED');
+  const pjob = ok(await upload(S.ops.token, cOrg, { ...fields, orderCount: 5 }));
+  assert.equal(pjob.noteCount, 5);
+  const notes = ok(await call('GET', `/labels/${pjob.id}/notes`, { token: S.c }));
+  assert.equal(notes.template.colors.primary, '#2F6B4F', 'the approved version is printed');
+  assert.equal(notes.job.count, 5);
+  // Editing an approved design creates v2 that needs approval; batches keep using v1.
+  const v2 = ok(await call('PATCH', `/thank-you/${draft.id}`, { token: S.c, body: { ...design, message: 'Thank you! We hope you love it.' } }));
+  assert.equal(v2.version, 2);
+  assert.equal(v2.status, 'DRAFT');
+  const pjob2 = ok(await upload(S.ops.token, cOrg, { ...fields, orderCount: 2 }));
+  assert.equal(ok(await call('GET', `/labels/${pjob2.id}/notes`, { token: S.c })).template.id, draft.id);
+  S.cOrg = cOrg;
+});
+
+test('low stock: severity per low-stock-alerts §7, velocity never guessed, urgent alerts to client + manager, plan-gated', async () => {
+  const resellerOrg = ok(await call('GET', '/auth/me', { token: S.reseller })).organization.id;
+  const rows = [
+    { sku: 'BD-4', sellable: 0, avgDailySales: 2 },
+    { sku: 'LAMP-1', name: 'Brass Lamp', sellable: 10, avgDailySales: 4, inbound: 50 },
+    { sku: 'LAMP-2', name: 'Brass Lamp XL', sellable: 30, avgDailySales: 3 },
+    { sku: 'TRAY-1', name: 'Tray', sellable: 60, avgDailySales: 3 },
+    { sku: 'TRAY-2', name: 'Tray XL', sellable: 300, avgDailySales: 2 },
+    { sku: 'NEW-1', name: 'New item', sellable: 15 },
+  ];
+  const body = { marketplace: 'AMAZON', dataAsOf: new Date().toISOString(), rows };
+  assert.equal((await call('POST', `/ops/clients/${resellerOrg}/inventory`, { token: S.ops.token, body })).status, 403, 'Growth+ only');
+  assert.equal((await call('POST', `/ops/clients/${S.bOrg}/inventory`, { token: S.ops.token, body: { ...body, rows: [rows[0], rows[0]] } })).status, 400, 'duplicate SKU');
+  const r = ok(await call('POST', `/ops/clients/${S.bOrg}/inventory`, { token: S.ops.token, body }));
+  assert.equal(r.urgent, 2);
+  const inv = ok(await call('GET', '/inventory', { token: S.b }));
+  const by = Object.fromEntries(inv.marketplaces.AMAZON.rows.map((x) => [x.sku, x]));
+  assert.equal(by['BD-4'].severity, 'CRITICAL');
+  assert.equal(by['LAMP-1'].severity, 'CRITICAL', '2.5 days of cover');
+  assert.equal(by['LAMP-2'].severity, 'MEDIUM', '10 days');
+  assert.equal(by['TRAY-1'].severity, 'WATCH', '20 days');
+  assert.equal(by['TRAY-2'].severity, 'HEALTHY');
+  assert.equal(by['NEW-1'].severity, null, 'no sales velocity → no severity guessed');
+  assert.equal(inv.marketplaces.AMAZON.rows[0].severity, 'CRITICAL', 'most urgent first');
+  assert.equal(inv.marketplaces.AMAZON.stale, false);
+  const alert = ok(await call('GET', '/notifications', { token: S.b })).find((n) => n.type === 'stock.alert');
+  assert.match(alert.body, /BD-4/);
+  assert.match(alert.body, /approval/);
+  ok(await call('POST', `/inventory/${by['BD-4'].id}/acknowledge`, { token: S.b }));
+  assert.equal((await call('POST', `/inventory/${by['BD-4'].id}/acknowledge`, { token: S.c })).status, 404);
+  const old = ok(await call('POST', `/ops/clients/${S.bOrg}/inventory`, { token: S.ops.token, body: { marketplace: 'FLIPKART', dataAsOf: '2026-01-01', rows: [{ sku: 'TRAY-1', sellable: 100, avgDailySales: 1 }] } }));
+  assert.equal(old.urgent, 0);
+  assert.equal(ok(await call('GET', '/inventory', { token: S.b })).marketplaces.FLIPKART.stale, true, 'stale data is flagged');
+});
+
+test('admin: overview, client suspension (instant), plan limit edits enforced by the API, team roles, payments, audit, enquiries, announcements', async () => {
+  const ov = ok(await call('GET', '/admin/overview', { token: S.admin }));
+  assert.ok(ov.activeSubscriptions >= 3 && ov.mrrPaise > 0 && ov.clients >= 5);
+  assert.equal((await call('GET', '/admin/overview', { token: S.ads.token })).status, 403);
+  const clients = ok(await call('GET', '/admin/client-list', { token: S.ops.token }));
+  assert.ok(clients.find((c) => c.id === S.bOrg).plan.code === 'GROWTH');
+  const detail = ok(await call('GET', `/admin/clients/${S.bOrg}/detail`, { token: S.admin }));
+  assert.ok(detail.onboarding.steps.length >= 6 && detail.marketplaces.length === 2);
+
+  // Suspension takes effect on the very next request, and is reversible.
+  assert.equal((await call('PATCH', `/admin/clients/${S.cOrg}/suspension`, { token: S.admin, body: { suspended: true } })).status, 400, 'reason required');
+  ok(await call('PATCH', `/admin/clients/${S.cOrg}/suspension`, { token: S.admin, body: { suspended: true, reason: 'Payment dispute under review' } }));
+  assert.equal((await call('GET', '/features', { token: S.c })).status, 403);
+  ok(await call('PATCH', `/admin/clients/${S.cOrg}/suspension`, { token: S.admin, body: { suspended: false } }));
+  ok(await call('GET', '/features', { token: S.c }));
+
+  // Plan limits live in the DB: raising Reseller's Amazon limit to 4 unblocks the 4th listing.
+  assert.equal((await call('PATCH', '/admin/plans/RESELLER/features/NEW_LISTING_AMAZON', { token: S.ops.token, body: { enabled: true, limitValue: 4 } })).status, 403, 'super admin only');
+  assert.equal((await call('PATCH', '/admin/plans/RESELLER/features/ADS_MANAGEMENT', { token: S.admin, body: { enabled: true, limitValue: 5 } })).status, 400, 'non-metered features take no limit');
+  ok(await call('PATCH', '/admin/plans/RESELLER/features/NEW_LISTING_AMAZON', { token: S.admin, body: { enabled: true, limitValue: 4 } }));
+  const prods = ok(await call('GET', '/products', { token: S.reseller }));
+  const fourth = prods.find((p) => p.sku === 'SB-4');
+  assert.equal(ok(await call('POST', '/listings', { token: S.reseller, body: { productId: fourth.id, marketplaces: ['AMAZON'] } })).results[0].created, true);
+  ok(await call('PATCH', '/admin/plans/RESELLER/features/NEW_LISTING_AMAZON', { token: S.admin, body: { enabled: true, limitValue: 3 } }));
+  const plans = ok(await call('GET', '/admin/plans', { token: S.admin }));
+  assert.equal(plans.find((p) => p.code === 'RESELLER').features.find((f) => f.key === 'NEW_LISTING_AMAZON').limitValue, 3);
+  ok(await call('PATCH', '/admin/plans/GROWTH', { token: S.admin, body: { pricePaise: 549900 } }));
+  assert.equal(ok(await call('GET', '/plans')).find((p) => p.code === 'GROWTH').pricePaise, 549900, 'public pricing reads the DB');
+  ok(await call('PATCH', '/admin/plans/GROWTH', { token: S.admin, body: { pricePaise: 499900 } }));
+
+  // Team: role change, last-admin guard, 2FA reset.
+  const temp = await staff('SUPPORT_EXECUTIVE', S.admin);
+  ok(await call('PATCH', `/admin/users/${temp.id}/role`, { token: S.admin, body: { staffRole: 'ADS_MANAGER' } }));
+  const team = ok(await call('GET', '/admin/team', { token: S.admin }));
+  assert.equal(team.find((t) => t.id === temp.id).staffRole, 'ADS_MANAGER');
+  const adminId = (await db.user.findUnique({ where: { email: ADMIN.email } })).id;
+  assert.equal((await call('PATCH', `/admin/users/${adminId}/deactivate`, { token: S.admin })).status, 400, 'cannot deactivate yourself / last admin');
+  assert.ok(team.find((t) => t.id === adminId).twoFactorEnabled);
+
+  const payments = ok(await call('GET', '/admin/payments', { token: S.acct.token }));
+  assert.ok(payments.some((p) => p.status === 'VERIFIED' && p.invoice?.number?.startsWith('SOL/')));
+  assert.ok(payments.some((p) => p.status === 'FAILED'));
+  assert.equal((await call('GET', '/admin/audit', { token: S.ops.token })).status, 403, 'audit log is super admin only');
+  const audit = ok(await call('GET', '/admin/audit?action=plan.', { token: S.admin }));
+  assert.ok(audit.some((a) => a.action === 'plan.feature_update' && a.actor.email === ADMIN.email));
+
+  // Public contact form → admin inbox (honeypot + validation).
+  assert.equal((await call('POST', '/public/contact', { body: { name: 'Bot', email: 'bot@x.test', message: 'Buy cheap followers now!!', website: 'http://spam' } })).status, 400);
+  ok(await call('POST', '/public/contact', { body: { name: 'Kavya Rao', email: 'kavya@shop.test', phone: '9876512345', business: 'Kavya Crafts', topic: 'PLANS', message: 'Which plan suits 40 SKUs on Amazon?' } }));
+  const inq = ok(await call('GET', '/admin/inquiries', { token: S.ops.token }));
+  assert.equal(inq[0].name, 'Kavya Rao');
+  ok(await call('PATCH', `/admin/inquiries/${inq[0].id}`, { token: S.ops.token, body: { status: 'CONTACTED' } }));
+  assert.ok(await db.notification.findFirst({ where: { type: 'admin.inquiry', userId: adminId } }));
+
+  const ann = ok(await call('POST', '/admin/announcements', { token: S.admin, body: { title: 'Diwali dispatch schedule', body: 'Label cut-off moves to 11 AM from 8–12 Nov.', audience: 'GROWTH' } }));
+  assert.ok(ann.recipients >= 1);
+  assert.ok(ok(await call('GET', '/notifications', { token: S.b })).some((n) => n.type === 'announcement'));
+  assert.ok(!ok(await call('GET', '/notifications', { token: S.reseller })).some((n) => n.type === 'announcement'), 'audience respected');
+});
+
+test('subscription: cancel at period end → no reminder, no grace → expired; undo restores renewal', async () => {
+  const t = await registerCustomer('Gauri');
+  await pay(t, 'RESELLER');
+  ok(await call('POST', '/billing/cancel', { token: t, body: { cancel: true, reason: 'Seasonal business' } }));
+  let b = ok(await call('GET', '/billing', { token: t }));
+  assert.equal(b.subscriptions[0].cancelAtPeriodEnd, true);
+  ok(await call('POST', '/billing/cancel', { token: t, body: { cancel: false } }));
+  ok(await call('POST', '/billing/cancel', { token: t, body: { cancel: true } }));
+  const org = ok(await call('GET', '/auth/me', { token: t })).organization.id;
+  await db.subscription.updateMany({ where: { organizationId: org, status: 'ACTIVE' }, data: { currentPeriodEnd: new Date(Date.now() - 60_000) } });
+  const sweep = ok(await call('POST', '/admin/billing/sweep', { token: S.admin }));
+  assert.ok(sweep.expired >= 1);
+  b = ok(await call('GET', '/billing', { token: t }));
+  assert.equal(b.subscriptions[0].status, 'EXPIRED', 'no grace period after a requested cancellation');
+  assert.equal(ok(await call('GET', '/features', { token: t })).plan, null, 'service ends');
+  assert.ok(ok(await call('GET', '/notifications', { token: t })).some((n) => n.type === 'subscription.expired'));
+  assert.equal((await call('POST', '/billing/cancel', { token: t, body: { cancel: true } })).status, 400);
 });
 
 test('security: login brute force is rate limited per IP', async () => {

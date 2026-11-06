@@ -5,7 +5,12 @@ import { config } from '../common/config';
 
 export type EventType =
   | 'request.created' | 'request.status_changed' | 'task.status_changed' | 'approval.requested' | 'approval.decided'
-  | 'subscription.activated' | 'payment.failed' | 'chat.message' | 'report.published' | 'subscription.renewal_reminder' | 'subscription.grace_period' | 'subscription.past_due';
+  | 'subscription.activated' | 'payment.failed' | 'chat.message' | 'report.published' | 'subscription.renewal_reminder' | 'subscription.grace_period' | 'subscription.past_due'
+  | 'subscription.cancel_scheduled' | 'subscription.expired' | 'ticket.created' | 'ticket.status_changed' | 'ticket.reply' | 'listing.status_changed' | 'mapping.updated'
+  | 'labels.ready' | 'stock.alert' | 'thank_you.review' | 'thank_you.decided' | 'marketplace.status_changed' | 'announcement' | 'account.suspended';
+
+/** Events addressed to one person by email (no organization), e.g. password reset links. */
+export interface DirectEvent { type: 'auth.password_reset' | 'auth.verify_email' | 'auth.password_changed'; to: string; name: string; title: string; body: string; link?: string }
 
 export interface PlatformEvent {
   type: EventType;
@@ -36,10 +41,31 @@ export class DispatcherService {
     return { inApp: users.length, webhook: await this.sendWebhook(e) };
   }
 
+  /** Email-only delivery through the connector webhook. Returns whether a connector accepted it. */
+  async direct(e: DirectEvent): Promise<'sent' | 'failed' | 'not_configured'> {
+    return this.post({ ...e, sentAt: new Date().toISOString() }, e.type);
+  }
+
+  /** In-app notifications for SOLLUNA staff (admin alerts, new tickets, new registrations, inquiries). */
+  async notifyStaff(opts: { userIds?: string[]; roles?: string[]; type: string; title: string; body: string; organizationId?: string }) {
+    const roleUsers = opts.roles?.length
+      ? await this.db.user.findMany({ where: { type: 'STAFF', isActive: true, staffRole: { in: opts.roles as never } }, select: { id: true } })
+      : [];
+    const ids = [...new Set([...(opts.userIds ?? []), ...roleUsers.map((u) => u.id)])];
+    if (!ids.length) return 0;
+    await this.db.notification.createMany({ data: ids.map((userId) => ({ userId, organizationId: opts.organizationId ?? null, type: opts.type, title: opts.title, body: opts.body })) });
+    return ids.length;
+  }
+
   private async sendWebhook(e: PlatformEvent): Promise<'sent' | 'failed' | 'not_configured'> {
     if (!config.connectorWebhookUrl) return 'not_configured';
     const org = await this.db.organization.findUnique({ where: { id: e.organizationId }, select: { legalName: true, brandName: true, contactEmail: true } });
-    const body = JSON.stringify({ ...e, organization: org, sentAt: new Date().toISOString() });
+    return this.post({ ...e, organization: org, sentAt: new Date().toISOString() }, e.type);
+  }
+
+  private async post(payload: Record<string, unknown>, type: string): Promise<'sent' | 'failed' | 'not_configured'> {
+    if (!config.connectorWebhookUrl) return 'not_configured';
+    const body = JSON.stringify(payload);
     const headers: Record<string, string> = { 'content-type': 'application/json' };
     if (config.connectorWebhookSecret) headers['x-solluna-signature'] = createHmac('sha256', config.connectorWebhookSecret).update(body).digest('hex');
     try {
@@ -47,7 +73,7 @@ export class DispatcherService {
       if (!r.ok) throw new Error(`HTTP ${r.status}`);
       return 'sent';
     } catch (err) {
-      this.log.warn(`Webhook delivery failed for ${e.type}: ${(err as Error).message}`);
+      this.log.warn(`Webhook delivery failed for ${type}: ${(err as Error).message}`);
       return 'failed';
     }
   }

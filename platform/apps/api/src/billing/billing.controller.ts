@@ -16,7 +16,7 @@ export class BillingController {
   @CustomerOnly() @Patch('profile')
   profile(@CurrentUser() user: AuthUser, @Body() body: unknown) { return this.billing.updateProfile(user, body); }
 
-  @StaffOnly('SUPER_ADMIN', 'ACCOUNTS_EXECUTIVE') @Get('admin/invoices/:id')
+  @StaffOnly('SUPER_ADMIN', 'OPERATIONS_MANAGER', 'ACCOUNTS_EXECUTIVE') @Get('admin/invoices/:id')
   staffInvoice(@CurrentUser() user: AuthUser, @Param('id') id: string) { return this.billing.getInvoice(user, id); }
 
   @CustomerOnly() @Get('invoices/:id')
@@ -24,6 +24,9 @@ export class BillingController {
 
   @CustomerOnly() @Post('checkout')
   checkout(@CurrentUser() user: AuthUser, @Body() body: unknown) { return this.billing.checkout(user, body); }
+
+  @CustomerOnly() @Post('cancel') @HttpCode(200)
+  cancel(@CurrentUser() user: AuthUser, @Body() body: unknown) { return this.billing.setCancel(user, body); }
 
   @CustomerOnly() @Post('verify') @HttpCode(200)
   verify(@CurrentUser() user: AuthUser, @Body() body: unknown) { return this.billing.verifyCheckout(user, body); }

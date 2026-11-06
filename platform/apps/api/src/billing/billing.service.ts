@@ -135,7 +135,7 @@ export class BillingService {
       const updated = await tx.subscription.update({
         where: { id: sub.id },
         // currentPeriodStart is the billing anchor (see billingMonthStart); renewals only extend the end.
-        data: { status: 'ACTIVE', currentPeriodStart: renewing ? sub.currentPeriodStart : start, currentPeriodEnd: end, graceUntil: null },
+        data: { status: 'ACTIVE', currentPeriodStart: renewing ? sub.currentPeriodStart : start, currentPeriodEnd: end, graceUntil: null, cancelAtPeriodEnd: false },
       });
       await this.issueInvoice(tx, payment, sub.plan, start, end, now);
       await this.audit.log({ action: 'subscription.activate', entity: 'Subscription', entityId: sub.id, organizationId: payment.organizationId, after: { plan: sub.plan.code, source, periodEnd: end } }, tx);
@@ -155,9 +155,9 @@ export class BillingService {
 
   /** Renewal reminders, grace period and past-due transitions. Run on a schedule (SWEEP_INTERVAL_MS) or by admin. */
   async sweep(now = new Date()) {
-    const out = { reminders: 0, toGrace: 0, toPastDue: 0 };
+    const out = { reminders: 0, toGrace: 0, toPastDue: 0, expired: 0 };
     const soon = await this.db.subscription.findMany({
-      where: { status: 'ACTIVE', currentPeriodEnd: { gt: now, lte: addDays(now, config.renewalReminderDays) } }, include: { plan: true },
+      where: { status: 'ACTIVE', cancelAtPeriodEnd: false, currentPeriodEnd: { gt: now, lte: addDays(now, config.renewalReminderDays) } }, include: { plan: true },
     });
     for (const s of soon) {
       const already = await this.db.auditLog.findFirst({ where: { action: 'subscription.renewal_reminder', entityId: s.id, after: { path: ['periodEnd'], equals: s.currentPeriodEnd!.toISOString() } } });
@@ -168,6 +168,14 @@ export class BillingService {
     }
     const expired = await this.db.subscription.findMany({ where: { status: 'ACTIVE', currentPeriodEnd: { lte: now } } });
     for (const s of expired) {
+      if (s.cancelAtPeriodEnd) {
+        // Client cancelled: service ends at period end, no grace period, no reminders.
+        await this.db.subscription.update({ where: { id: s.id }, data: { status: 'EXPIRED' } });
+        await this.audit.log({ action: 'subscription.expired', entity: 'Subscription', entityId: s.id, organizationId: s.organizationId, after: { reason: 'cancelled_at_period_end' } });
+        await this.dispatch.emit({ type: 'subscription.expired', organizationId: s.organizationId, title: 'Plan ended', body: 'Your plan ended as requested. Your reports, documents and chat history stay available. Re-activate any time from Billing.' });
+        out.expired++;
+        continue;
+      }
       const graceUntil = addDays(s.currentPeriodEnd!, config.graceDays);
       await this.db.subscription.update({ where: { id: s.id }, data: { status: 'GRACE_PERIOD', graceUntil } });
       await this.audit.log({ action: 'subscription.grace_period', entity: 'Subscription', entityId: s.id, organizationId: s.organizationId, after: { graceUntil } });
@@ -182,6 +190,22 @@ export class BillingService {
       out.toPastDue++;
     }
     return out;
+  }
+
+  /** Cancel at period end (no partial-month refunds — see Refund & Cancellation Policy), or undo it. */
+  async setCancel(user: AuthUser, input: unknown) {
+    const { cancel, reason } = parse(z.object({ cancel: z.boolean(), reason: z.string().trim().max(500).optional() }), input);
+    const sub = await this.db.subscription.findFirst({ where: { organizationId: user.organizationId!, status: { in: ['ACTIVE', 'GRACE_PERIOD'] } }, include: { plan: true }, orderBy: { currentPeriodEnd: 'desc' } });
+    if (!sub) throw new BadRequestException('No active plan to cancel');
+    await this.db.subscription.update({ where: { id: sub.id }, data: { cancelAtPeriodEnd: cancel } });
+    await this.audit.log({ actor: user, action: cancel ? 'subscription.cancel_scheduled' : 'subscription.cancel_undone', entity: 'Subscription', entityId: sub.id, after: { reason } });
+    await this.dispatch.emit({
+      type: 'subscription.cancel_scheduled', organizationId: sub.organizationId,
+      title: cancel ? 'Cancellation scheduled' : 'Cancellation withdrawn',
+      body: cancel ? `Your ${sub.plan.name} plan stays active until ${sub.currentPeriodEnd?.toDateString()} and will not renew.` : `Your ${sub.plan.name} plan will continue. Renew before ${sub.currentPeriodEnd?.toDateString()} to avoid interruption.`,
+    });
+    if (cancel) await this.dispatch.notifyStaff({ roles: ['SUPER_ADMIN', 'OPERATIONS_MANAGER'], organizationId: sub.organizationId, type: 'admin.cancellation', title: 'Client scheduled a cancellation', body: reason ?? 'No reason given' });
+    return { cancelAtPeriodEnd: cancel, currentPeriodEnd: sub.currentPeriodEnd };
   }
 
   get invoicingConfigured() {

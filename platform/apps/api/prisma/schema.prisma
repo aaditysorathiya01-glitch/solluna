@@ -179,21 +179,24 @@ enum ApprovalStatus {
 // ───────────── Identity & tenancy ─────────────
 
 model User {
-  id             String        @id @default(cuid())
-  type           UserType
-  staffRole      StaffRole?
-  email          String        @unique
-  phone          String?       @unique
-  name           String
-  passwordHash   String?
-  emailVerified  DateTime?
-  phoneVerified  DateTime?
-  twoFactorSecret String?      // required for staff
-  isActive       Boolean       @default(true) // false = access revoked immediately
-  organizationId String?       // null for staff
-  organization   Organization? @relation(fields: [organizationId], references: [id])
-  createdAt      DateTime      @default(now())
-  updatedAt      DateTime      @updatedAt
+  id                 String        @id @default(cuid())
+  type               UserType
+  staffRole          StaffRole?
+  email              String        @unique
+  phone              String?       @unique
+  name               String
+  passwordHash       String?
+  emailVerified      DateTime?
+  phoneVerified      DateTime?
+  twoFactorSecret    String? // AES-256-GCM encrypted TOTP secret (common/crypto.ts)
+  twoFactorEnabledAt DateTime? // set once the first code is confirmed; required for SUPER_ADMIN
+  passwordChangedAt  DateTime? // sessions issued before this are rejected
+  lastLoginAt        DateTime?
+  isActive           Boolean       @default(true) // false = access revoked immediately
+  organizationId     String? // null for staff
+  organization       Organization? @relation(fields: [organizationId], references: [id])
+  createdAt          DateTime      @default(now())
+  updatedAt          DateTime      @updatedAt
 
   managedAssignments ManagerAssignment[] @relation("Manager")
   messages           Message[]
@@ -203,21 +206,23 @@ model User {
 }
 
 model Organization {
-  id           String   @id @default(cuid())
-  legalName    String
-  brandName    String?
-  gstin        String?
-  pan          String?
-  category     String?
-  contactEmail String
-  contactPhone String
-  address      String?
-  city         String?
-  pincode      String?
-  stateCode    String?  // GST state code for place of supply (derived from GSTIN when present)
-  isSuspended  Boolean  @default(false)
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
+  id              String    @id @default(cuid())
+  legalName       String
+  brandName       String?
+  gstin           String?
+  pan             String?
+  category        String?
+  contactEmail    String
+  contactPhone    String
+  address         String?
+  city            String?
+  pincode         String?
+  stateCode       String? // GST state code for place of supply (derived from GSTIN when present)
+  isSuspended     Boolean   @default(false)
+  suspendedReason String?
+  onboardedAt     DateTime? // business + marketplace details + documents complete
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
 
   users               User[]
   subscriptions       Subscription[]
@@ -251,14 +256,14 @@ model Organization {
 // ───────────── Plans (admin-configurable) ─────────────
 
 model Plan {
-  id          String        @id @default(cuid())
-  code        String        @unique // RESELLER | GROWTH | PREMIUM
-  name        String
-  pricePaise  Int           // 199900, 499900, 999900
-  interval    String        @default("monthly")
-  isActive    Boolean       @default(true)
-  sortOrder   Int           @default(0)
-  features    PlanFeature[]
+  id            String         @id @default(cuid())
+  code          String         @unique // RESELLER | GROWTH | PREMIUM
+  name          String
+  pricePaise    Int // 199900, 499900, 999900
+  interval      String         @default("monthly")
+  isActive      Boolean        @default(true)
+  sortOrder     Int            @default(0)
+  features      PlanFeature[]
   subscriptions Subscription[]
 }
 
@@ -268,10 +273,10 @@ model PlanFeature {
   id         String  @id @default(cuid())
   planId     String
   plan       Plan    @relation(fields: [planId], references: [id], onDelete: Cascade)
-  featureKey String  // see packages/permissions/src/features.ts
+  featureKey String // see packages/permissions/src/features.ts
   enabled    Boolean @default(true)
   limitValue Int?
-  meta       Json?   // e.g. { callSupport: "ON_REQUEST" | "PRIORITY" }
+  meta       Json? // e.g. { callSupport: "ON_REQUEST" | "PRIORITY" }
 
   @@unique([planId, featureKey])
 }
@@ -311,10 +316,10 @@ model Payment {
   organizationId    String
   organization      Organization  @relation(fields: [organizationId], references: [id])
   subscriptionId    String?
-  amountPaise       Int           // total charged = taxable + GST
+  amountPaise       Int // total charged = taxable + GST
   taxablePaise      Int           @default(0)
   taxPaise          Int           @default(0)
-  placeOfSupply     String?       // GST state code
+  placeOfSupply     String? // GST state code
   status            PaymentStatus @default(INITIATED)
   razorpayOrderId   String?       @unique
   razorpayPaymentId String?       @unique
@@ -345,8 +350,8 @@ model Invoice {
   cgstPaise      Int          @default(0)
   sgstPaise      Int          @default(0)
   igstPaise      Int          @default(0)
-  gstPaise       Int          // total tax
-  amountPaise    Int          // invoice total
+  gstPaise       Int // total tax
+  amountPaise    Int // invoice total
   supplier       Json?
   buyer          Json?
   fileKey        String?
@@ -359,13 +364,18 @@ model Invoice {
 // ───────────── Marketplaces ─────────────
 
 model MarketplaceAccount {
-  id             String       @id @default(cuid())
+  id             String                 @id @default(cuid())
   organizationId String
-  organization   Organization @relation(fields: [organizationId], references: [id])
+  organization   Organization           @relation(fields: [organizationId], references: [id])
   marketplace    Marketplace
   sellerId       String?
   storeName      String?
-  status         String       @default("PENDING") // PENDING | CONNECTED | ERROR | DISCONNECTED
+  status         String                 @default("PENDING") // PENDING | CONNECTED | ERROR | DISCONNECTED — CONNECTED only with staff-verified evidence
+  hasAccount     Boolean                @default(true) // false = client needs seller-account registration
+  contactEmail   String? // seller-central login email (never the password)
+  verifiedNote   String? // how SOLLUNA verified access (e.g. "user permission accepted in Seller Central")
+  verifiedById   String?
+  updatedAt      DateTime               @default(now()) @updatedAt
   lastSyncAt     DateTime?
   lastError      String?
   credential     MarketplaceCredential?
@@ -399,7 +409,7 @@ model Product {
   gstRate        Decimal?     @db.Decimal(5, 2)
   mrpPaise       Int?
   sellingPaise   Int?
-  costPaise      Int?         // COGS — required for verified P&L
+  costPaise      Int? // COGS — required for verified P&L
   specs          Json?
   variations     Json?
   asin           String?
@@ -414,38 +424,44 @@ model Product {
 
 /// One row per marketplace — Amazon & Flipkart statuses tracked separately.
 model ListingRequest {
-  id             String        @id @default(cuid())
-  organizationId String
-  organization   Organization  @relation(fields: [organizationId], references: [id])
-  productId      String
-  product        Product       @relation(fields: [productId], references: [id])
-  marketplace    Marketplace
-  status         ListingStatus @default(RESEARCH_NOT_STARTED)
-  countsTowardQuota Boolean    @default(false) // true only once catalog ID created (rejected drafts don't count)
-  assigneeId     String?
-  payload        Json          // title, bullets, description, keywords, attributes
-  imageKeys      String[]
-  rejectionNote  String?
-  liveUrl        String?
-  createdAt      DateTime      @default(now())
-  updatedAt      DateTime      @updatedAt
+  id                String        @id @default(cuid())
+  organizationId    String
+  organization      Organization  @relation(fields: [organizationId], references: [id])
+  productId         String
+  product           Product       @relation(fields: [productId], references: [id])
+  marketplace       Marketplace
+  status            ListingStatus @default(RESEARCH_NOT_STARTED)
+  countsTowardQuota Boolean       @default(false) // true only once catalog ID created (rejected drafts don't count)
+  assigneeId        String?
+  payload           Json // title, bullets, description, keywords, attributes
+  imageKeys         String[]
+  rejectionNote     String?
+  liveUrl           String?
+  catalogId         String? // ASIN / FSN once created
+  serviceRequestId  String? // orchestrator request this listing belongs to
+  history           Json          @default("[]") // [{status, note, at, by}]
+  createdAt         DateTime      @default(now())
+  updatedAt         DateTime      @updatedAt
 
   @@index([organizationId, marketplace, status])
 }
 
 model CatalogMapping {
-  id             String        @id @default(cuid())
-  organizationId String
-  organization   Organization  @relation(fields: [organizationId], references: [id])
-  marketplace    Marketplace
-  identifier     String        // ASIN / FSN / product reference
-  productInfo    Json?
-  status         MappingStatus @default(NOT_ASSESSED) // HIGH_CONFIDENCE needs human review before upload
-  candidateId    String?       // ASIN / FSN found
-  result         Json?
-  assigneeId     String?
-  createdAt      DateTime      @default(now())
-  updatedAt      DateTime      @updatedAt
+  id               String        @id @default(cuid())
+  organizationId   String
+  organization     Organization  @relation(fields: [organizationId], references: [id])
+  marketplace      Marketplace
+  identifier       String // ASIN / FSN / product reference
+  productInfo      Json?
+  status           MappingStatus @default(NOT_ASSESSED) // HIGH_CONFIDENCE needs human review before upload
+  candidateId      String? // ASIN / FSN found
+  result           Json?
+  sellerSku        String?
+  note             String?
+  assigneeId       String?
+  serviceRequestId String?
+  createdAt        DateTime      @default(now())
+  updatedAt        DateTime      @updatedAt
 
   @@index([organizationId, status])
 }
@@ -453,17 +469,17 @@ model CatalogMapping {
 // ───────────── Ads, promotions, inventory ─────────────
 
 model AdCampaign {
-  id             String       @id @default(cuid())
-  organizationId String
-  organization   Organization @relation(fields: [organizationId], references: [id])
-  marketplace    Marketplace
-  externalId     String?
-  name           String
+  id               String        @id @default(cuid())
+  organizationId   String
+  organization     Organization  @relation(fields: [organizationId], references: [id])
+  marketplace      Marketplace
+  externalId       String?
+  name             String
   dailyBudgetPaise Int?
-  status         String       @default("DRAFT")
-  metrics        Json?        // spend, sales, acos, roas, impressions, clicks
-  changes        AdChangeLog[]
-  createdAt      DateTime     @default(now())
+  status           String        @default("DRAFT")
+  metrics          Json? // spend, sales, acos, roas, impressions, clicks
+  changes          AdChangeLog[]
+  createdAt        DateTime      @default(now())
 
   @@index([organizationId])
 }
@@ -475,36 +491,43 @@ model AdChangeLog {
   field         String
   previousValue String?
   newValue      String?
-  actorId       String?    // null = system
-  actorType     String     // STAFF | SYSTEM
+  actorId       String? // null = system
+  actorType     String // STAFF | SYSTEM
   createdAt     DateTime   @default(now())
 }
 
 model PromotionRequest {
-  id             String       @id @default(cuid())
+  id             String          @id @default(cuid())
   organizationId String
-  organization   Organization @relation(fields: [organizationId], references: [id])
+  organization   Organization    @relation(fields: [organizationId], references: [id])
   marketplace    Marketplace
-  type           String       // DEAL | COUPON | LIGHTNING | OTHER
+  type           String // DEAL | COUPON | LIGHTNING | OTHER
   details        Json
   status         PromotionStatus @default(OPPORTUNITY_IDENTIFIED) // ACTIVE/OPTED_OUT only on marketplace confirmation
   approvalId     String?
-  createdAt      DateTime     @default(now())
+  createdAt      DateTime        @default(now())
 
   @@index([organizationId])
 }
 
 model InventoryRecord {
-  id             String       @id @default(cuid())
+  id             String         @id @default(cuid())
   organizationId String
-  organization   Organization @relation(fields: [organizationId], references: [id])
+  organization   Organization   @relation(fields: [organizationId], references: [id])
   productId      String
-  product        Product      @relation(fields: [productId], references: [id])
+  product        Product        @relation(fields: [productId], references: [id])
   marketplace    Marketplace
-  quantity       Int
-  daysOfCover    Decimal?     @db.Decimal(8, 2)
-  severity       StockSeverity?      // defaults: CRITICAL ≤3d, HIGH 4–7, MEDIUM 8–14, WATCH 15–30
-  recordedAt     DateTime     @default(now())
+  sku            String         @default("")
+  quantity       Int // sellable units
+  inboundUnits   Int?
+  avgDailySales  Decimal?       @db.Decimal(10, 2) // units/day over the chosen window
+  daysOfCover    Decimal?       @db.Decimal(8, 2)
+  severity       StockSeverity? // defaults: CRITICAL ≤3d, HIGH 4–7, MEDIUM 8–14, WATCH 15–30
+  snapshotId     String         @default("")
+  dataAsOf       DateTime       @default(now())
+  acknowledgedAt DateTime?
+  recordedById   String?
+  recordedAt     DateTime       @default(now())
 
   @@index([organizationId, productId])
 }
@@ -512,18 +535,25 @@ model InventoryRecord {
 // ───────────── Labels & Thank You Notes ─────────────
 
 model LabelJob {
-  id             String         @id @default(cuid())
-  organizationId String
-  organization   Organization   @relation(fields: [organizationId], references: [id])
-  batchDate      DateTime
-  marketplace    Marketplace
-  status         LabelJobStatus @default(QUEUED)
-  orderCount     Int            @default(0)
-  skippedOrders  Json?          // duplicates, cancellations, invalid
-  labelFileKey   String?
-  noteFileKey    String?        // Premium only
-  startedAt      DateTime?
-  completedAt    DateTime?
+  id              String         @id @default(cuid())
+  organizationId  String
+  organization    Organization   @relation(fields: [organizationId], references: [id])
+  batchDate       DateTime
+  marketplace     Marketplace
+  status          LabelJobStatus @default(QUEUED)
+  orderCount      Int            @default(0)
+  skippedOrders   Json? // duplicates, cancellations, invalid
+  labelFileKey    String?
+  noteFileKey     String? // Premium only
+  labelDocumentId String? // official marketplace label PDF, stored unaltered
+  noteTemplateId  String? // Premium: approved thank-you template printed as separate inserts
+  noteCount       Int            @default(0)
+  dispatchBy      DateTime?
+  note            String?
+  createdById     String?
+  startedAt       DateTime?
+  completedAt     DateTime?
+  downloadedAt    DateTime?
 
   @@index([organizationId, batchDate])
 }
@@ -541,31 +571,39 @@ model ThankYouTemplate {
   heightMm       Int          @default(150)
   approvedAt     DateTime?
   isActive       Boolean      @default(true)
+  name           String       @default("Thank you note")
+  version        Int          @default(1)
+  status         String       @default("DRAFT") // DRAFT | CLIENT_REVIEW | APPROVED | REVISION_REQUESTED | ARCHIVED
+  supportContact String?
+  approvedById   String?
+  revisionNote   String?
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @default(now()) @updatedAt
+
+  @@index([organizationId, status])
 }
 
 // ───────────── Reports & documents ─────────────
-
-
 
 /// A client file (business documents, deliverables, chat attachments). Bytes live in storage (fileKey).
 model Document {
   id             String       @id @default(cuid())
   organizationId String
   organization   Organization @relation(fields: [organizationId], references: [id])
-  kind           String       // GST_CERT | PAN | INVOICE | BRAND_AUTH | STATEMENT | REPORT | CA_DOCUMENT | LABELS | CHAT_ATTACHMENT | OTHER
+  kind           String // GST_CERT | PAN | INVOICE | BRAND_AUTH | STATEMENT | REPORT | CA_DOCUMENT | LABELS | CHAT_ATTACHMENT | OTHER
   title          String       @default("")
   fileName       String       @default("")
   visibility     String       @default("CLIENT") // CLIENT (client + staff) | INTERNAL (SOLLUNA staff only)
-  fileKey        String       // storage key
+  fileKey        String // storage key
   sha256         String       @default("")
-  mimeType       String       // detected from content, not the file name
+  mimeType       String // detected from content, not the file name
   sizeBytes      Int
   scanStatus     String       @default("NOT_SCANNED") // NOT_SCANNED | CLEAN | INFECTED
   uploadedById   String
   messageId      String?
   message        Message?     @relation(fields: [messageId], references: [id])
-  periodMonth    DateTime?    // accounting month the document belongs to (CA pack)
-  caStatus       String?      // ca-documentation-support §8: VERIFIED_READABLE | DUPLICATE | INCOMPLETE | OUTSIDE_PERIOD | CA_REVIEW_REQUIRED
+  periodMonth    DateTime? // accounting month the document belongs to (CA pack)
+  caStatus       String? // ca-documentation-support §8: VERIFIED_READABLE | DUPLICATE | INCOMPLETE | OUTSIDE_PERIOD | CA_REVIEW_REQUIRED
   deletedAt      DateTime?
   createdAt      DateTime     @default(now())
 
@@ -602,31 +640,79 @@ model Message {
   attachmentKeys String[]
   attachments    Document[]
   isInternalNote Boolean      @default(false) // staff-only, never sent to customer
-  readAt         DateTime?    // set when the other side (client ↔ SOLLUNA) reads it
+  readAt         DateTime? // set when the other side (client ↔ SOLLUNA) reads it
   createdAt      DateTime     @default(now())
 
   @@index([conversationId, createdAt])
 }
 
 model SupportTicket {
-  id             String         @id @default(cuid())
-  organizationId String
-  organization   Organization   @relation(fields: [organizationId], references: [id])
-  number         Int            @default(autoincrement())
-  category       TicketCategory
-  marketplace    Marketplace?
-  subject        String
-  description    String
-  status         TicketStatus   @default(NEW)
-  priority       Priority       @default(P3) // SLA ack: P1 30m · P2 2 business hrs · P3 1 business day · P4 2 business days
-  assigneeId     String?
-  createdById    String
-  resolvedAt     DateTime?
-  createdAt      DateTime       @default(now())
-  updatedAt      DateTime       @updatedAt
+  id              String          @id @default(cuid())
+  organizationId  String
+  organization    Organization    @relation(fields: [organizationId], references: [id])
+  number          Int             @default(autoincrement())
+  category        TicketCategory
+  marketplace     Marketplace?
+  subject         String
+  description     String
+  status          TicketStatus    @default(NEW)
+  priority        Priority        @default(P3) // SLA ack: P1 30m · P2 2 business hrs · P3 1 business day · P4 2 business days
+  assigneeId      String?
+  createdById     String
+  resolvedAt      DateTime?
+  firstResponseAt DateTime?
+  createdAt       DateTime        @default(now())
+  updatedAt       DateTime        @updatedAt
+  comments        TicketComment[]
 
   @@index([organizationId, status])
   @@index([assigneeId, status])
+}
+
+model TicketComment {
+  id         String        @id @default(cuid())
+  ticketId   String
+  ticket     SupportTicket @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  authorId   String?
+  authorType String // CUSTOMER | STAFF | SYSTEM
+  authorName String        @default("")
+  body       String
+  internal   Boolean       @default(false) // staff-only note
+  statusFrom TicketStatus?
+  statusTo   TicketStatus?
+  createdAt  DateTime      @default(now())
+
+  @@index([ticketId, createdAt])
+}
+
+/// Single-use tokens for password reset and email verification. Only the SHA-256 hash is stored.
+model AuthToken {
+  id        String    @id @default(cuid())
+  userId    String
+  purpose   String // RESET_PASSWORD | VERIFY_EMAIL
+  tokenHash String    @unique
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime  @default(now())
+
+  @@index([userId, purpose])
+}
+
+/// Public website contact form.
+model ContactInquiry {
+  id          String   @id @default(cuid())
+  name        String
+  email       String
+  phone       String?
+  business    String?
+  topic       String   @default("GENERAL") // GENERAL | PLANS | SUPPORT | PARTNERSHIP
+  message     String
+  status      String   @default("NEW") // NEW | CONTACTED | CONVERTED | CLOSED
+  handledById String?
+  ip          String?
+  createdAt   DateTime @default(now())
+
+  @@index([status, createdAt])
 }
 
 /// A client request as received by the orchestrator (Step 1). Expands into one or more Tasks.
@@ -635,12 +721,12 @@ model ServiceRequest {
   organizationId String
   organization   Organization @relation(fields: [organizationId], references: [id])
   featureKey     String
-  workflow       String       // workflow template id (orchestrator Step 4)
+  workflow       String // workflow template id (orchestrator Step 4)
   marketplace    Marketplace?
   title          String
   details        Json
   status         TaskStatus   @default(NEW)
-  entitlement    String       // ALLOWED | PENDING_VERIFICATION | OUT_OF_PLAN | LIMIT_REACHED
+  entitlement    String // ALLOWED | PENDING_VERIFICATION | OUT_OF_PLAN | LIMIT_REACHED
   createdById    String
   tasks          Task[]
   createdAt      DateTime     @default(now())
@@ -651,31 +737,31 @@ model ServiceRequest {
 
 /// Orchestrator work item (solluna-skill-orchestrator Step 5). One per routed skill action.
 model Task {
-  id             String       @id @default(cuid())
+  id             String          @id @default(cuid())
   organizationId String
-  organization   Organization @relation(fields: [organizationId], references: [id])
+  organization   Organization    @relation(fields: [organizationId], references: [id])
   requestId      String?
   request        ServiceRequest? @relation(fields: [requestId], references: [id])
-  stepKey        String?      // workflow step id
-  stepIndex      Int          @default(0) // position in the workflow (createdAt is identical within one transaction)
-  approvalAction String?      // if set, client Approval of this action type gates the task
+  stepKey        String? // workflow step id
+  stepIndex      Int             @default(0) // position in the workflow (createdAt is identical within one transaction)
+  approvalAction String? // if set, client Approval of this action type gates the task
   title          String
-  featureKey     String       // packages/permissions FEATURES key
-  skill          String       // .claude/skills/<skill>
+  featureKey     String // packages/permissions FEATURES key
+  skill          String // .claude/skills/<skill>
   marketplace    Marketplace?
-  priority       Priority     @default(P3)
-  status         TaskStatus   @default(NEW)
-  entitlement    String       @default("PENDING_VERIFICATION") // ALLOWED | PENDING_VERIFICATION | OUT_OF_PLAN | LIMIT_REACHED
+  priority       Priority        @default(P3)
+  status         TaskStatus      @default(NEW)
+  entitlement    String          @default("PENDING_VERIFICATION") // ALLOWED | PENDING_VERIFICATION | OUT_OF_PLAN | LIMIT_REACHED
   requiredInputs Json?
   dependsOnIds   String[]
-  refId          String?      // linked listing/mapping/label/promo id
+  refId          String? // linked listing/mapping/label/promo id
   assigneeId     String?
   dueAt          DateTime?
-  evidence       Json?        // output locations, marketplace confirmations
+  evidence       Json? // output locations, marketplace confirmations
   blocker        String?
   approvals      Approval[]
-  createdAt      DateTime     @default(now())
-  updatedAt      DateTime     @updatedAt
+  createdAt      DateTime        @default(now())
+  updatedAt      DateTime        @updatedAt
 
   @@index([organizationId, status])
   @@index([assigneeId, status])
@@ -689,11 +775,11 @@ model Approval {
   organizationId String
   taskId         String?
   task           Task?          @relation(fields: [taskId], references: [id])
-  actionType     String         // AD_BUDGET | SPEND | MARKETPLACE_FEE | PRICE_CHANGE | CONTENT_CHANGE | ORDER_ACTION | DATA_SHARE | OUT_OF_PLAN
-  parameters     Json           // the material parameters approved (amount, SKU, dates…)
+  actionType     String // AD_BUDGET | SPEND | MARKETPLACE_FEE | PRICE_CHANGE | CONTENT_CHANGE | ORDER_ACTION | DATA_SHARE | OUT_OF_PLAN
+  parameters     Json // the material parameters approved (amount, SKU, dates…)
   status         ApprovalStatus @default(REQUESTED)
   requestedById  String
-  decidedById    String?        // client user
+  decidedById    String? // client user
   decidedAt      DateTime?
   expiresAt      DateTime?
   createdAt      DateTime       @default(now())
@@ -723,8 +809,8 @@ model BrandApproval {
   organizationId     String
   marketplace        Marketplace
   brand              String
-  approvalType       String      // reseller_selling_approval | catalog_brand_creation | brand_owner_enrollment | product_category_approval
-  clientRelationship String      // brand_owner | manufacturer | authorized_distributor | authorized_reseller | importer
+  approvalType       String // reseller_selling_approval | catalog_brand_creation | brand_owner_enrollment | product_category_approval
+  clientRelationship String // brand_owner | manufacturer | authorized_distributor | authorized_reseller | importer
   status             String      @default("intake")
   evidence           Json?
   createdAt          DateTime    @default(now())
@@ -750,16 +836,16 @@ model ManagerAssignment {
 // ───────────── Notifications & audit ─────────────
 
 model Notification {
-  id             String       @id @default(cuid())
+  id             String        @id @default(cuid())
   organizationId String?
   organization   Organization? @relation(fields: [organizationId], references: [id])
   userId         String?
   type           String
   title          String
   body           String
-  channel        String       @default("IN_APP") // IN_APP | EMAIL | SMS | WHATSAPP
+  channel        String        @default("IN_APP") // IN_APP | EMAIL | SMS | WHATSAPP
   readAt         DateTime?
-  createdAt      DateTime     @default(now())
+  createdAt      DateTime      @default(now())
 
   @@index([userId, readAt])
 }
@@ -768,9 +854,9 @@ model AuditLog {
   id             String   @id @default(cuid())
   actorId        String?
   actor          User?    @relation(fields: [actorId], references: [id])
-  actorType      String   // CUSTOMER | STAFF | SYSTEM
+  actorType      String // CUSTOMER | STAFF | SYSTEM
   organizationId String?
-  action         String   // e.g. subscription.activate, credential.update
+  action         String // e.g. subscription.activate, credential.update
   entity         String
   entityId       String?
   before         Json?
@@ -787,38 +873,38 @@ model AuditLog {
 /// Monthly marketplace figures entered by SOLLUNA from marketplace reports (manual-assisted until APIs are approved).
 /// All amounts in paise, GST-exclusive. NULL = not provided (never treated as zero).
 model MarketplaceMonth {
-  id                   String       @id @default(cuid())
-  organizationId       String
-  organization         Organization @relation(fields: [organizationId], references: [id])
-  periodMonth          DateTime     // first day of the month (UTC)
-  marketplace          Marketplace
-  salesBasis           String       @default("SHIPPED") // SHIPPED | ORDERED — never mixed
-  grossSalesPaise      Int?
-  discountsPaise       Int?
-  returnsRefundsPaise  Int?
-  reimbursementsPaise  Int?
-  orders               Int?
-  unitsSold            Int?
-  unitsReturned        Int?
-  cancelledOrders      Int?
-  sessions             Int?
-  commissionPaise      Int?
-  fixedFeesPaise       Int?
-  fulfilmentPaise      Int?
-  shippingPaise        Int?
-  storagePaise         Int?
-  otherFeesPaise       Int?
-  adSpendPaise         Int?
-  adSalesPaise         Int?
-  impressions          Int?
-  clicks               Int?
-  adSpendInFees        Boolean      @default(false) // ad spend already deducted inside marketplace fees (avoid double count)
-  settlementPaise      Int?
-  bankCreditPaise      Int?         // verified bank credit for the settlement
-  reservesPaise        Int?
-  sourceNote           String?      // which reports were used
-  enteredById          String
-  updatedAt            DateTime     @updatedAt
+  id                  String       @id @default(cuid())
+  organizationId      String
+  organization        Organization @relation(fields: [organizationId], references: [id])
+  periodMonth         DateTime // first day of the month (UTC)
+  marketplace         Marketplace
+  salesBasis          String       @default("SHIPPED") // SHIPPED | ORDERED — never mixed
+  grossSalesPaise     Int?
+  discountsPaise      Int?
+  returnsRefundsPaise Int?
+  reimbursementsPaise Int?
+  orders              Int?
+  unitsSold           Int?
+  unitsReturned       Int?
+  cancelledOrders     Int?
+  sessions            Int?
+  commissionPaise     Int?
+  fixedFeesPaise      Int?
+  fulfilmentPaise     Int?
+  shippingPaise       Int?
+  storagePaise        Int?
+  otherFeesPaise      Int?
+  adSpendPaise        Int?
+  adSalesPaise        Int?
+  impressions         Int?
+  clicks              Int?
+  adSpendInFees       Boolean      @default(false) // ad spend already deducted inside marketplace fees (avoid double count)
+  settlementPaise     Int?
+  bankCreditPaise     Int? // verified bank credit for the settlement
+  reservesPaise       Int?
+  sourceNote          String? // which reports were used
+  enteredById         String
+  updatedAt           DateTime     @updatedAt
 
   @@unique([organizationId, periodMonth, marketplace])
 }
@@ -860,10 +946,10 @@ model OperatingExpense {
   organizationId String
   organization   Organization @relation(fields: [organizationId], references: [id])
   periodMonth    DateTime
-  category       String       // STAFF | RENT | SOFTWARE | PROFESSIONAL | TRANSPORT | OTHER
+  category       String // STAFF | RENT | SOFTWARE | PROFESSIONAL | TRANSPORT | OTHER
   description    String
   amountPaise    Int
-  documentId     String?      // supporting invoice
+  documentId     String? // supporting invoice
   enteredById    String
   createdAt      DateTime     @default(now())
 
@@ -885,19 +971,19 @@ model ReportMonth {
 
 /// Immutable generated report snapshot. Clients only see PUBLISHED versions.
 model MonthlyReport {
-  id                String           @id @default(cuid())
-  organizationId    String
-  organization      Organization     @relation(fields: [organizationId], references: [id])
-  periodMonth       DateTime
-  kind              String           // PERFORMANCE | PL
-  version           Int
-  status            String           @default("DRAFT") // DRAFT | PUBLISHED | SUPERSEDED
-  confidence        FigureConfidence
-  data              Json
-  generatedById     String
-  publishedById     String?
-  publishedAt       DateTime?
-  createdAt         DateTime         @default(now())
+  id             String           @id @default(cuid())
+  organizationId String
+  organization   Organization     @relation(fields: [organizationId], references: [id])
+  periodMonth    DateTime
+  kind           String // PERFORMANCE | PL
+  version        Int
+  status         String           @default("DRAFT") // DRAFT | PUBLISHED | SUPERSEDED
+  confidence     FigureConfidence
+  data           Json
+  generatedById  String
+  publishedById  String?
+  publishedAt    DateTime?
+  createdAt      DateTime         @default(now())
 
   @@unique([organizationId, periodMonth, kind, version])
   @@index([organizationId, status])
