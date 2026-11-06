@@ -9,7 +9,8 @@ async function bootstrap() {
   // rawBody is required to verify Razorpay webhook signatures byte-for-byte.
   const app = await NestFactory.create(AppModule, { rawBody: true });
   app.setGlobalPrefix('api');
-  app.getHttpAdapter().getInstance().set('trust proxy', 1);
+  // Proxy hops in front of the API: 1 behind Caddy; 2 on Render (Render edge → web proxy → Render edge → API).
+  app.getHttpAdapter().getInstance().set('trust proxy', Number(process.env.TRUST_PROXY_HOPS ?? 1));
   app.getHttpAdapter().getInstance().disable('x-powered-by');
   app.enableShutdownHooks();
   await app.listen(config.port);
