@@ -15,14 +15,16 @@ solluna.co.in, its DNS, the GitHub Pages site and the `main` branch are untouche
 ## Services
 | Render service | Type | Build | Start |
 |---|---|---|---|
-| `solluna-preview` | Free web service (Next.js) | `cd platform && npm ci --include=dev && npm run build -w @solluna/web` | `cd platform/apps/web && npx next start -p $PORT -H 0.0.0.0` |
-| `solluna-api-preview` | Free web service (NestJS) | `cd platform && npm ci --include=dev && npx prisma generate … && npm run build -w @solluna/api` | `prisma migrate deploy` → `seed-plans.ts` → `seed-preview.ts` → `node …/main.js` |
+| `solluna-preview` | Free web service running **web + API together** | `cd platform && npm ci --include=dev && prisma generate && build api && build web` | `bash platform/deploy/render/start-preview.sh` |
+| `solluna-api-preview` | Former separate API service — **suspended** (kept only for rollback) | — | — |
 | `solluna-preview-db` | Free Postgres | — | internal URL only (no public IP allow-list) |
 
-The web service proxies `/api/*` to the API (`API_URL`), so the session cookie stays first-party on the preview domain.
+Why one service: two free services sleep separately (first request ~60–90 s) and two always-on services would need ~1,440 hours a month, far above the 750 free hours. One service stays within the free hours, so `KEEP_ALIVE_URL` makes the API ping its own public URL every 10 minutes and the preview never sleeps.
+
+`start-preview.sh` runs `prisma migrate deploy`, then the API on `127.0.0.1:4000` and Next.js on Render's `$PORT` (Next proxies `/api`). Node heaps are capped to fit 512 MB. Seeds run only with `RUN_SEEDS=1` (needed only for a fresh database).
 Secrets (`JWT_SECRET`, `DATA_ENCRYPTION_KEY`, `ADMIN_PASSWORD`, `DATABASE_URL`) are Render environment variables, generated randomly for this preview and never committed.
 
-Preview-only settings: `PREVIEW_MODE=true`, `PREVIEW_DEMO_SUBSCRIPTIONS`, `PREVIEW_BANNER` (amber banner + `noindex`), `TRUST_PROXY_HOPS=2`, `AUTH_RATE_LIMIT_PER_MIN=20`.
+Preview-only settings: `PREVIEW_MODE=true` (enables the no-payment test activation button), `PREVIEW_DEMO_SUBSCRIPTIONS`, `PREVIEW_BANNER` (amber banner + `noindex`), `KEEP_ALIVE_URL`, `TRUST_PROXY_HOPS=1`, `AUTH_RATE_LIMIT_PER_MIN=20`. Manager hand-off timing: `MANAGER_ASSIGN_DELAY_MIN` (default 5), `MANAGER_MESSAGE_GAP_SEC` (default 40).
 
 ## Demo data
 Accounts (passwords are held privately by the owner, not in the repository):
@@ -58,13 +60,13 @@ node deploy/render/test-preview.mjs https://solluna-preview.onrender.com ./shots
 Both need ADMIN_EMAIL / ADMIN_PASSWORD / ADMIN_TOTP_SECRET (and STAFF_PASSWORD / CLIENT_PASSWORD for the second).
 
 ## Deploying a change
-The Render GitHub app is not installed, so pushes do not auto-deploy. After pushing to `solluna-2.0-platform`, open each service in the Render dashboard → **Manual Deploy → Deploy latest commit** (web first if only the UI changed). To enable auto-deploy, install the Render GitHub app for this repository and switch Auto-Deploy on.
+The Render GitHub app is not installed, so pushes do not auto-deploy. After pushing to `solluna-2.0-platform`, open `solluna-preview` in the Render dashboard → **Manual Deploy → Deploy latest commit**. To enable auto-deploy, install the Render GitHub app for this repository and switch Auto-Deploy on.
 
 ## Free-tier limitations (why this is not production)
-1. **Sleeps after 15 minutes idle.** The first request afterwards takes about 30–60 seconds (both services wake separately). Timed jobs (renewal sweep) only run while awake.
+1. **Kept awake by a self-ping** every 10 minutes (one service ≈ 744 hours/month, within the 750 free hours). After a deploy or restart the first request can still take ~30–60 seconds; the browser retries for up to 90 seconds.
 2. **Database expires on 6 Dec 2026** (30 days), then it is deleted after a grace period. 1 GB storage, **no backups, no point-in-time recovery.** Treat every record as disposable.
 3. **512 MB RAM, 0.1 CPU** per service: pages and label downloads are noticeably slower than on a real server; no load testing here.
-4. **750 free instance hours per month** per workspace, shared by both services. Two services running continuously need 1,440 hours, but sleeping keeps real use well under the limit.
+4. **750 free instance hours per month** per workspace. The always-on preview uses ~720–744. Do not start other free services in this workspace, or the preview may be suspended near month-end.
 5. **No background worker, cron job, shell or persistent disk** on free services. Files are stored in Postgres, so nothing is lost on restart, but anything stored dies with the database.
 6. **No email delivery** until a connector webhook is configured (`CONNECTOR_WEBHOOK_URL`). Forgot-password and verification links therefore do not arrive; signed-in users can still change their password in Settings.
 7. **onrender.com domain, Singapore region.** Data is outside India and the address is not the brand domain. Do not put real client data or credentials into the preview.
