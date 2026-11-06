@@ -6,6 +6,11 @@ import { Logo } from './Logo';
 import { Status } from './Dashboard';
 import { ChatPanel, DocumentsPanel } from './Chat';
 import { OpsReporting } from './Reporting';
+import { OpsTickets } from './Tickets';
+import { OpsClients } from './OpsClients';
+import { AdminConsole, PaymentsPanel } from './Admin';
+import { AccountSettings, TwoFactor, type MeFull } from './Settings';
+import { Flash, NotificationBell, type FlashMsg } from './ui';
 
 interface QueueTask { id: string; title: string; status: string; priority: string; skill: string; featureKey: string; marketplace: string | null; organization: { legalName: string; brandName: string | null }; request: { title: string } | null; createdAt: string }
 interface Context {
@@ -20,22 +25,29 @@ interface Context {
 const CONNECTOR_LABEL: Record<string, string> = { GOOGLE_DRIVE: 'Google Drive', GOOGLE_SHEETS: 'Google Sheets', ZAPIER_GMAIL: 'Gmail (Zapier)', CLAUDE_DOCS: 'Claude Docs' };
 const NEEDS_BLOCKER = ['BLOCKED', 'AWAITING_INFORMATION', 'PARTIALLY_COMPLETED'];
 const NEEDS_EVIDENCE = ['COMPLETED', 'PARTIALLY_COMPLETED'];
+type View = 'tasks' | 'inbox' | 'reports' | 'tickets' | 'clients' | 'admin' | 'payments' | 'settings';
 
 export function Ops() {
   const router = useRouter();
   const [me, setMe] = useState<{ name: string; staffRole: string } | null>(null);
+  const [full, setFull] = useState<MeFull | null>(null);
+  const [staffList, setStaffList] = useState<{ id: string; name: string; staffRole: string }[]>([]);
+  const [flash, setFlash] = useState<FlashMsg>(null);
   const [queue, setQueue] = useState<QueueTask[]>([]);
   const [selected, setSelected] = useState<string | null>(null);
   const [ctx, setCtx] = useState<Context | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [view, setView] = useState<'tasks' | 'inbox' | 'reports'>('tasks');
+  const [view, setView] = useState<View>('tasks');
 
   const loadQueue = useCallback(async () => {
     try {
-      const m = await api<{ user: { name: string; type: string; staffRole: string } }>('/auth/me');
+      const m = await api<MeFull>('/auth/me');
       if (m.user.type !== 'STAFF') { router.replace('/dashboard'); return; }
-      setMe(m.user);
+      setMe({ name: m.user.name, staffRole: m.user.staffRole! });
+      setFull(m);
+      if (m.user.twoFactorRequired) return; // enrolment first — the API refuses everything else
       setQueue(await api<QueueTask[]>('/ops/tasks'));
+      if (['SUPER_ADMIN', 'OPERATIONS_MANAGER'].includes(m.user.staffRole!)) api<{ id: string; name: string; staffRole: string }[]>('/admin/staff').then(setStaffList).catch(() => undefined);
     } catch (e) {
       if ((e as ApiError).status === 401) router.replace('/login'); else setError((e as Error).message);
     }
@@ -47,7 +59,28 @@ export function Ops() {
     api<Context>(`/ops/tasks/${selected}/context`).then(setCtx).catch((e) => setError(e.message));
   }, [selected]);
 
-  if (!me) return <main className="flex min-h-screen items-center justify-center text-ink-3">{error ?? 'Loading…'}</main>;
+  if (!me || !full) return <main className="flex min-h-screen items-center justify-center text-ink-3">{error ?? 'Loading…'}</main>;
+
+  if (full.user.twoFactorRequired) {
+    return (
+      <main className="mx-auto max-w-xl space-y-4 px-4 py-16">
+        <Logo />
+        <h1 className="font-display text-3xl">Secure your admin account</h1>
+        <p className="text-sm text-ink-3">Super admin accounts must use two-factor authentication before the console opens.</p>
+        <Flash msg={flash} onClose={() => setFlash(null)} />
+        <TwoFactor me={full} forced onDone={(m) => { setFlash(m); if (m?.kind === 'ok' && /is on/.test(m.text)) setTimeout(() => window.location.reload(), 800); }} />
+        <button className="text-sm underline" onClick={async () => { await api('/auth/logout', { method: 'POST' }); router.replace('/login'); }}>Sign out</button>
+      </main>
+    );
+  }
+  const role = me.staffRole;
+  const views: [View, string][] = [
+    ['tasks', 'Task queue'], ['inbox', 'Client inbox'], ['tickets', 'Tickets'], ['clients', 'Client workspace'],
+    ...(['SUPER_ADMIN', 'OPERATIONS_MANAGER', 'ACCOUNTS_EXECUTIVE'].includes(role) ? [['reports', 'Reporting'] as [View, string]] : []),
+    ...(role === 'ACCOUNTS_EXECUTIVE' ? [['payments', 'Payments'] as [View, string]] : []),
+    ...(['SUPER_ADMIN', 'OPERATIONS_MANAGER'].includes(role) ? [['admin', 'Admin'] as [View, string]] : []),
+    ['settings', 'My account'],
+  ];
 
   return (
     <div className="min-h-screen">
@@ -56,16 +89,17 @@ export function Ops() {
           <div className="flex items-center gap-4"><Logo light /><span className="chip bg-sun/20 text-sun-2">Operations</span></div>
           <div className="flex items-center gap-3 text-sm text-ivory/70">
             <span className="hidden sm:inline">{me.name} · {me.staffRole.replace(/_/g, ' ').toLowerCase()}</span>
+            <NotificationBell dark />
             <button className="btn border border-ivory/20 py-1.5 text-ivory" onClick={async () => { await api('/auth/logout', { method: 'POST' }); router.replace('/login'); }}>Sign out</button>
           </div>
         </div>
       </header>
-      <nav className="mx-auto flex max-w-7xl gap-1 px-4 pt-4 sm:px-6" aria-label="Operations">
-        {(['tasks', 'inbox', ...(['SUPER_ADMIN', 'OPERATIONS_MANAGER', 'ACCOUNTS_EXECUTIVE'].includes(me.staffRole) ? ['reports'] as const : [])] as const).map((v) => (
-          <button key={v} onClick={() => setView(v)} className={view === v ? 'btn-primary py-1.5 text-xs' : 'btn-ghost py-1.5 text-xs'}>{v === 'tasks' ? 'Task queue' : v === 'inbox' ? 'Client inbox' : 'Reporting'}</button>
+      <nav className="mx-auto flex max-w-7xl flex-wrap gap-1 px-4 pt-4 sm:px-6" aria-label="Operations">
+        {views.map(([v, label]) => (
+          <button key={v} onClick={() => setView(v)} className={view === v ? 'btn-primary py-1.5 text-xs' : 'btn-ghost py-1.5 text-xs'}>{label}</button>
         ))}
       </nav>
-      {view === 'reports' ? <OpsReporting /> : view === 'inbox' ? <Inbox canAssign={['SUPER_ADMIN', 'OPERATIONS_MANAGER'].includes(me.staffRole)} /> : (
+      {view === 'tickets' ? <OpsTickets staff={staffList} /> : view === 'clients' ? <OpsClients /> : view === 'admin' ? <AdminConsole role={role} /> : view === 'payments' ? <main className="mx-auto max-w-7xl px-4 py-6 sm:px-6"><h1 className="mb-4 font-display text-2xl">Payments</h1><PaymentsPanel /></main> : view === 'settings' ? <main className="mx-auto max-w-3xl px-4 py-6 sm:px-6"><Flash msg={flash} onClose={() => setFlash(null)} /><AccountSettings me={full} onDone={(m) => { setFlash(m); api<MeFull>('/auth/me').then(setFull).catch(() => undefined); }} /></main> : view === 'reports' ? <OpsReporting /> : view === 'inbox' ? <Inbox canAssign={['SUPER_ADMIN', 'OPERATIONS_MANAGER'].includes(me.staffRole)} /> : (
       <main className="mx-auto grid max-w-7xl gap-6 px-4 py-6 sm:px-6 lg:grid-cols-[minmax(0,2fr)_minmax(0,3fr)]">
         <section>
           <div className="mb-3 flex items-center justify-between"><h1 className="font-display text-2xl">Task queue</h1><button className="btn-ghost py-1.5 text-xs" onClick={loadQueue}>Refresh</button></div>

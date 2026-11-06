@@ -12,6 +12,7 @@ export function AuthForm({ mode, plan }: { mode: 'login' | 'register'; plan?: st
   const [error, setError] = useState<string | null>(null);
   const [issues, setIssues] = useState<Record<string, string>>({});
   const [busy, setBusy] = useState(false);
+  const [needCode, setNeedCode] = useState(false);
 
   const fields: Field[] = mode === 'login'
     ? [{ name: 'email', label: 'Email', type: 'email', required: true, autoComplete: 'email' }, { name: 'password', label: 'Password', type: 'password', required: true, autoComplete: 'current-password' }]
@@ -28,13 +29,23 @@ export function AuthForm({ mode, plan }: { mode: 'login' | 'register'; plan?: st
   async function submit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
     setBusy(true); setError(null); setIssues({});
-    const body = Object.fromEntries([...new FormData(e.currentTarget).entries()].filter(([, v]) => String(v).trim() !== ''));
+    const body: Record<string, unknown> = Object.fromEntries([...new FormData(e.currentTarget).entries()].filter(([, v]) => String(v).trim() !== ''));
+    if (mode === 'register') {
+      if (body.terms !== 'on') { setError('Please accept the Terms & Conditions and Privacy Policy'); setBusy(false); return; }
+      delete body.terms;
+    }
     try {
       await api(`/auth/${mode}`, { method: 'POST', body });
       const me = await api<{ user: { type: string } }>('/auth/me');
       router.push(me.user.type === 'STAFF' ? '/ops' : plan ? `/dashboard?tab=billing&plan=${plan}` : '/dashboard');
     } catch (err) {
       const a = err as ApiError;
+      if (a.status === 401 && /authenticator|code/i.test(a.message) && mode === 'login') {
+        setNeedCode(true);
+        setError(needCode ? a.message : null);
+        setBusy(false);
+        return;
+      }
       setError(a.message);
       if (a.issues) setIssues(Object.fromEntries(a.issues.map((i) => [i.path, i.message])));
       setBusy(false);
@@ -55,8 +66,22 @@ export function AuthForm({ mode, plan }: { mode: 'login' | 'register'; plan?: st
               {issues[f.name] && <p className="mt-1 text-xs text-red-700">{issues[f.name]}</p>}
             </div>
           ))}
+          {needCode && (
+            <div>
+              <label className="label" htmlFor="code">Authenticator code</label>
+              <input className="input tracking-[0.4em]" id="code" name="code" inputMode="numeric" autoComplete="one-time-code" maxLength={6} placeholder="123456" autoFocus required />
+              <p className="mt-1 text-xs text-ink-3">Two-factor authentication is on for this account. Enter the 6-digit code from your authenticator app.</p>
+            </div>
+          )}
+          {mode === 'register' && (
+            <label className="flex items-start gap-2 text-sm text-ink-3">
+              <input type="checkbox" name="terms" className="mt-1 accent-[#C9962B]" />
+              <span>I agree to the <Link className="underline" href="/terms" target="_blank">Terms &amp; Conditions</Link>, <Link className="underline" href="/privacy" target="_blank">Privacy Policy</Link> and <Link className="underline" href="/refund-policy" target="_blank">Refund &amp; Cancellation Policy</Link>.</span>
+            </label>
+          )}
           {error && <p role="alert" className="rounded-xl bg-red-50 px-3 py-2 text-sm text-red-800">{error}</p>}
           <button className="btn-primary w-full" disabled={busy}>{busy ? 'Please wait…' : mode === 'login' ? 'Sign in' : 'Create account'}</button>
+          {mode === 'login' && <p className="text-center text-sm"><Link className="text-ink-3 underline hover:text-ink" href="/forgot-password">Forgot password?</Link></p>}
           <p className="text-center text-sm text-ink-3">
             {mode === 'login' ? <>New to SOLLUNA? <Link className="font-semibold text-ink underline" href="/register">Create an account</Link></> : <>Already registered? <Link className="font-semibold text-ink underline" href="/login">Sign in</Link></>}
           </p>

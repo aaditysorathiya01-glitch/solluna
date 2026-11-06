@@ -61,7 +61,7 @@ before(async () => {
 
   const a = start('node', ['dist/apps/api/src/main.js'], apiDir, {
     DATABASE_URL, PORT: String(apiPort), JWT_SECRET: 'web-e2e-secret-web-e2e-secret-123', COOKIE_SECURE: 'false',
-    RAZORPAY_KEY_ID: KEY_ID, RAZORPAY_KEY_SECRET: KEY_SECRET, RAZORPAY_WEBHOOK_SECRET: 'wh', RAZORPAY_API_BASE: `http://127.0.0.1:${rzpPort}`, RATE_LIMIT_PER_MIN: '10000', AUTH_RATE_LIMIT_PER_MIN: '100',
+    RAZORPAY_KEY_ID: KEY_ID, RAZORPAY_KEY_SECRET: KEY_SECRET, RAZORPAY_WEBHOOK_SECRET: 'wh', RAZORPAY_API_BASE: `http://127.0.0.1:${rzpPort}`, RATE_LIMIT_PER_MIN: '10000', AUTH_RATE_LIMIT_PER_MIN: '100', EXPOSE_AUTH_LINKS: 'true', APP_URL: 'http://web.invalid',
     SUPPLIER_LEGAL_NAME: 'Aaditya Jitendrabhai Sorathia', SUPPLIER_TRADE_NAME: 'Solluna', SUPPLIER_GSTIN: '24OPVPS8924H1ZQ', SUPPLIER_ADDRESS: 'Survey No 135, Plot No 9, Shreeji Nagar, Meghpar Kumbhardi Sim, Anjar, Kachchh, Gujarat 370110', SUPPLIER_EMAIL: 'solluna.play@gmail.com',
   });
   apiProc = a.p;
@@ -104,6 +104,25 @@ async function apiCall(method, path, token, body) {
 
 const S = {};
 
+// RFC 6238 TOTP (independent implementation) — what the admin's authenticator app would show.
+function totp(secretB32, at = Date.now()) {
+  const A = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567';
+  let bits = '';
+  for (const c of secretB32.replace(/\s+/g, '')) bits += A.indexOf(c).toString(2).padStart(5, '0');
+  const key = Buffer.from(bits.match(/.{8}/g).map((b) => parseInt(b, 2)));
+  const msg = Buffer.alloc(8); msg.writeBigUInt64BE(BigInt(Math.floor(at / 30000)));
+  const h = createHmac('sha1', key).update(msg).digest();
+  const o = h[19] & 15;
+  return String((h.readUInt32BE(o) & 0x7fffffff) % 1e6).padStart(6, '0');
+}
+async function adminToken() {
+  const r = await apiCall('POST', '/auth/login', null, { ...ADMIN, code: totp(S.adminSecret) });
+  assert.ok(r.token, JSON.stringify(r));
+  return r.token;
+}
+// Emailed links point at APP_URL; open them on the test server instead.
+const local = (link) => link.replace('http://web.invalid', webBase);
+
 test('landing page renders live plans and the 28-service comparison', async () => {
   const { page, errors } = await newPage();
   await page.goto(webBase);
@@ -124,6 +143,38 @@ test('landing page has no horizontal scroll on a phone', async () => {
   assert.ok(overflow <= 0, `horizontal overflow ${overflow}px`);
 });
 
+test('super admin must enrol 2FA in the browser before the console opens; sign-in then asks for the code', async () => {
+  const { page, errors } = await newPage();
+  await page.goto(`${webBase}/login`);
+  await page.fill('#email', ADMIN.email); await page.fill('#password', ADMIN.password);
+  await page.click('button:has-text("Sign in")');
+  await page.waitForURL(/\/ops/);
+  await page.getByRole('heading', { name: 'Secure your admin account' }).waitFor();
+  await page.click('button:has-text("Set up two-factor authentication")');
+  const secret = (await page.getByTestId('totp-secret').innerText()).replace(/\s+/g, '');
+  assert.match(secret, /^[A-Z2-7]{32}$/);
+  await page.fill('input[aria-label="Authenticator code"]', '000000');
+  await page.click('button:has-text("Confirm")');
+  await page.getByText('That code did not match').waitFor();
+  await page.fill('input[aria-label="Authenticator code"]', totp(secret));
+  await page.click('button:has-text("Confirm")');
+  await page.getByRole('button', { name: 'Admin', exact: true }).waitFor({ timeout: 15000 });
+  S.adminSecret = secret;
+  // Fresh sign-in now requires the code.
+  const { page: p2 } = await newPage();
+  await p2.goto(`${webBase}/login`);
+  await p2.fill('#email', ADMIN.email); await p2.fill('#password', ADMIN.password);
+  await p2.click('button:has-text("Sign in")');
+  await p2.locator('#code').waitFor();
+  await p2.fill('#code', totp(secret));
+  await p2.click('button:has-text("Sign in")');
+  await p2.waitForURL(/\/ops/);
+  await p2.getByRole('button', { name: 'Admin', exact: true }).click();
+  await p2.getByText('MRR (excl. GST)').waitFor();
+  await p2.screenshot({ path: join(SHOTS, '0-admin-overview.png'), fullPage: true });
+  assert.deepEqual(errors, []);
+});
+
 test('register → billing details → GST total → Razorpay checkout → verified → GST tax invoice', async () => {
   const { page, errors } = await newPage();
   S.customer = page;
@@ -132,6 +183,9 @@ test('register → billing details → GST total → Razorpay checkout → verif
   // Validation from the API surfaces on the form.
   await page.fill('#name', 'Riya Shah'); await page.fill('#email', 'riya@brand.test'); await page.fill('#phone', '12345');
   await page.fill('#legalName', 'Riya Lifestyle Pvt Ltd'); await page.fill('#password', 'Riya-Strong-Pass1');
+  await page.click('button:has-text("Create account")');
+  await page.getByText('Please accept the Terms').waitFor(); // consent is required before anything is sent
+  await page.check('input[name="terms"]');
   await page.click('button:has-text("Create account")');
   await page.getByText('Enter a valid Indian mobile number').waitFor();
   await page.fill('#phone', '9812345678');
@@ -196,7 +250,7 @@ test('customer raises an Ads request; out-of-plan services are visibly not inclu
 });
 
 test('staff executes the task in Ops with the skill procedure; client approves the budget', async () => {
-  const admin = (await apiCall('POST', '/auth/login', null, ADMIN)).token;
+  const admin = await adminToken();
   await apiCall('POST', '/admin/users/staff', admin, { name: 'Kabir Ads', email: 'kabir@solluna.test', password: 'Kabir-Passw0rd-1', staffRole: 'ADS_MANAGER' });
 
   const { page, errors } = await newPage();
@@ -302,7 +356,7 @@ test('Manager Chat Support: live two-way chat, attachments, internal notes, read
 });
 
 test('monthly reporting: staff inputs → client costs & expenses → P&L published → client report, CSV, CA pack', async () => {
-  const admin = (await apiCall('POST', '/auth/login', null, ADMIN)).token;
+  const admin = await adminToken();
   await apiCall('POST', '/admin/users/staff', admin, { name: 'Meera Accounts', email: 'meera@solluna.test', password: 'Meera-Passw0rd-1', staffRole: 'ACCOUNTS_EXECUTIVE' });
   const { page: st } = await newPage({ width: 1400, height: 900 });
   await st.goto(`${webBase}/login`);
@@ -379,6 +433,220 @@ test('monthly reporting: staff inputs → client costs & expenses → P&L publis
   assert.ok(await pack.getByRole('cell', { name: 'Received' }).first().isVisible());
   assert.equal(await pack.getByRole('listitem').filter({ hasText: 'Amazon settlement report' }).count(), 0, 'no longer listed as missing');
   assert.ok(await pack.getByText('Tax filing, audit and certification are not included', { exact: false }).isVisible());
+});
+
+test('public site: services, about, FAQ, legal pages render from the shared header; contact form reaches the admin inbox', async () => {
+  const { page, errors } = await newPage();
+  await page.goto(webBase);
+  await page.getByRole('link', { name: 'Services' }).first().click();
+  await page.waitForURL(/\/services/);
+  await page.getByRole('heading', { name: '28 services. One accountable team.' }).waitFor();
+  assert.equal(await page.locator('main li.card').count(), 28, 'every service listed from the live plan matrix');
+  for (const [path, heading] of [['/about', /Specialists for the work/], ['/faq', /Questions sellers ask/], ['/terms', 'Terms & Conditions'], ['/privacy', 'Privacy Policy'], ['/refund-policy', 'Refund & Cancellation Policy']]) {
+    await page.goto(webBase + path);
+    await page.getByRole('heading', { name: heading, level: 1 }).waitFor();
+  }
+  assert.ok(await page.getByText('Cancel at period end', { exact: false }).first().isVisible());
+  await page.goto(`${webBase}/faq`);
+  await page.click('summary:has-text("Do you need my Seller Central")');
+  assert.ok(await page.getByText('never ask for passwords or OTPs', { exact: false }).isVisible());
+
+  await page.goto(`${webBase}/contact`);
+  await page.fill('#c-name', 'Meera Joshi'); await page.fill('#c-email', 'meera@crafts.test');
+  await page.fill('#c-message', 'short');
+  await page.click('button:has-text("Send message")');
+  await page.locator('p.text-red-700').first().waitFor();
+  await page.fill('#c-message', 'We sell 60 handloom SKUs on Flipkart and want to start Amazon.');
+  await page.fill('#c-business', 'Meera Crafts');
+  await page.click('button:has-text("Send message")');
+  await page.getByText('Thank you — message received.').waitFor();
+  const inbox = await apiCall('GET', '/admin/inquiries', await adminToken());
+  assert.equal(inbox[0].business, 'Meera Crafts');
+  await page.screenshot({ path: join(SHOTS, '9-contact.png'), fullPage: true });
+
+  const phone = await newPage({ width: 390, height: 844 });
+  for (const path of ['/services', '/contact', '/terms']) {
+    await phone.page.goto(webBase + path);
+    const overflow = await phone.page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
+    assert.ok(overflow <= 0, `${path}: horizontal overflow ${overflow}px`);
+  }
+  assert.deepEqual(errors, []);
+});
+
+test('forgot password → emailed link → new password → old password stops working', async () => {
+  await apiCall('POST', '/auth/register', null, { name: 'Tara Nair', email: 'tara@shop.test', phone: '9822001100', password: 'Tara-Old-Pass-1', legalName: 'Tara Shop' });
+  const { page, errors } = await newPage();
+  await page.goto(`${webBase}/login`);
+  await page.click('text=Forgot password?');
+  await page.waitForURL(/forgot-password/);
+  await page.fill('#email', 'tara@shop.test');
+  await page.click('button:has-text("Send reset link")');
+  await page.getByText('If an account exists', { exact: false }).waitFor();
+  const link = await page.getByRole('link', { name: 'open reset link' }).getAttribute('href');
+  await page.goto(webBase + link);
+  await page.fill('#password', 'Tara-New-Pass-22'); await page.fill('#confirm', 'Tara-New-Pass-2X');
+  await page.click('button:has-text("Set new password")');
+  await page.getByText('Passwords do not match').waitFor();
+  await page.fill('#confirm', 'Tara-New-Pass-22');
+  await page.click('button:has-text("Set new password")');
+  await page.getByRole('heading', { name: 'Password updated' }).waitFor();
+  assert.equal((await apiCall('POST', '/auth/login', null, { email: 'tara@shop.test', password: 'Tara-Old-Pass-1' })).statusCode, 401);
+  await page.goto(`${webBase}/login`);
+  await page.fill('#email', 'tara@shop.test'); await page.fill('#password', 'Tara-New-Pass-22');
+  await page.click('button:has-text("Sign in")');
+  await page.waitForURL(/\/dashboard/);
+  await page.getByText('Finish setting up').waitFor();
+  assert.deepEqual(errors, []);
+});
+
+test('client: onboarding checklist, marketplace details (no passwords), product → listing request, support ticket, email verification', async () => {
+  const c = S.customer;
+  await c.goto(`${webBase}/dashboard`);
+  const checklist = c.getByRole('region', { name: 'Onboarding checklist' });
+  await checklist.waitFor();
+  assert.ok(await checklist.getByText('Amazon / Flipkart seller details').isVisible());
+
+  await c.click('nav[aria-label="Dashboard"] >> text=catalog');
+  await c.getByText('We never need your password or OTP.').waitFor();
+  await c.fill('#AMAZON-store', 'Riya Lifestyle'); await c.fill('#AMAZON-sid', 'A2RIYA12345');
+  await c.locator('form:has(#AMAZON-store) button:has-text("Save")').click();
+  await c.getByText('Amazon details saved', { exact: false }).waitFor();
+  await c.getByText('Awaiting verification').first().waitFor();
+
+  await c.click('button[role="tab"]:has-text("Products & listings")');
+  await c.click('button:has-text("Add product")');
+  await c.fill('#pr-name', 'Jute Table Runner'); await c.fill('#pr-brand', 'Riya'); await c.fill('#pr-cat', 'Home Decor');
+  await c.fill('#pr-sku', 'JTR-01'); await c.fill('#pr-hsn', '6304'); await c.fill('#pr-mrp', '899'); await c.fill('#pr-sp', '1099');
+  await c.click('button:has-text("Save product")');
+  await c.getByText('Selling price cannot be above MRP', { exact: false }).waitFor();
+  await c.fill('#pr-sp', '649'); await c.selectOption('#pr-gst', '12');
+  await c.click('button:has-text("Save product")');
+  await c.getByRole('cell', { name: /Jute Table Runner/ }).waitFor();
+  await c.click('button:has-text("Request listing")');
+  await c.check('input[name="mp"][value="FLIPKART"]');
+  await c.click('div[role="dialog"] button:has-text("Submit")');
+  await c.getByText('Amazon: request received', { exact: false }).waitFor();
+  await c.getByText('Flipkart: request received', { exact: false }).waitFor();
+  await c.screenshot({ path: join(SHOTS, '10-catalog.png'), fullPage: true });
+
+  await c.click('nav[aria-label="Dashboard"] >> text=tickets');
+  await c.click('button:has-text("New ticket")');
+  await c.selectOption('#t-cat', 'SHIPPING_LABELS');
+  await c.fill('#t-sub', 'Label missing for order 171-001');
+  await c.fill('#t-desc', 'Order 171-0011223 has no label in today’s batch.');
+  await c.selectOption('#t-pri', 'P2');
+  await c.click('button:has-text("Create ticket")');
+  await c.getByText('Ticket #', { exact: false }).first().waitFor();
+  await c.getByText('Label missing for order 171-001').waitFor();
+
+  await c.click('nav[aria-label="Dashboard"] >> text=settings');
+  await c.click('button:has-text("Send verification email")');
+  const vlink = await c.getByRole('link', { name: 'open verification link' }).getAttribute('href');
+  await c.goto(webBase + vlink);
+  await c.getByRole('heading', { name: 'Email verified' }).waitFor();
+});
+
+test('ops workspace: verify marketplace with evidence, mark listing live, publish labels; client downloads the unaltered PDF; ticket resolved', async () => {
+  const admin = await adminToken();
+  await apiCall('POST', '/admin/users/staff', admin, { name: 'Anaya Ops', email: 'anaya@solluna.test', password: 'Anaya-Passw0rd-1', staffRole: 'OPERATIONS_MANAGER' });
+  const { page: o, errors } = await newPage();
+  await o.goto(`${webBase}/login`);
+  await o.fill('#email', 'anaya@solluna.test'); await o.fill('#password', 'Anaya-Passw0rd-1');
+  await o.click('button:has-text("Sign in")');
+  await o.waitForURL(/\/ops/);
+  await o.getByRole('button', { name: 'Client workspace' }).click();
+  await o.click('aside button:has-text("Riya")');
+  const amazon = o.locator('div.card:has(h3:has-text("Amazon"))');
+  await amazon.locator('select[aria-label="Connection status"]').selectOption('CONNECTED');
+  await amazon.getByRole('button', { name: 'Update status' }).click();
+  await o.getByText('Describe how access was confirmed', { exact: false }).waitFor();
+  await amazon.locator('input[aria-label="Verification note"]').fill('User permission accepted in Seller Central (Manage Users) on 6 Nov');
+  await amazon.getByRole('button', { name: 'Update status' }).click();
+  await o.getByText('Amazon status updated', { exact: false }).waitFor();
+
+  await o.click('button[role="tab"]:has-text("Listings")');
+  const row = o.locator('div.card:has-text("Jute Table Runner · Amazon")');
+  await row.getByRole('button', { name: 'Update' }).click();
+  await row.locator('select[aria-label="Listing status"]').selectOption('ACTIVE');
+  await row.locator('input[aria-label="Catalog ID"]').fill('B0RIYA0001');
+  await row.getByRole('button', { name: 'Save' }).click();
+  await o.getByText('Live status needs the marketplace product URL', { exact: false }).waitFor();
+  await row.locator('input[aria-label="Live URL"]').fill('https://www.amazon.in/dp/B0RIYA0001');
+  await row.getByRole('button', { name: 'Save' }).click();
+  await o.getByText('Listing status updated', { exact: false }).waitFor();
+
+  await o.click('button[role="tab"]:has-text("Labels")');
+  const pdf = Buffer.from('%PDF-1.4\n% official label\n1 0 obj<<>>endobj\ntrailer<<>>\n%%EOF\n');
+  await o.fill('#lb-count', '7');
+  await o.setInputFiles('#lb-file', { name: 'amazon-labels.pdf', mimeType: 'application/pdf', buffer: pdf });
+  await o.click('button:has-text("Publish batch")');
+  await o.getByText('Batch ready: 7 orders', { exact: false }).waitFor();
+  await o.getByText('Amazon ·', { exact: false }).first().waitFor(); // list refreshes after publishing
+  await o.screenshot({ path: join(SHOTS, '11-ops-workspace.png'), fullPage: true });
+
+  await o.getByRole('button', { name: 'Tickets' }).click();
+  await o.click('button:has-text("Label missing for order 171-001")');
+  await o.selectOption('#o-status', 'RESOLVED');
+  await o.click('button:has-text("Update ticket")');
+  await o.getByText('Add a resolution note', { exact: false }).waitFor();
+  await o.fill('#o-note', 'Label regenerated and added to today’s batch.');
+  await o.click('button:has-text("Update ticket")');
+  await o.getByText('Ticket updated', { exact: false }).waitFor();
+
+  const c = S.customer;
+  await c.goto(`${webBase}/dashboard?tab=labels`);
+  await c.getByText('Amazon ·').first().waitFor();
+  const [dl] = await Promise.all([c.waitForEvent('download'), c.click('text=Download labels (PDF)')]);
+  const got = await (await import('node:fs/promises')).readFile(await dl.path());
+  assert.deepEqual(got, pdf, 'client receives the official label byte-for-byte');
+  await c.goto(`${webBase}/dashboard?tab=catalog`);
+  await c.click('button[role="tab"]:has-text("Products & listings")');
+  await c.getByRole('link', { name: 'View live' }).first().waitFor();
+  await c.goto(`${webBase}/dashboard?tab=tickets`);
+  await c.locator('button:has-text("Label missing for order 171-001")').getByText('Resolved').waitFor();
+  assert.deepEqual(errors, []);
+});
+
+test('admin console: plan limits editable by super admin, team management, notification bell', async () => {
+  const { page: a, errors } = await newPage();
+  await a.goto(`${webBase}/login`);
+  await a.fill('#email', ADMIN.email); await a.fill('#password', ADMIN.password);
+  await a.click('button:has-text("Sign in")');
+  await a.locator('#code').waitFor();
+  await a.fill('#code', totp(S.adminSecret));
+  await a.click('button:has-text("Sign in")');
+  await a.waitForURL(/\/ops/);
+  await a.getByRole('button', { name: 'Admin', exact: true }).click();
+  await a.click('button[role="tab"]:has-text("Plans")');
+  const limit = a.locator('input[aria-label="New Amazon Listings / Month limit on Reseller"]');
+  await limit.fill('5'); await limit.blur();
+  await a.getByText('Reseller: New Amazon Listings / Month limit set to 5.').waitFor();
+  const plans = await apiCall('GET', '/plans');
+  assert.equal(plans.find((p) => p.code === 'RESELLER').features.find((f) => f.key === 'NEW_LISTING_AMAZON').limit, 5, 'public pricing reads the edited limit');
+  await limit.fill('3'); await limit.blur();
+  await a.getByText('limit set to 3', { exact: false }).waitFor();
+
+  await a.click('button[role="tab"]:has-text("Team")');
+  await a.click('button:has-text("Add team member")');
+  await a.fill('#st-name', 'Dev Support'); await a.fill('#st-email', 'dev@solluna.test'); await a.selectOption('#st-role', 'SUPPORT_EXECUTIVE'); await a.fill('#st-pw', 'Dev-Support-Pass1');
+  await a.click('button:has-text("Create account")');
+  await a.getByText('Team member added', { exact: false }).waitFor();
+  const devRow = a.locator('tr:has-text("dev@solluna.test")');
+  await devRow.getByRole('button', { name: 'Disable' }).click();
+  await a.getByText('Dev Support disabled', { exact: false }).waitFor();
+  assert.ok((await apiCall('POST', '/auth/login', null, { email: 'dev@solluna.test', password: 'Dev-Support-Pass1' })).statusCode === 401, 'disabled staff cannot sign in');
+
+  await a.click('button[role="tab"]:has-text("Clients")');
+  await a.locator('tr:has-text("Riya")').getByRole('button', { name: 'Manage' }).click();
+  await a.getByText('Onboarding').first().waitFor();
+  await a.keyboard.press('Escape');
+  await a.click('button[role="tab"]:has-text("Audit log")');
+  await a.getByText('plan.feature_update').first().waitFor();
+
+  await a.getByRole('button', { name: /Notifications/ }).click();
+  await a.getByText('New client registered', { exact: false }).first().waitFor();
+  await a.screenshot({ path: join(SHOTS, '12-admin.png'), fullPage: true });
+  assert.deepEqual(errors, []);
 });
 
 test('route guards: signed-out users go to login; customers cannot open ops', async () => {

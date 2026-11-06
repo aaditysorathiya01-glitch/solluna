@@ -8,8 +8,13 @@ import { Logo } from './Logo';
 import { Markdownish } from './Markdownish';
 import { ChatPanel, DocumentsPanel } from './Chat';
 import { ClientReporting } from './Reporting';
+import { ClientCatalog } from './ClientCatalog';
+import { ClientFulfilment, ClientInventory } from './Fulfilment';
+import { ClientTickets } from './Tickets';
+import { AccountSettings, type MeFull } from './Settings';
 
-interface Me { user: { id: string; name: string; email: string; type: string }; organization: { legalName: string; brandName: string | null } | null }
+type Me = MeFull;
+interface Onboarding { complete: boolean; steps: { key: string; label: string; done: boolean; tab: string }[] }
 interface Feature { key: string; label: string; section: string; skill: string; enabled: boolean; limit: number | null; used: number | null; access: string; remaining: number | null; meta: { mode?: string } | null }
 interface Catalog { plan: { code: string; name: string; status: string; currentPeriodEnd: string } | null; subscriptionVerified: boolean | null; features: Feature[] }
 interface TaskLite { id: string; title: string; status: string; skill: string; stepKey: string; blocker: string | null }
@@ -22,26 +27,18 @@ interface Billing {
   profileComplete: boolean;
   gst: { rateBps: number; supplierState: string | null };
   states: Record<string, string>;
-  subscriptions: { id: string; status: string; currentPeriodEnd: string | null; plan: { code: string; name: string; pricePaise: number } }[];
+  subscriptions: { id: string; status: string; currentPeriodEnd: string | null; cancelAtPeriodEnd: boolean; plan: { code: string; name: string; pricePaise: number } }[];
   payments: { id: string; amountPaise: number; status: string; failureReason: string | null; createdAt: string }[];
   invoices: { id: string; number: string; amountPaise: number; taxablePaise: number; gstPaise: number; issuedAt: string }[];
 }
 interface Plan { code: string; name: string; pricePaise: number; features: { enabled: boolean }[] }
 interface Notification { id: string; title: string; body: string; createdAt: string; readAt: string | null }
 
-const TABS = ['overview', 'services', 'requests', 'approvals', 'chat', 'reports', 'documents', 'billing'] as const;
+const TABS = ['overview', 'services', 'requests', 'approvals', 'catalog', 'labels', 'inventory', 'tickets', 'chat', 'reports', 'documents', 'billing', 'settings'] as const;
 type Tab = (typeof TABS)[number];
 
-const STATUS_STYLE: Record<string, string> = {
-  COMPLETED: 'bg-emerald-50 text-emerald-800', PARTIALLY_COMPLETED: 'bg-amber-50 text-amber-800', CANCELLED: 'bg-ink/5 text-ink-3',
-  BLOCKED: 'bg-red-50 text-red-800', AWAITING_CLIENT_APPROVAL: 'bg-sun/15 text-sun-3', AWAITING_INFORMATION: 'bg-sun/15 text-sun-3',
-  PLAN_VERIFICATION: 'bg-moon/10 text-moon', IN_PROGRESS: 'bg-moon/10 text-moon', QUEUED: 'bg-ink/5 text-ink-2', NEW: 'bg-ink/5 text-ink-2',
-  UNDER_MARKETPLACE_REVIEW: 'bg-moon/10 text-moon', ACTIVE: 'bg-emerald-50 text-emerald-800', GRACE_PERIOD: 'bg-amber-50 text-amber-800',
-  VERIFIED: 'bg-emerald-50 text-emerald-800', FAILED: 'bg-red-50 text-red-800', INITIATED: 'bg-ink/5 text-ink-2', REQUESTED: 'bg-sun/15 text-sun-3',
-  APPROVED: 'bg-emerald-50 text-emerald-800', DECLINED: 'bg-red-50 text-red-800',
-};
-const human = (s: string) => s.replace(/_/g, ' ').toLowerCase().replace(/^\w/, (c) => c.toUpperCase());
-export const Status = ({ s }: { s: string }) => <span className={`chip ${STATUS_STYLE[s] ?? 'bg-ink/5 text-ink-2'}`}>{human(s)}</span>;
+export { Status, human } from './ui';
+import { Status, human, NotificationBell } from './ui';
 
 export function Dashboard() {
   const router = useRouter();
@@ -56,16 +53,17 @@ export function Dashboard() {
   const [notes, setNotes] = useState<Notification[]>([]);
   const [flash, setFlash] = useState<{ kind: 'ok' | 'err'; text: string } | null>(null);
   const [requestFor, setRequestFor] = useState<Feature | null>(null);
+  const [onboarding, setOnboarding] = useState<Onboarding | null>(null);
 
   const load = useCallback(async () => {
     try {
       const m = await api<Me>('/auth/me');
       if (m.user.type === 'STAFF') { router.replace('/ops'); return; }
       setMe(m);
-      const [c, r, a, b, p, n] = await Promise.all([
-        api<Catalog>('/features'), api<Req[]>('/requests'), api<Approval[]>('/approvals'), api<Billing>('/billing'), api<Plan[]>('/plans'), api<Notification[]>('/notifications'),
+      const [c, r, a, b, p, n, o] = await Promise.all([
+        api<Catalog>('/features'), api<Req[]>('/requests'), api<Approval[]>('/approvals'), api<Billing>('/billing'), api<Plan[]>('/plans'), api<Notification[]>('/notifications'), api<Onboarding>('/onboarding'),
       ]);
-      setCatalog(c); setRequests(r); setApprovals(a); setBilling(b); setPlans(p); setNotes(n);
+      setCatalog(c); setRequests(r); setApprovals(a); setBilling(b); setPlans(p); setNotes(n); setOnboarding(o);
     } catch (e) {
       if ((e as ApiError).status === 401) router.replace('/login');
       else setFlash({ kind: 'err', text: (e as Error).message });
@@ -90,12 +88,13 @@ export function Dashboard() {
           <Logo />
           <div className="flex items-center gap-3 text-sm">
             <span className="hidden text-ink-3 sm:inline">{me.organization?.brandName ?? me.organization?.legalName}</span>
+            <NotificationBell />
             <button className="btn-ghost py-1.5" onClick={logout}>Sign out</button>
           </div>
         </div>
         <nav className="mx-auto flex max-w-6xl gap-1 overflow-x-auto px-4 sm:px-6" aria-label="Dashboard">
           {TABS.map((t) => (
-            <button key={t} onClick={() => setTab(t)} className={`relative whitespace-nowrap px-3 py-3 text-sm font-medium capitalize ${tab === t ? 'text-ink' : 'text-ink-3 hover:text-ink'}`}>
+            <button key={t} onClick={() => { setTab(t); window.history.replaceState(null, '', `?tab=${t}`); }} className={`relative whitespace-nowrap px-3 py-3 text-sm font-medium capitalize ${tab === t ? 'text-ink' : 'text-ink-3 hover:text-ink'}`}>
               {t}{t === 'approvals' && pendingApprovals.length > 0 && <span className="ml-1.5 chip bg-sun text-ink">{pendingApprovals.length}</span>}
               {tab === t && <span className="absolute inset-x-2 bottom-0 h-0.5 rounded bg-sun" />}
             </button>
@@ -119,6 +118,22 @@ export function Dashboard() {
               <Stat label="Open requests" value={String(openRequests.length)} />
               <Stat label="Awaiting your approval" value={String(pendingApprovals.length)} highlight={pendingApprovals.length > 0} />
             </div>
+            {onboarding && !onboarding.complete && (
+              <section className="card p-6" aria-label="Onboarding checklist">
+                <div className="flex flex-wrap items-center justify-between gap-2"><h2 className="font-semibold">Finish setting up</h2><span className="text-sm text-ink-3">{onboarding.steps.filter((x) => x.done).length} of {onboarding.steps.length} done</span></div>
+                <div className="mt-3 h-1.5 overflow-hidden rounded-full bg-ink/5"><div className="h-full bg-sun" style={{ width: `${(onboarding.steps.filter((x) => x.done).length / onboarding.steps.length) * 100}%` }} /></div>
+                <ul className="mt-4 grid gap-2 sm:grid-cols-2">
+                  {onboarding.steps.map((st) => (
+                    <li key={st.key}>
+                      <button className="flex w-full items-center gap-3 rounded-xl px-3 py-2 text-left text-sm hover:bg-ivory" onClick={() => setTab(st.tab as Tab)} disabled={st.done}>
+                        <span className={`flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-[11px] ${st.done ? 'bg-emerald-600 text-white' : 'border border-ink/25'}`}>{st.done ? '✓' : ''}</span>
+                        <span className={st.done ? 'text-ink-3 line-through' : ''}>{st.label}</span>
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              </section>
+            )}
             {!catalog.plan && <div className="card flex flex-wrap items-center justify-between gap-4 p-6"><p>Activate a plan to start submitting requests.</p><button className="btn-gold" onClick={() => setTab('billing')}>View plans</button></div>}
             {catalog.plan && (
               <div className="grid gap-4 md:grid-cols-2">
@@ -188,6 +203,12 @@ export function Dashboard() {
             {!approvals.length && <p className="card p-6 text-sm text-ink-3">Nothing needs your approval.</p>}
           </div>
         )}
+
+        {tab === 'catalog' && <ClientCatalog />}
+        {tab === 'labels' && <ClientFulfilment />}
+        {tab === 'inventory' && <ClientInventory />}
+        {tab === 'tickets' && <ClientTickets />}
+        {tab === 'settings' && <AccountSettings me={me} onDone={(m) => { setFlash(m); api<Me>('/auth/me').then(setMe).catch(() => undefined); }} />}
 
         {tab === 'chat' && <ChatPanel mode="client" />}
 
@@ -351,6 +372,7 @@ function BillingTab({ billing, plans, current, preselect, onDone }: { billing: B
           </div>
         ))}
       </div>
+      <CancelPlan billing={billing} onDone={onDone} />
       <section className="card overflow-x-auto p-6">
         <h2 className="font-semibold">Payments</h2>
         <table className="mt-3 w-full min-w-[480px] text-sm">
@@ -442,5 +464,32 @@ function BillingProfileForm({ billing, onSaved }: { billing: Billing; onSaved: (
       {error && <p role="alert" className="rounded-xl bg-red-50 px-3 py-2 text-sm text-red-800">{error}</p>}
       <div className="flex gap-2"><button className="btn-primary" disabled={busy}>{busy ? 'Saving…' : 'Save billing details'}</button>{billing.profileComplete && <button type="button" className="btn-ghost" onClick={() => setEditing(false)}>Cancel</button>}</div>
     </form>
+  );
+}
+
+function CancelPlan({ billing, onDone }: { billing: Billing; onDone: (m: { kind: 'ok' | 'err'; text: string }) => void }) {
+  const sub = billing.subscriptions.find((x) => x.status === 'ACTIVE' || x.status === 'GRACE_PERIOD');
+  const [confirming, setConfirming] = useState(false);
+  if (!sub) return null;
+  const end = sub.currentPeriodEnd ? new Date(sub.currentPeriodEnd).toLocaleDateString('en-IN', { dateStyle: 'medium' }) : '';
+  async function set(cancel: boolean, reason?: string) {
+    try { await api('/billing/cancel', { method: 'POST', body: { cancel, reason } }); onDone({ kind: 'ok', text: cancel ? `Cancellation scheduled. ${sub!.plan.name} stays active until ${end}.` : 'Cancellation withdrawn. Your plan continues.' }); }
+    catch (e) { onDone({ kind: 'err', text: (e as Error).message }); }
+    setConfirming(false);
+  }
+  return (
+    <section className="card flex flex-wrap items-center justify-between gap-3 p-6">
+      <div className="text-sm">
+        <p className="font-semibold">{sub.plan.name} plan · {sub.cancelAtPeriodEnd ? <span className="text-amber-800">ends {end}</span> : <>paid until {end}</>}</p>
+        <p className="text-xs text-ink-3">{sub.cancelAtPeriodEnd ? 'Your plan will not renew. You keep access to reports, documents and chat history.' : 'Plans are paid monthly. Renew from the plan cards above before the date to avoid interruption.'}</p>
+      </div>
+      {sub.cancelAtPeriodEnd ? <button className="btn-ghost py-1.5 text-xs" onClick={() => set(false)}>Keep my plan</button> : confirming ? (
+        <form className="flex flex-wrap gap-2" onSubmit={(e) => { e.preventDefault(); set(true, String(new FormData(e.currentTarget).get('reason') ?? '') || undefined); }}>
+          <input name="reason" className="input py-1.5 text-xs" placeholder="Reason (optional)" aria-label="Cancellation reason" />
+          <button className="btn-ghost py-1.5 text-xs text-red-800">Confirm cancel at period end</button>
+          <button type="button" className="py-1.5 text-xs underline" onClick={() => setConfirming(false)}>Back</button>
+        </form>
+      ) : <button className="btn-ghost py-1.5 text-xs" onClick={() => setConfirming(true)}>Cancel at period end</button>}
+    </section>
   );
 }

@@ -1,21 +1,10 @@
 import Link from 'next/link';
-import { Logo } from '@/components/Logo';
+import { SiteFooter, SiteHeader } from '@/components/Site';
 import { SECTIONS, SECTION_LABEL, inr } from '@/lib/api';
+import { getPlans, type Plan, type PlanFeature } from '@/lib/plans';
+import { FAQS } from '@/lib/faq';
 
 export const dynamic = 'force-dynamic';
-
-interface PlanFeature { key: string; label: string; section: string; enabled: boolean; limit: number | null; meta: { mode?: string } | null }
-interface Plan { code: string; name: string; pricePaise: number; features: PlanFeature[] }
-
-/** Plans come from the API (DB), so admin edits to prices/limits show here without a deploy. */
-async function getPlans(): Promise<Plan[] | null> {
-  try {
-    const r = await fetch(`${process.env.API_URL ?? 'http://localhost:4000'}/api/plans`, { cache: 'no-store' });
-    return r.ok ? r.json() : null;
-  } catch {
-    return null;
-  }
-}
 
 function cell(f: PlanFeature | undefined) {
   if (!f || !f.enabled) return <span className="text-ink/25">—</span>;
@@ -32,6 +21,15 @@ const TAGLINE: Record<string, string> = {
   PREMIUM: 'Full management with strategy and branding',
 };
 
+const WHY = [
+  ['Approval-first execution', 'Nothing that costs you money or changes your listings happens without your explicit approval in the dashboard.'],
+  ['Proof for every status', 'Live listing URLs, marketplace case IDs and published reports — progress you can verify, not take on trust.'],
+  ['GST-ready billing', 'Transparent GST-exclusive pricing with a proper tax invoice for every payment, so you can claim input tax credit.'],
+  ['Your own manager', 'A named SOLLUNA manager, Manager Chat Support and response targets by priority.'],
+  ['Secure by design', 'No marketplace passwords, isolated client data, audited staff access and two-factor-protected admin.'],
+  ['Honest reporting', 'Monthly P&L marked verified, estimated or unavailable — never profit you cannot rely on.'],
+];
+
 const STEPS = [
   ['Choose a plan', 'Pick Reseller, Growth or Premium and pay securely with Razorpay.'],
   ['Onboard your business', 'Share GST, brand and seller details. We verify documents before any submission.'],
@@ -46,14 +44,7 @@ export default async function Home() {
   return (
     <main>
       <header className="bg-ink">
-        <nav className="mx-auto flex max-w-6xl items-center justify-between px-4 py-5 sm:px-6">
-          <Logo light />
-          <div className="flex items-center gap-2 sm:gap-3">
-            <a href="#pricing" className="hidden text-sm text-ivory/80 hover:text-ivory sm:inline">Pricing</a>
-            <Link href="/login" className="btn text-ivory/90 hover:text-ivory">Sign in</Link>
-            <Link href="/register" className="btn-gold">Get started</Link>
-          </div>
-        </nav>
+        <SiteHeader dark />
         <section className="mx-auto max-w-6xl px-4 pb-20 pt-12 sm:px-6 sm:pt-20">
           <p className="mb-4 text-xs font-semibold uppercase tracking-[0.25em] text-sun-2">Amazon · Flipkart · India</p>
           <h1 className="max-w-3xl font-display text-4xl leading-tight text-ivory sm:text-6xl">
@@ -86,6 +77,17 @@ export default async function Home() {
             </li>
           ))}
         </ol>
+      </section>
+
+      <section className="bg-white py-20">
+        <div className="mx-auto max-w-6xl px-4 sm:px-6">
+          <h2 className="font-display text-3xl">Why sellers choose SOLLUNA</h2>
+          <div className="mt-10 grid gap-5 md:grid-cols-3">
+            {WHY.map(([t, d]) => (
+              <div key={t} className="border-l-2 border-sun pl-5"><h3 className="font-semibold">{t}</h3><p className="mt-2 text-sm text-ink-3">{d}</p></div>
+            ))}
+          </div>
+        </div>
       </section>
 
       <section id="pricing" className="bg-ivory-2 py-20">
@@ -137,12 +139,31 @@ export default async function Home() {
         </div>
       </section>
 
-      <footer className="bg-ink py-10 text-sm text-ivory/60">
-        <div className="mx-auto flex max-w-6xl flex-wrap items-center justify-between gap-4 px-4 sm:px-6">
-          <Logo light />
-          <span>© {new Date().getFullYear()} SOLLUNA · solluna.co.in</span>
+      <section className="mx-auto max-w-6xl px-4 py-20 sm:px-6">
+        <div className="grid gap-10 lg:grid-cols-[minmax(0,2fr)_minmax(0,3fr)]">
+          <div>
+            <h2 className="font-display text-3xl">Common questions</h2>
+            <p className="mt-3 text-ink-3">More in the <Link className="underline" href="/faq">full FAQ</Link>.</p>
+          </div>
+          <div className="divide-y divide-ink/10 rounded-2xl border border-ink/10 bg-white">
+            {FAQS.slice(0, 5).map(([q, a]) => (
+              <details key={q} className="group p-5 [&_summary::-webkit-details-marker]:hidden">
+                <summary className="flex cursor-pointer list-none items-center justify-between gap-4 font-semibold">{q}<span className="text-sun transition group-open:rotate-45" aria-hidden>+</span></summary>
+                <p className="mt-3 text-sm leading-6 text-ink-3">{a}</p>
+              </details>
+            ))}
+          </div>
         </div>
-      </footer>
+      </section>
+
+      <section className="bg-ink-2">
+        <div className="mx-auto flex max-w-6xl flex-wrap items-center justify-between gap-6 px-4 py-14 sm:px-6">
+          <div><p className="font-display text-3xl text-ivory">Ready to hand over the operations?</p><p className="mt-2 text-ivory/60">Start today, or talk to us first about your catalog.</p></div>
+          <div className="flex flex-wrap gap-3"><Link href="/register" className="btn-gold px-7 py-3">Get started</Link><Link href="/contact" className="btn border border-ivory/25 px-7 py-3 text-ivory hover:border-ivory/60">Contact us</Link></div>
+        </div>
+      </section>
+
+      <SiteFooter />
     </main>
   );
 }
