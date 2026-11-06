@@ -1004,3 +1004,31 @@ model ManagerWelcome {
 
   @@index([dueAt])
 }
+
+/// Self-serve label cropping (LABEL_CROPPER). Auto / specialised crops run in the background processor, never in the
+/// request. The uploaded source (buyer addresses) is deleted as soon as the job finishes; outputs expire after 7 days.
+model LabelCropJob {
+  id                String    @id @default(cuid())
+  organizationId    String
+  createdById       String
+  mode              String // AUTO | SPECIAL
+  layout            String // A4_4UP | A4_6UP | THERMAL_4X6
+  includeInvoices   Boolean   @default(false)
+  fileName          String
+  sourceKey         String?
+  outputKey         String?
+  status            String    @default("QUEUED") // QUEUED | PROCESSING | DONE | FAILED
+  marketplace       String?
+  labelCount        Int       @default(0)
+  invoiceCount      Int       @default(0)
+  unrecognisedPages Int[]
+  reviewPages       Int[]
+  error             String?
+  createdAt         DateTime  @default(now())
+  startedAt         DateTime?
+  finishedAt        DateTime?
+  expiresAt         DateTime
+
+  @@index([organizationId, createdAt])
+  @@index([status])
+}

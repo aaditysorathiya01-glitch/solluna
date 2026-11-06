@@ -186,9 +186,9 @@ test('auth: registration validation, duplicates, login, session cookie, me', asy
   assert.equal((await call('POST', '/auth/2fa/disable', { token: S.admin, body: { code: totp(setup.secret) } })).status, 403, 'super admins cannot turn 2FA off');
 });
 
-test('features: all 28 services are linked to installed skills; no plan = no access', async () => {
+test('features: all 29 services are linked to installed skills; no plan = no access', async () => {
   const cat = ok(await call('GET', '/features', { token: S.a }));
-  assert.equal(cat.features.length, 28);
+  assert.equal(cat.features.length, 29);
   assert.equal(cat.plan, null);
   assert.ok(cat.features.every((f) => f.access === 'NO_ACTIVE_SUBSCRIPTION'));
   const skills = ok(await call('GET', '/skills', { token: S.admin }));
@@ -1189,6 +1189,65 @@ test('subscription: cancel at period end → no reminder, no grace → expired; 
   assert.equal(ok(await call('GET', '/features', { token: t })).plan, null, 'service ends');
   assert.ok(ok(await call('GET', '/notifications', { token: t })).some((n) => n.type === 'subscription.expired'));
   assert.equal((await call('POST', '/billing/cancel', { token: t, body: { cancel: true } })).status, 400);
+});
+
+test('label cropper: plan modes enforced by the API; auto crop and specialised picklist run in the background; source deleted', async () => {
+  const { PDFDocument, StandardFonts } = await import('pdf-lib');
+  // A Flipkart-style "invoice_labels" PDF: label on the top half, tax invoice below.
+  async function flipkartPdf(n) {
+    const doc = await PDFDocument.create(); const f = await doc.embedFont(StandardFonts.Helvetica);
+    for (let i = 0; i < n; i++) {
+      const p = doc.addPage([595, 842]); const t = (s, x, y, size = 7) => p.drawText(s, { x, y, size, font: f });
+      t('STD', 193, 801, 8); t('E-Kart Logistics', 216, 805, 6); t(`OD43906324113750510${i}`, 216, 793); t('E', 393, 799, 11); t('Ordered through', 193, 781);
+      t('SKU ID | Description', 256, 557, 6); t('QTY', 387, 557, 6); t('1', 192, 548, 6); t(`SKU-${i % 2 ? 'B' : 'A'} | Test Product ${i % 2 ? 'B' : 'A'}`, 200, 548, 6); t(String(i + 1), 384, 548, 6);
+      t(`FMPC67260166${i}0`, 199, 500); t('Not for resale.', 193, 469, 6); t('Printed at 1122 hrs', 293, 469, 6);
+      t('Tax Invoice', 52, 442, 8); t('Sold By', 52, 395, 8);
+    }
+    return Buffer.from(await doc.save());
+  }
+  async function crop(token, fields, buf = null) {
+    const fd = new FormData(); fd.append('file', new Blob([buf ?? await flipkartPdf(5)], { type: 'application/pdf' }), 'invoice_labels.pdf');
+    for (const [k, v] of Object.entries(fields)) fd.append(k, String(v));
+    const r = await fetch(`${base}/label-crops`, { method: 'POST', headers: { authorization: `Bearer ${token}` }, body: fd });
+    return { status: r.status, body: await r.json() };
+  }
+  async function done(token, id) {
+    for (let i = 0; i < 60; i++) {
+      const j = ok(await call('GET', '/label-crops', { token })).jobs.find((x) => x.id === id);
+      if (['DONE', 'FAILED'].includes(j.status)) return j;
+      await new Promise((r) => setTimeout(r, 250));
+    }
+    throw new Error('crop job did not finish');
+  }
+  const reseller = await registerCustomer('Rekha'); await pay(reseller, 'RESELLER');
+  const growth = await registerCustomer('Gauri'); await pay(growth, 'GROWTH');
+  const premium = await registerCustomer('Pooja'); await pay(premium, 'PREMIUM');
+
+  assert.deepEqual(ok(await call('GET', '/label-crops', { token: reseller })).modes, ['MANUAL']);
+  assert.deepEqual(ok(await call('GET', '/label-crops', { token: growth })).modes, ['AUTO', 'MANUAL']);
+  assert.deepEqual(ok(await call('GET', '/label-crops', { token: premium })).modes, ['AUTO', 'SPECIAL', 'MANUAL']);
+  assert.equal((await crop(reseller, { mode: 'AUTO' })).status, 403, 'Reseller: manual only');
+  assert.equal((await crop(growth, { mode: 'SPECIAL' })).status, 403, 'Growth: no specialised');
+  assert.equal((await crop(growth, { mode: 'AUTO' }, Buffer.from('not a pdf'))).status, 400);
+
+  const g = await crop(growth, { mode: 'AUTO', layout: 'A4_4UP' });
+  assert.equal(g.status, 201); assert.equal(g.body.status, 'QUEUED', 'queued, not processed in the request');
+  const gj = await done(growth, g.body.id);
+  assert.equal(gj.status, 'DONE', gj.error); assert.equal(gj.marketplace, 'FLIPKART'); assert.equal(gj.labelCount, 5);
+  const dl = await fetch(`${base}/label-crops/${gj.id}/download`, { headers: { authorization: `Bearer ${growth}` } });
+  assert.equal(dl.status, 200);
+  const out = await PDFDocument.load(Buffer.from(await dl.arrayBuffer()));
+  assert.equal(out.getPageCount(), 2, '5 labels on A4 4-up = 2 pages, invoices left out');
+  const row = await db.labelCropJob.findUnique({ where: { id: gj.id } });
+  assert.equal(row.sourceKey, null, 'uploaded original (buyer addresses) deleted after processing');
+  assert.equal((await fetch(`${base}/label-crops/${gj.id}/download`, { headers: { authorization: `Bearer ${premium}` } })).status, 404, 'tenant isolation');
+
+  const p = await crop(premium, { mode: 'SPECIAL', layout: 'A4_4UP', includeInvoices: 'true' });
+  const pj = await done(premium, p.body.id);
+  assert.equal(pj.status, 'DONE', pj.error);
+  const pout = await PDFDocument.load(Buffer.from(await (await fetch(`${base}/label-crops/${pj.id}/download`, { headers: { authorization: `Bearer ${premium}` } })).arrayBuffer()));
+  assert.equal(pout.getPageCount(), 1 + 2 + 3, 'picklist + 2 label pages + 5 invoices two per page');
+  assert.ok(await db.notification.findFirst({ where: { type: 'labels.ready', title: { contains: '5 labels' } } }), 'client notified when ready');
 });
 
 test('security: login brute force is rate limited per IP', async () => {

@@ -11,12 +11,15 @@
     "@types/express": "^5.0.6"
   },
   "dependencies": {
+    "@napi-rs/canvas": "^1.1.0",
     "@nestjs/common": "^11.2.8",
     "@nestjs/core": "^11.2.8",
     "@nestjs/jwt": "^11.0.2",
     "@nestjs/platform-express": "^11.2.8",
     "@nestjs/throttler": "^6.7.1",
     "bcryptjs": "^3.0.3",
+    "pdf-lib": "^1.17.1",
+    "pdfjs-dist": "^6.3.289",
     "reflect-metadata": "^0.2.2",
     "rxjs": "^7.8.2",
     "zod": "^4.6.7"

@@ -128,14 +128,14 @@ async function accountMenu(page, item) {
   await page.getByRole('menuitem', { name: item }).click();
 }
 
-test('landing page renders live plans and the 28-service comparison', async () => {
+test('landing page renders live plans and the 29-service comparison', async () => {
   const { page, errors } = await newPage();
   await page.goto(webBase);
   await page.getByRole('heading', { name: /run by specialists/i }).waitFor();
   for (const price of ['₹1,999', '₹4,999', '₹9,999']) assert.ok(await page.getByText(price).first().isVisible(), price);
   assert.ok(await page.getByText('/month + GST').first().isVisible(), 'prices shown GST-exclusive');
   const serviceRows = await page.locator('#pricing tbody tr').count();
-  assert.equal(serviceRows, 28 + 5, '28 services + 5 section headers');
+  assert.equal(serviceRows, 29 + 5, '29 services + 5 section headers');
   assert.ok(await page.getByText('On request').isVisible());
   await page.screenshot({ path: join(SHOTS, '1-landing.png'), fullPage: true });
   assert.deepEqual(errors, []);
@@ -451,8 +451,8 @@ test('public site: services, about, FAQ, legal pages render from the shared head
   await page.goto(webBase);
   await page.getByRole('link', { name: 'Services' }).first().click();
   await page.waitForURL(/\/services/);
-  await page.getByRole('heading', { name: '28 services. One accountable team.' }).waitFor();
-  assert.equal(await page.locator('main li.card').count(), 28, 'every service listed from the live plan matrix');
+  await page.getByRole('heading', { name: '29 services. One accountable team.' }).waitFor();
+  assert.equal(await page.locator('main li.card').count(), 29, 'every service listed from the live plan matrix');
   for (const [path, heading] of [['/about', /Specialists for the work/], ['/faq', /Questions sellers ask/], ['/terms', 'Terms & Conditions'], ['/privacy', 'Privacy Policy'], ['/refund-policy', 'Refund & Cancellation Policy']]) {
     await page.goto(webBase + path);
     await page.getByRole('heading', { name: heading, level: 1 }).waitFor();
@@ -606,6 +606,7 @@ test('ops workspace: verify marketplace with evidence, mark listing live, publis
 
   const c = S.customer;
   await c.goto(`${webBase}/dashboard?tab=labels`);
+  await c.getByRole('tab', { name: 'From your manager' }).click();
   await c.getByText('Amazon ·').first().waitFor();
   const [dl] = await Promise.all([c.waitForEvent('download'), c.click('text=Download labels (PDF)')]);
   const got = await (await import('node:fs/promises')).readFile(await dl.path());
@@ -658,6 +659,49 @@ test('admin console: plan limits editable by super admin, team management, notif
   await a.getByText('New client registered', { exact: false }).first().waitFor();
   await a.screenshot({ path: join(SHOTS, '12-admin.png'), fullPage: true });
   assert.deepEqual(errors, []);
+});
+
+test('label cropper: Growth auto-crops a Flipkart PDF on the server; manual crop runs in the browser', async () => {
+  const { PDFDocument, StandardFonts } = await import('pdf-lib');
+  const doc = await PDFDocument.create(); const f = await doc.embedFont(StandardFonts.Helvetica);
+  for (let i = 0; i < 6; i++) {
+    const p = doc.addPage([595, 842]); const t = (s, x, y, size = 7) => p.drawText(s, { x, y, size, font: f });
+    t('STD', 193, 801, 8); t('E-Kart Logistics', 216, 805, 6); t(`OD4390632411375051${i}0`, 216, 793); t('E', 393, 799, 11); t('Ordered through', 193, 781);
+    t('SKU ID | Description', 256, 557, 6); t('QTY', 387, 557, 6); t('1', 192, 548, 6); t(`SKU-${i} | Test Product`, 200, 548, 6); t('1', 384, 548, 6);
+    t(`FMPC6726016${i}59`, 199, 500); t('Not for resale.', 193, 469, 6); t('Tax Invoice', 52, 442, 8);
+  }
+  const pdf = Buffer.from(await doc.save());
+  const c = S.customer;
+  await c.goto(`${webBase}/dashboard?tab=labels`);
+  const cropper = c.getByRole('region', { name: 'Label cropper' });
+  await cropper.waitFor();
+  assert.ok(await c.locator('input[name="crop-mode"][value="AUTO"]').isChecked(), 'Growth defaults to auto');
+  assert.ok(await c.locator('input[name="crop-mode"][value="SPECIAL"]').isDisabled(), 'specialised is Premium only');
+  await c.setInputFiles('#crop-file', { name: 'invoice_labels.pdf', mimeType: 'application/pdf', buffer: pdf });
+  await c.click('button:has-text("Crop labels")');
+  const files = c.getByRole('region', { name: 'Cropped files' });
+  await files.getByRole('link', { name: 'Download PDF' }).first().waitFor({ timeout: 30000 });
+  await files.getByText('6 labels (Flipkart)', { exact: false }).first().waitFor();
+  const [dl] = await Promise.all([c.waitForEvent('download'), files.getByRole('link', { name: 'Download PDF' }).first().click()]);
+  const auto = await PDFDocument.load(await (await import('node:fs/promises')).readFile(await dl.path()));
+  assert.equal(auto.getPageCount(), 2, '6 labels → 2 A4 pages (4-up)');
+  await c.screenshot({ path: join(SHOTS, '13-label-cropper.png'), fullPage: true });
+
+  // Manual: draw the box on the preview; the PDF is built in the browser.
+  await c.check('input[name="crop-mode"][value="MANUAL"]');
+  await c.selectOption('#crop-layout', 'A4_6UP');
+  await c.setInputFiles('#crop-file', { name: 'other-courier.pdf', mimeType: 'application/pdf', buffer: pdf });
+  const surface = c.getByTestId('crop-surface');
+  await surface.waitFor({ timeout: 15000 });
+  await c.waitForTimeout(800);
+  const b = await surface.boundingBox();
+  await c.mouse.move(b.x + b.width * 0.3, b.y + b.height * 0.03); await c.mouse.down();
+  await c.mouse.move(b.x + b.width * 0.7, b.y + b.height * 0.45, { steps: 8 }); await c.mouse.up();
+  await c.screenshot({ path: join(SHOTS, '14-manual-crop.png'), fullPage: true });
+  const [mdl] = await Promise.all([c.waitForEvent('download'), c.click('button:has-text("Crop and download")')]);
+  const manual = await PDFDocument.load(await (await import('node:fs/promises')).readFile(await mdl.path()));
+  assert.equal(manual.getPageCount(), 1, '6 labels → 1 A4 page (6-up)');
+  await c.getByText('Done — 6 labels cropped', { exact: false }).waitFor();
 });
 
 test('route guards: signed-out users go to login; customers cannot open ops', async () => {

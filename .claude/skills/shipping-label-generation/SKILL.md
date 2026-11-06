@@ -138,6 +138,22 @@ Mark an order as **Blocked** and report the platform reason if:
 
 Do not bypass platform restrictions or mark a blocked order as completed.
 
+## Label Cropping Tool (self-serve, feature LABEL_CROPPER)
+
+Clients crop their own Amazon / Flipkart label PDFs in Dashboard → Labels. Mode comes from the plan (PlanFeature.meta.mode, admin-editable) and is enforced by the API:
+
+| Plan | Mode | What it does |
+|---|---|---|
+| Reseller | `MANUAL` | Client draws the label box once on a preview; it is applied to all / odd / even pages. Runs in the browser; the file never leaves the client's computer. |
+| Growth | `AUTO_MANUAL` | Auto: labels found from the PDF text (Flipkart label + invoice pages, Amazon label + invoice pairs); other courier formats use the hybrid detector (dashed line, text, whitespace, border, raster) from the original SOLLUNA label cropper. Manual as fallback. |
+| Premium | `AUTO_SPECIAL_MANUAL` | Auto + a SKU / product / qty line above each label, labels sorted by SKU, and a picklist page first. |
+
+Rules:
+1. Never alter the label: regions are embedded as vector content and scaled uniformly; nothing is drawn over a label. The specialised line sits outside the label box.
+2. Layouts: 4 per A4, 6 per A4, or 1 per page (4×6 thermal). Tax invoices can be included for packing; they are never edited.
+3. Pages the detector cannot crop confidently are reported (never guessed) — the client uses Manual crop for them; lower-confidence pages are flagged for checking.
+4. Uploaded originals (buyer names and addresses) are deleted as soon as the job finishes; outputs expire after 7 days. Processing runs in the background, never inside the upload request.
+
 ## Plan and scope controls
 
 - **Reseller:** Shipping-label generation is not included by default. Process only if separately approved and priced.

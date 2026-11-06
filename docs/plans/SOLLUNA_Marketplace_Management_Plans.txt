@@ -67,6 +67,7 @@ Inventory & Replenishment Planning	—	✓	✓
 SHIPPING & BRANDING			
 Shipping Label Generation	—	Unlimited	Unlimited
 Daily Label Processing & Delivery	—	✓	✓
+Label Cropping Tool	Manual crop	Auto + Manual	Auto + Specialised + Manual
 Personalized Thank You Notes	—	—	✓
 Customized Thank You Note Design	—	—	✓
 PREMIUM BUSINESS SERVICES			

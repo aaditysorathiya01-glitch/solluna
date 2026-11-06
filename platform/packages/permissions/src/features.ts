@@ -62,6 +62,15 @@ export const FEATURES = {
   // ── Shipping & branding
   SHIPPING_LABEL_GENERATION: { label: 'Shipping Label Generation', section: 'SHIPPING_BRANDING', skill: 'shipping-label-generation', plans: GROWTH_UP },
   DAILY_LABEL_PROCESSING: { label: 'Daily Label Processing & Delivery', section: 'SHIPPING_BRANDING', skill: 'daily-label-processing-delivery', plans: GROWTH_UP },
+  // Self-serve tool: crop marketplace label PDFs into print-ready sheets. Mode by plan (admin-editable in PlanFeature.meta).
+  LABEL_CROPPER: {
+    label: 'Label Cropping Tool', section: 'SHIPPING_BRANDING', skill: 'shipping-label-generation',
+    plans: {
+      RESELLER: { enabled: true, meta: { mode: 'MANUAL' } },
+      GROWTH: { enabled: true, meta: { mode: 'AUTO_MANUAL' } },
+      PREMIUM: { enabled: true, meta: { mode: 'AUTO_SPECIAL_MANUAL' } },
+    },
+  },
   PERSONALIZED_THANK_YOU_NOTES: { label: 'Personalized Thank You Notes', section: 'SHIPPING_BRANDING', skill: 'personalized-thank-you-notes', plans: PREMIUM_ONLY },
   CUSTOM_THANK_YOU_DESIGN: { label: 'Customized Thank You Note Design', section: 'SHIPPING_BRANDING', skill: 'customized-thank-you-note-design', plans: PREMIUM_ONLY },
 

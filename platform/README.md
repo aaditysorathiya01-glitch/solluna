@@ -6,7 +6,7 @@ Amazon & Flipkart marketplace-management SaaS. Repo rules: `../CLAUDE.md` · Bui
 |---|---|---|
 | API | `apps/api` | NestJS 11, Prisma 5, PostgreSQL |
 | Web | `apps/web` | Next.js 15 (App Router), Tailwind 3.4 |
-| Shared rules | `packages/permissions` | 28-feature catalog → skills, roles, connectors, entitlement check |
+| Shared rules | `packages/permissions` | 29-feature catalog → skills, roles, connectors, entitlement check |
 | Skills | `../.claude/skills` | 1 orchestrator + 28 specialist procedures (loaded by the API at boot) |
 
 ## Run locally
@@ -15,7 +15,7 @@ cp .env.example .env            # fill JWT_SECRET, Razorpay test keys, ADMIN_*
 docker compose up -d            # Postgres + Redis
 npm install
 npx prisma migrate deploy --schema apps/api/prisma/schema.prisma
-npm run db:seed                 # plans × 28 features + first super admin
+npm run db:seed                 # plans × 29 features + first super admin
 npm run dev:api                 # :4000
 npm run dev:web                 # :3000  (proxies /api → API_URL)
 ```
@@ -28,7 +28,7 @@ npm test     # skill-map drift check + 11 engine unit + 36 API E2E + 14 browser 
 ## What is built (tested end-to-end)
 - **Auth:** customer registration (org + Manager Chat conversation), login, httpOnly session, staff roles, instant revocation, per-IP brute-force limit, audit log.
 - **Billing:** Razorpay Orders (REST), Checkout signature + webhook HMAC verification, idempotent activation, **GST-exclusive pricing with GST tax invoices** (CGST+SGST intra-state / IGST inter-state, place of supply from GSTIN or billing state, GSTIN check-digit validation, gap-free `SOL/26-27/00001` numbering per FY, amount in words, printable PDF), failed-payment handling, plan switch, renewal reminder → grace → past due.
-- **Features ↔ skills:** all 28 services served with their skill and connectors. The API refuses to boot if a skill is missing. Plan limits are read from the DB.
+- **Features ↔ skills:** all 29 services served with their skill and connectors. The API refuses to boot if a skill is missing. Plan limits are read from the DB.
 - **Orchestrator:** workflow graphs from the orchestrator skill (new listing, replenishment, advertising, promotion, shipping labels, monthly reporting, single-step). Covers dependency propagation, skip rules, client approval gates, evidence-gated completion, quota reservation under a per-org lock, and client updates in the orchestrator's format.
 - **Connectors:** in-app notifications + HMAC-signed webhook for Zapier fan-out; Drive/Docs links enforced as delivery channels.
 - **Manager Chat Support:** one private conversation per client, live both ways (Server-Sent Events, no extra dependency), attachments, read receipts, search, staff-only internal notes, manager auto-assignment at registration + reassignment, staff inbox with waiting time, log a request from chat through the orchestrator (plan rules apply), notifications in-app and via the Zapier connector.

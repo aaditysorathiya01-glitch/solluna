@@ -5,7 +5,7 @@ import { SECTIONS, SECTION_LABEL } from '@/lib/api';
 import { getPlans, type Plan } from '@/lib/plans';
 
 export const dynamic = 'force-dynamic';
-export const metadata: Metadata = { title: 'Services — SOLLUNA Amazon & Flipkart management', description: '28 managed services across account setup, catalog, listings, ads, promotions, inventory, shipping labels, reporting, CA documentation and growth strategy.' };
+export const metadata: Metadata = { title: 'Services — SOLLUNA Amazon & Flipkart management', description: '29 managed services across account setup, catalog, listings, ads, promotions, inventory, shipping labels, reporting, CA documentation and growth strategy.' };
 
 const SECTION_COPY: Record<string, string> = {
   ACCOUNT_CATALOG: 'Seller registration, brand approval, mapping to existing ASINs/FSNs, new listings and SEO — built to each marketplace’s catalog rules.',
@@ -35,7 +35,7 @@ export default async function Services() {
   const plans = await getPlans();
   const features = plans?.[0]?.features ?? [];
   return (
-    <PageShell eyebrow="Services" title="28 services. One accountable team." intro="Every service follows a written procedure, is checked against your plan before work starts, and is tracked to completion with evidence in your dashboard.">
+    <PageShell eyebrow="Services" title="29 services. One accountable team." intro="Every service follows a written procedure, is checked against your plan before work starts, and is tracked to completion with evidence in your dashboard.">
       {!plans && <p className="card mb-8 p-6 text-sm text-ink-3">Plan details are temporarily unavailable. Please refresh in a moment.</p>}
       <div className="space-y-14">
         {SECTIONS.map((s) => (

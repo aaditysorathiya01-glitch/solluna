@@ -203,7 +203,7 @@ const shot = async (p, name) => { if (SHOTS) await p.screenshot({ path: join(SHO
 await check('UI', 'Client dashboard: chat, listings, labels, notifications + approval, reports, billing (Riya, Growth)', async () => {
   const p = await asUser('riya@demo.solluna.co.in', E.CLIENT_PASSWORD);
   await p.waitForURL(/\/dashboard/, { timeout: 20000 }); await p.getByRole('region', { name: 'Your account manager' }).waitFor(); await shot(p, 'client-chat');
-  for (const [tab, text, sub] of [['listings', 'Brass Diya Set of 4', 'Products & listings'], ['labels', '18 orders'], ['notifications', 'Needs your approval'], ['reports', 'P&L report'], ['billing', 'GSTIN 24ABCDE1234F1Z6']]) {
+  for (const [tab, text, sub] of [['listings', 'Brass Diya Set of 4', 'Products & listings'], ['labels', '18 orders', 'From your manager'], ['notifications', 'Needs your approval'], ['reports', 'P&L report'], ['billing', 'GSTIN 24ABCDE1234F1Z6']]) {
     await p.goto(`${BASE}/dashboard?tab=${tab}`); if (sub) await p.getByRole('tab', { name: sub }).click();
     await p.getByText(text, { exact: false }).first().waitFor({ timeout: 15000 }); await shot(p, `client-${tab}`);
   }
@@ -212,7 +212,7 @@ await check('UI', 'Client dashboard: chat, listings, labels, notifications + app
 await check('UI', 'Premium client: thank-you design review', async () => {
   const p = await asUser('kavya@demo.solluna.co.in', E.CLIENT_PASSWORD);
   await p.waitForURL(/\/dashboard/, { timeout: 20000 });
-  await p.goto(`${BASE}/dashboard?tab=labels`); await p.getByText('Thank-you notes', { exact: true }).click(); await p.getByText('Everyday insert', { exact: false }).first().waitFor({ timeout: 15000 }); await shot(p, 'premium-thank-you');
+  await p.goto(`${BASE}/dashboard?tab=labels`); await p.getByRole('tab', { name: 'From your manager' }).click(); await p.getByText('Thank-you notes', { exact: true }).click(); await p.getByText('Everyday insert', { exact: false }).first().waitFor({ timeout: 15000 }); await shot(p, 'premium-thank-you');
   await p.context().close();
 });
 await check('UI', 'Staff console: task queue and client workspace (Kabir, operations manager)', async () => {
@@ -248,12 +248,13 @@ await check('UI', 'New sign-up: plans only → test activation → plan dashboar
   await ctx.close();
   return 'plan dashboard + manager promised within 1 hour';
 });
-await check('UI', 'Reseller: same five areas; Labels shows the upgrade note', async () => {
+await check('UI', 'Reseller: same five areas; label cropper in manual mode', async () => {
   const p = await asUser('amit@demo.solluna.co.in', E.CLIENT_PASSWORD);
   await p.waitForURL(/\/dashboard/, { timeout: 20000 }); await p.locator('nav[aria-label="Dashboard"]').waitFor();
   const tabs = (await p.locator('nav[aria-label="Dashboard"] button').allInnerTexts()).map((t) => t.trim().toLowerCase());
   assert(tabs.join('|') === 'manager chat|listings & mapping|labels|reports|notifications', `Reseller tabs: ${tabs}`);
-  await p.click('nav[aria-label="Dashboard"] >> text=Labels'); await p.getByText('Shipping labels are included from the Growth plan').waitFor();
+  await p.click('nav[aria-label="Dashboard"] >> text=Labels'); await p.getByRole('region', { name: 'Label cropper' }).waitFor();
+  assert(await p.locator('input[name="crop-mode"][value="AUTO"]').isDisabled() && await p.locator('input[name="crop-mode"][value="MANUAL"]').isChecked(), 'Reseller: manual crop only');
   await p.context().close();
 });
 await check('UI', 'Public site shows the preview banner and is hidden from search engines', async () => {

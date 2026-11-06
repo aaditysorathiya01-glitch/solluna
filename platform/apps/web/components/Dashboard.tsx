@@ -9,6 +9,8 @@ import { ChatPanel, DocumentsPanel } from './Chat';
 import { ClientReporting } from './Reporting';
 import { ClientCatalog } from './ClientCatalog';
 import { ClientFulfilment } from './Fulfilment';
+import { LabelCropper } from './LabelCropper';
+import { SubTabs } from './ui';
 import { AccountSettings, type MeFull } from './Settings';
 
 type Me = MeFull;
@@ -165,16 +167,7 @@ export function Dashboard() {
           </div>
         )}
         {current === 'listings' && <ClientCatalog />}
-        {current === 'labels' && (allowed('SHIPPING_LABEL_GENERATION') || allowed('PERSONALIZED_THANK_YOU_NOTES') ? <ClientFulfilment /> : (
-          <div className="space-y-4">
-            <h1 className="font-display text-3xl">Labels</h1>
-            <section className="card p-6" aria-label="Labels not in plan">
-              <p className="font-semibold">Shipping labels are included from the Growth plan</p>
-              <p className="mt-1 text-sm text-ink-3">On Growth, your manager generates your Amazon and Flipkart labels every day and you download print-ready files here.</p>
-              <button className="btn-gold mt-4" onClick={() => go('billing')}>See plans</button>
-            </section>
-          </div>
-        ))}
+        {current === 'labels' && <LabelsArea managerLabels={allowed('SHIPPING_LABEL_GENERATION') || allowed('PERSONALIZED_THANK_YOU_NOTES')} />}
         {current === 'reports' && <div className="space-y-8">{hasPlan && <CaRequest onDone={setFlash} />}<ClientReporting /></div>}
         {current === 'notifications' && <NotificationsCenter approvals={pendingApprovals} onDecide={decide} onRead={refreshUnread} />}
         {current === 'settings' && <AccountSettings me={me} onDone={(m) => { setFlash(m); api<Me>('/auth/me').then(setMe).catch(() => undefined); }} />}
@@ -315,6 +308,21 @@ function CaRequest({ onDone }: { onDone: (m: { kind: 'ok' | 'err'; text: string 
   );
 }
 
+
+/** Labels: the self-serve cropper on every plan; batches prepared by the manager on Growth and Premium. */
+function LabelsArea({ managerLabels }: { managerLabels: boolean }) {
+  const [view, setView] = useState<'cropper' | 'manager'>('cropper');
+  return (
+    <div className="space-y-5">
+      <div><h1 className="font-display text-3xl">Labels</h1><p className="mt-1 text-sm text-ink-3">Crop Amazon and Flipkart label PDFs into print-ready sheets{managerLabels ? ', and download the daily batches your manager prepares' : ''}.</p></div>
+      {managerLabels && <SubTabs tabs={[['cropper', 'Label cropper'], ['manager', 'From your manager']] as const} value={view} onChange={setView} />}
+      {view === 'cropper' || !managerLabels ? <LabelCropper /> : <ClientFulfilment />}
+    </div>
+  );
+}
+
+const CROP_MODE_TEXT: Record<string, string> = { MANUAL: 'manual crop', AUTO_MANUAL: 'auto + manual', AUTO_SPECIAL_MANUAL: 'auto + specialised + manual' };
+
 const PLAN_PITCH: Record<string, string> = {
   RESELLER: 'For sellers starting out: catalog, listings, reports and a dedicated manager.',
   GROWTH: 'We run your ads, stock alerts and daily shipping labels as you scale.',
@@ -396,7 +404,7 @@ function PlanPicker({ firstName, billing, plans, preselect, lapsed, verifying, o
                     <li key={sec}>
                       <p className="text-[11px] font-semibold uppercase tracking-wider text-ink-3">{SECTION_LABEL[sec]}</p>
                       <ul className="mt-1 space-y-1">
-                        {inc.map((f) => <li key={f.key} className="flex gap-2"><span className="text-emerald-700" aria-hidden>✓</span><span>{f.key === 'CALL_SUPPORT' && call ? `Call support (${human(call).toLowerCase()})` : f.label}</span></li>)}
+                        {inc.map((f) => <li key={f.key} className="flex gap-2"><span className="text-emerald-700" aria-hidden>✓</span><span>{f.key === 'CALL_SUPPORT' && call ? `Call support (${human(call).toLowerCase()})` : f.key === 'LABEL_CROPPER' && f.meta?.mode ? `Label cropping tool (${CROP_MODE_TEXT[f.meta.mode] ?? 'manual crop'})` : f.label}</span></li>)}
                       </ul>
                     </li>
                   );

@@ -13,5 +13,5 @@
     "useDefineForClassFields": false,
     "sourceMap": true
   },
-  "include": ["src/**/*.ts", "../../packages/permissions/src/**/*.ts"]
+  "include": ["src/**/*.ts", "../../packages/permissions/src/**/*.ts", "../../packages/labels/src/**/*.ts"]
 }

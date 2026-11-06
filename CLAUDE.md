@@ -21,9 +21,10 @@ Two things live in this repo. Know which one you are touching.
 - Call support — / On Request / Priority.
 - Growth+: ads, promotions, low stock, competitor and price monitoring, listing health, inventory planning, shipping labels, daily label processing.
 - Premium only: personalized thank-you notes, custom thank-you design, and the 6 strategy services.
+- Label Cropping Tool (all plans): Reseller manual crop · Growth auto + manual · Premium auto + specialised (SKU line, sort, picklist) + manual.
 
 ## Single source of truth chain
-`plan matrix` ↔ `platform/packages/permissions/src/features.ts` (28 keys, each → one skill) ↔ `.claude/skills/<skill>` ↔ orchestrator directory.
+`plan matrix` ↔ `platform/packages/permissions/src/features.ts` (29 keys, each → one skill; LABEL_CROPPER shares shipping-label-generation) ↔ `.claude/skills/<skill>` ↔ orchestrator directory.
 Run `cd platform && npm run verify:skills` after changing any of them; it fails on drift.
 
 ## Platform non-negotiables

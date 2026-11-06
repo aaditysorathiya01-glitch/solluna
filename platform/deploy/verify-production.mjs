@@ -64,10 +64,10 @@ await check('Plans from database, GST-exclusive', async () => {
   const plans = await (await req.get(BASE + '/api/plans')).json();
   const price = Object.fromEntries(plans.map((p) => [p.code, p.pricePaise]));
   assert(price.RESELLER === 199900 && price.GROWTH === 499900 && price.PREMIUM === 999900, JSON.stringify(price));
-  assert(plans.every((p) => p.features.length === 28), 'features');
+  assert(plans.every((p) => p.features.length === 29), 'features');
   return '₹1,999 / ₹4,999 / ₹9,999 + GST';
 });
-for (const [path, text] of [['/', 'run by specialists'], ['/services', '28 services'], ['/about', 'Specialists for the work'], ['/faq', 'Questions sellers ask'], ['/contact', 'Tell us about your marketplace'], ['/terms', 'Terms & Conditions'], ['/privacy', 'Privacy Policy'], ['/refund-policy', 'Refund & Cancellation Policy'], ['/login', 'Sign in'], ['/register', 'Create your seller account'], ['/forgot-password', 'Reset your password']]) {
+for (const [path, text] of [['/', 'run by specialists'], ['/services', '29 services'], ['/about', 'Specialists for the work'], ['/faq', 'Questions sellers ask'], ['/contact', 'Tell us about your marketplace'], ['/terms', 'Terms & Conditions'], ['/privacy', 'Privacy Policy'], ['/refund-policy', 'Refund & Cancellation Policy'], ['/login', 'Sign in'], ['/register', 'Create your seller account'], ['/forgot-password', 'Reset your password']]) {
   await check(`Page ${path}`, async () => {
     const r = await page.goto(BASE + path, { waitUntil: 'networkidle' });
     assert(r.status() === 200, `HTTP ${r.status()}`);

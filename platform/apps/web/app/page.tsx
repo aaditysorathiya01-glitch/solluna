@@ -59,7 +59,7 @@ export default async function Home() {
             <a href="#pricing" className="btn border border-ivory/25 px-7 py-3 text-ivory hover:border-ivory/60">Compare plans</a>
           </div>
           <dl className="mt-14 grid max-w-3xl grid-cols-2 gap-6 text-ivory sm:grid-cols-4">
-            {[['28', 'managed services'], ['2', 'marketplaces'], ['1', 'dedicated manager'], ['0', 'actions without approval']].map(([n, l]) => (
+            {[['29', 'managed services'], ['2', 'marketplaces'], ['1', 'dedicated manager'], ['0', 'actions without approval']].map(([n, l]) => (
               <div key={l}><dt className="font-display text-3xl text-sun-2">{n}</dt><dd className="text-sm text-ivory/60">{l}</dd></div>
             ))}
           </dl>

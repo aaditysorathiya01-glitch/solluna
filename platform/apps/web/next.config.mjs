@@ -3,6 +3,8 @@
 /** @type {import('next').NextConfig} */
 export default {
   poweredByHeader: false,
+  // Shared label cropping code lives in platform/packages/labels (also used by the API).
+  experimental: { externalDir: true },
   async headers() {
     return [{
       source: '/:path*',
