@@ -17,6 +17,10 @@ const prisma = new PrismaClient();
 async function main() {
   if (process.env.PREVIEW_MODE !== 'true') return console.log('seed-preview: PREVIEW_MODE is not true — skipped.');
   if (/solluna\.co\.in/i.test(process.env.APP_URL ?? '')) throw new Error('seed-preview refuses to run against the production domain');
+  // Checkout attempts that never reached a payment gateway (no order id) on demo accounts are test debris: remove them.
+  const debris = await prisma.payment.deleteMany({ where: { razorpayOrderId: null, status: 'INITIATED', organization: { contactEmail: { endsWith: DEMO_DOMAIN } } } });
+  const pending = await prisma.subscription.deleteMany({ where: { status: 'PENDING_PAYMENT', organization: { contactEmail: { endsWith: DEMO_DOMAIN } }, NOT: { id: { in: (await prisma.payment.findMany({ where: { subscriptionId: { not: null } }, select: { subscriptionId: true } })).map((p) => p.subscriptionId!) } } } });
+  if (debris.count || pending.count) console.log(`seed-preview: removed ${debris.count} gateway-less payment attempt(s), ${pending.count} unpaid draft subscription(s) on demo accounts`);
   const pairs = (process.env.PREVIEW_DEMO_SUBSCRIPTIONS ?? '').split(',').map((s) => s.trim()).filter(Boolean);
   for (const pair of pairs) {
     const [email, code] = pair.split(':').map((s) => s.trim());

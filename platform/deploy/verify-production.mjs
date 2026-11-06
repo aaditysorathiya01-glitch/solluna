@@ -33,7 +33,8 @@ function totp(secret, at = Date.now()) {
   return String((h.readUInt32BE(o) & 0x7fffffff) % 1e6).padStart(6, '0');
 }
 
-const browser = await chromium.launch();
+// PLAYWRIGHT_PROXY: optional outbound proxy (e.g. a sandbox that only reaches the internet through one).
+const browser = await chromium.launch(process.env.PLAYWRIGHT_PROXY ? { proxy: { server: process.env.PLAYWRIGHT_PROXY } } : {});
 const ctx = await browser.newContext({ ignoreHTTPSErrors: INSECURE, viewport: { width: 1280, height: 860 } });
 const page = await ctx.newPage();
 const pageErrors = [];

@@ -46,6 +46,8 @@ export class BillingService {
     const orgId = user.organizationId!;
     const plan = await this.db.plan.findUnique({ where: { code: planCode } });
     if (!plan || !plan.isActive) throw new NotFoundException('Plan not available');
+    // Refuse before writing anything: no PENDING_PAYMENT subscription or INITIATED payment without a gateway.
+    if (!this.rzp.configured) throw new ServiceUnavailableException('Online payments are not configured yet. Please contact SOLLUNA to activate your plan.');
 
     // Renewing the same plan extends the current subscription; a different plan starts a new one
     // (the old one is closed when the new payment is verified).
