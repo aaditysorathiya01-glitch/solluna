@@ -28,11 +28,16 @@ const ProfileSchema = z.object({
  * Activation happens ONLY from a server-verified Razorpay signature (checkout handler or webhook);
  * the browser's success screen is never trusted. Both paths are idempotent.
  */
+export interface ActivationInfo { planCode: string; planName: string; kind: 'new' | 'change' | 'renewal'; previousPlanCode: string | null; preview?: boolean }
+
 @Injectable()
 export class BillingService {
   private readonly log = new Logger('Billing');
-  /** Set by OrchestratorService to re-run requests that were waiting on plan verification. */
-  onActivated?: (organizationId: string) => Promise<void>;
+  /**
+   * Run after a plan becomes active: the orchestrator re-runs requests waiting on plan verification, Manager Chat
+   * assigns the client's manager and sends the plan welcome. `kind` is 'new' (first plan), 'change' or 'renewal'.
+   */
+  readonly activationListeners: ((organizationId: string, info: ActivationInfo) => Promise<unknown>)[] = [];
 
   constructor(
     private readonly db: PrismaService,
@@ -126,6 +131,7 @@ export class BillingService {
       const sub = await tx.subscription.findUniqueOrThrow({ where: { id: payment.subscriptionId! }, include: { plan: true } });
       const now = new Date();
       const renewing = (sub.status === 'ACTIVE' || sub.status === 'GRACE_PERIOD') && sub.currentPeriodEnd && sub.currentPeriodEnd > now;
+      const previous = renewing ? null : await tx.subscription.findFirst({ where: { organizationId: payment.organizationId, id: { not: sub.id }, status: { in: ['ACTIVE', 'GRACE_PERIOD', 'PAST_DUE'] } }, include: { plan: true }, orderBy: { createdAt: 'desc' } });
       const start = renewing ? sub.currentPeriodEnd! : now;
       const end = addMonths(start, 1);
 
@@ -141,7 +147,7 @@ export class BillingService {
       });
       await this.issueInvoice(tx, payment, sub.plan, start, end, now);
       await this.audit.log({ action: 'subscription.activate', entity: 'Subscription', entityId: sub.id, organizationId: payment.organizationId, after: { plan: sub.plan.code, source, periodEnd: end } }, tx);
-      return { alreadyActive: false, payment, plan: sub.plan, end, subscription: updated };
+      return { alreadyActive: false, payment, plan: sub.plan, end, subscription: updated, renewing: Boolean(renewing), previousPlanCode: previous?.plan.code ?? null };
     });
 
     if (!result.alreadyActive) {
@@ -150,7 +156,8 @@ export class BillingService {
         title: `${result.plan!.name} plan active`,
         body: `Payment of ${formatInr(result.payment.amountPaise)} verified. Your ${result.plan!.name} plan is active until ${result.end!.toDateString()}.`,
       });
-      await this.onActivated?.(result.payment.organizationId);
+      const info: ActivationInfo = { planCode: result.plan!.code, planName: result.plan!.name, kind: result.renewing ? 'renewal' : result.previousPlanCode ? 'change' : 'new', previousPlanCode: result.previousPlanCode! };
+      await this.runActivationListeners(result.payment.organizationId, info);
     }
     return { status: 'ACTIVE', alreadyActive: result.alreadyActive };
   }
@@ -272,6 +279,43 @@ export class BillingService {
     return { ...inv, amountInWords: amountInWords(inv.amountPaise), placeOfSupplyName: STATES[inv.placeOfSupply] ?? inv.placeOfSupply, reverseCharge: 'No' };
   }
 
+  private async runActivationListeners(orgId: string, info: ActivationInfo) {
+    for (const fn of this.activationListeners) {
+      try { await fn(orgId, info); } catch (e) { this.log.error(`Activation listener failed for ${orgId}: ${(e as Error).message}`); }
+    }
+  }
+
+  /**
+   * TEMPORARY TEST ENVIRONMENTS ONLY. Lets a tester activate a plan without a payment so the plan dashboard and the
+   * manager welcome can be tested while Razorpay is off. Refused unless PREVIEW_MODE=true, the site is not
+   * solluna.co.in and no payment gateway is configured. Creates no Payment and no invoice; audited as
+   * `preview.demo_subscription`.
+   */
+  get previewActivationAllowed() {
+    return process.env.PREVIEW_MODE === 'true' && !/solluna\.co\.in/i.test(config.appUrl) && !this.rzp.configured;
+  }
+
+  async previewActivate(user: AuthUser, input: unknown) {
+    if (!this.previewActivationAllowed) throw new NotFoundException();
+    const { planCode } = parse(z.object({ planCode: z.enum(['RESELLER', 'GROWTH', 'PREMIUM']) }), input);
+    const orgId = user.organizationId!;
+    const plan = await this.db.plan.findUnique({ where: { code: planCode } });
+    if (!plan || !plan.isActive) throw new NotFoundException('Plan not available');
+    const previous = await this.db.subscription.findFirst({ where: { organizationId: orgId, status: { in: ['ACTIVE', 'GRACE_PERIOD', 'PAST_DUE'] } }, include: { plan: true }, orderBy: { createdAt: 'desc' } });
+    if (previous?.planId === plan.id && previous.status === 'ACTIVE') throw new ConflictException(`${plan.name} is already active`);
+    const start = new Date();
+    const end = addMonths(start, 1);
+    const sub = await this.db.$transaction(async (tx) => {
+      await tx.subscription.updateMany({ where: { organizationId: orgId, status: { in: ['ACTIVE', 'GRACE_PERIOD', 'PAST_DUE', 'PENDING_PAYMENT'] } }, data: { status: 'CANCELLED' } });
+      const created = await tx.subscription.create({ data: { organizationId: orgId, planId: plan.id, status: 'ACTIVE', currentPeriodStart: start, currentPeriodEnd: end } });
+      await this.audit.log({ actor: user, action: 'preview.demo_subscription', entity: 'Subscription', entityId: created.id, after: { plan: plan.code, note: 'Preview test activation — no payment, no invoice' } }, tx);
+      return created;
+    });
+    await this.dispatch.emit({ type: 'subscription.activated', organizationId: orgId, title: `${plan.name} plan active (test)`, body: `Test activation in the preview environment — no payment was taken. Active until ${end.toDateString()}.` });
+    await this.runActivationListeners(orgId, { planCode: plan.code, planName: plan.name, kind: previous ? 'change' : 'new', previousPlanCode: previous?.plan.code ?? null, preview: true });
+    return { status: sub.status, plan: { code: plan.code, name: plan.name }, currentPeriodEnd: end };
+  }
+
   async billingSummary(user: AuthUser) {
     const orgId = user.organizationId!;
     const [subscriptions, payments, invoices] = await Promise.all([
@@ -285,6 +329,7 @@ export class BillingService {
       subscriptions, payments, invoices, profile,
       profileComplete: Boolean(profile.stateCode && org.address && org.pincode),
       paymentsConfigured: this.rzp.configured && this.invoicingConfigured,
+      previewActivation: this.previewActivationAllowed,
       gst: { rateBps: config.gstRateBps, supplierState: config.supplier.gstin ? stateOfGstin(config.supplier.gstin) : null },
       states: STATES,
     };

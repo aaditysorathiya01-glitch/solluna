@@ -7,7 +7,7 @@ export type EventType =
   | 'request.created' | 'request.status_changed' | 'task.status_changed' | 'approval.requested' | 'approval.decided'
   | 'subscription.activated' | 'payment.failed' | 'chat.message' | 'report.published' | 'subscription.renewal_reminder' | 'subscription.grace_period' | 'subscription.past_due'
   | 'subscription.cancel_scheduled' | 'subscription.expired' | 'ticket.created' | 'ticket.status_changed' | 'ticket.reply' | 'listing.status_changed' | 'mapping.updated'
-  | 'labels.ready' | 'stock.alert' | 'thank_you.review' | 'thank_you.decided' | 'marketplace.status_changed' | 'announcement' | 'account.suspended';
+  | 'labels.ready' | 'stock.alert' | 'thank_you.review' | 'thank_you.decided' | 'marketplace.status_changed' | 'announcement' | 'account.suspended' | 'manager.pending';
 
 /** Events addressed to one person by email (no organization), e.g. password reset links. */
 export interface DirectEvent { type: 'auth.password_reset' | 'auth.verify_email' | 'auth.password_changed'; to: string; name: string; title: string; body: string; link?: string }

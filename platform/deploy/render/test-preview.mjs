@@ -226,6 +226,35 @@ await check('UI', 'Admin console with 2FA (MRR, clients, plans)', async () => {
   await p.getByRole('button', { name: 'Admin', exact: true }).click(); await p.getByText('MRR (excl. GST)').waitFor({ timeout: 15000 }); await shot(p, 'admin-console');
   await p.context().close();
 });
+await check('UI', 'New sign-up: plans only → test activation → plan dashboard with manager welcome', async () => {
+  const ctx = await browser.newContext({ viewport: { width: 1366, height: 900 } }); const p = await ctx.newPage();
+  p.on('pageerror', (e) => errors.push(`signup: ${e.message}`));
+  const stamp = Date.now().toString(36);
+  await p.goto(BASE + '/register');
+  await p.fill('#name', 'Flow Check'); await p.fill('#email', `flow+${stamp}@demo.solluna.co.in`);
+  await p.fill('#phone', `8${String(Date.now()).slice(-9)}`); await p.fill('#legalName', `FLOW CHECK ${stamp} (test account)`);
+  await p.fill('#password', `Flow-${stamp}-Pass1`); await p.check('input[name="terms"]');
+  await p.click('button:has-text("Create account")');
+  await p.getByRole('heading', { name: 'Choose your plan' }).waitFor({ timeout: 60000 });
+  assert(await p.locator('nav[aria-label="Dashboard"]').count() === 0, 'tabs visible before a plan');
+  await shot(p, 'signup-plans');
+  await p.getByRole('button', { name: 'Select Growth' }).click();
+  await p.getByRole('button', { name: 'Activate Growth for testing (no payment)' }).click();
+  const mgr = p.getByRole('region', { name: 'Your account manager' });
+  await mgr.getByText('Growth plan is active', { exact: false }).waitFor({ timeout: 30000 });
+  const tabs = (await p.locator('nav[aria-label="Dashboard"] button').allInnerTexts()).map((t) => t.trim().toLowerCase());
+  assert(tabs.includes('labels') && tabs.includes('low stock'), `Growth tabs: ${tabs}`);
+  await shot(p, 'signup-growth-overview');
+  await ctx.close();
+  return 'manager assigned + welcome sent';
+});
+await check('UI', 'Reseller dashboard hides Growth-only tabs (labels, low stock)', async () => {
+  const p = await asUser('amit@demo.solluna.co.in', E.CLIENT_PASSWORD);
+  await p.waitForURL(/\/dashboard/, { timeout: 20000 }); await p.locator('nav[aria-label="Dashboard"]').waitFor();
+  const tabs = (await p.locator('nav[aria-label="Dashboard"] button').allInnerTexts()).map((t) => t.trim().toLowerCase());
+  assert(!tabs.includes('labels') && !tabs.includes('low stock'), `Reseller tabs: ${tabs}`);
+  await p.context().close();
+});
 await check('UI', 'Public site shows the preview banner and is hidden from search engines', async () => {
   const ctx = await browser.newContext({ viewport: { width: 390, height: 844 } }); const p = await ctx.newPage();
   await p.goto(BASE + '/'); await p.getByText('Temporary test environment', { exact: false }).first().waitFor();

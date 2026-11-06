@@ -37,7 +37,7 @@ export function AuthForm({ mode, plan }: { mode: 'login' | 'register'; plan?: st
     try {
       await api(`/auth/${mode}`, { method: 'POST', body });
       const me = await api<{ user: { type: string } }>('/auth/me');
-      router.push(me.user.type === 'STAFF' ? '/ops' : plan ? `/dashboard?tab=billing&plan=${plan}` : '/dashboard');
+      router.push(me.user.type === 'STAFF' ? '/ops' : plan ? `/dashboard?plan=${plan}` : '/dashboard');
     } catch (err) {
       const a = err as ApiError;
       if (a.status === 401 && /authenticator|code/i.test(a.message) && mode === 'login') {

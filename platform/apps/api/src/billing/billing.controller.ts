@@ -25,6 +25,10 @@ export class BillingController {
   @CustomerOnly() @Post('checkout')
   checkout(@CurrentUser() user: AuthUser, @Body() body: unknown) { return this.billing.checkout(user, body); }
 
+  /** Preview environments only (PREVIEW_MODE): activate a plan without payment for testing. 404 everywhere else. */
+  @CustomerOnly() @Post('preview-activate') @HttpCode(200)
+  previewActivate(@CurrentUser() user: AuthUser, @Body() body: unknown) { return this.billing.previewActivate(user, body); }
+
   @CustomerOnly() @Post('cancel') @HttpCode(200)
   cancel(@CurrentUser() user: AuthUser, @Body() body: unknown) { return this.billing.setCancel(user, body); }
 

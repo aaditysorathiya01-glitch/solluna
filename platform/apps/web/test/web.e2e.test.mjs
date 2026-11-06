@@ -190,12 +190,19 @@ test('register → billing details → GST total → Razorpay checkout → verif
   await page.getByText('Enter a valid Indian mobile number').waitFor();
   await page.fill('#phone', '9812345678');
   await page.click('button:has-text("Create account")');
-  await page.waitForURL(/\/dashboard\?tab=billing&plan=GROWTH/);
-  await page.getByRole('heading', { name: 'Billing', exact: true }).waitFor();
+  await page.waitForURL(/\/dashboard\?plan=GROWTH/);
+  // A new client sees only the plans and their benefits — no dashboard tabs until a plan is active.
+  await page.getByRole('heading', { name: 'Choose your plan' }).waitFor();
+  assert.equal(await page.locator('nav[aria-label="Dashboard"]').count(), 0, 'no dashboard before a plan');
+  for (const name of ['Reseller', 'Growth', 'Premium']) assert.ok(await page.getByRole('region', { name: `${name} plan` }).isVisible());
+  assert.ok(await page.getByRole('region', { name: 'Premium plan' }).getByText('Product Research & Suggestions').isVisible(), 'benefits listed per plan');
+  assert.equal(await page.getByRole('region', { name: 'Reseller plan' }).getByText('Ads Management').count(), 0, 'a plan lists only what it includes');
+  await page.getByRole('heading', { name: 'Activate Growth' }).waitFor(); // preselected from the pricing link
+  await page.screenshot({ path: join(SHOTS, '4-plan-picker.png'), fullPage: true });
   const firstStates = await page.locator('#stateCode option').evaluateAll((o) => o.slice(1, 3).map((x) => x.textContent));
   assert.deepEqual(firstStates, ['01 · Jammu and Kashmir', '02 · Himachal Pradesh'], 'states listed in GST code order');
 
-  assert.ok(await page.locator('button:has-text("Choose Growth")').isDisabled(), 'checkout needs billing details first');
+  assert.ok(await page.locator('button:has-text("Pay & activate Growth")').isDisabled(), 'checkout needs billing details first');
   await page.fill('#gstin', '24ABCDE1234F1Z5');
   await page.fill('#address', '7 Linking Road, Bandra West'); await page.fill('#city', 'Mumbai'); await page.fill('#pincode', '400050');
   await page.click('button:has-text("Save billing details")');
@@ -205,13 +212,18 @@ test('register → billing details → GST total → Razorpay checkout → verif
   await page.click('button:has-text("Save billing details")');
   await page.getByText('Billing details saved.').waitFor();
   await page.getByText('Unregistered (no GSTIN)').waitFor();
-  assert.equal((await page.getByTestId('total-GROWTH').innerText()).replace(/\s+/g, ' '), 'Payable ₹5,898.82 incl. IGST 18%');
+  assert.equal((await page.getByTestId('total-GROWTH').innerText()).replace(/\s+/g, ' '), 'Payable ₹5,898.82');
+  assert.ok(await page.getByText('IGST 18%').isVisible(), 'GST shown separately');
 
-  await page.click('button:has-text("Choose Growth")');
+  await page.click('button:has-text("Pay & activate Growth")');
   await page.getByText('Payment verified. Your Growth plan is active.').waitFor();
   const opts = await page.evaluate(() => ({ amount: window.__rzpOptions.amount, key: window.__rzpOptions.key, currency: window.__rzpOptions.currency }));
   assert.deepEqual(opts, { amount: 589882, key: KEY_ID, currency: 'INR' }, 'Razorpay charged ₹4,999 + 18% IGST');
 
+  // The plan dashboard opens on the overview with the manager card.
+  await page.getByRole('region', { name: 'Your account manager' }).waitFor();
+  assert.equal(await page.locator('nav[aria-label="Dashboard"] >> text=Low stock').count(), 1, 'Growth shows plan tabs');
+  await page.click('nav[aria-label="Dashboard"] >> text=billing');
   await page.click('text=View tax invoice');
   await page.waitForURL(/\/invoices\//);
   const invoice = page.getByRole('article', { name: 'Tax invoice' });
@@ -495,7 +507,7 @@ test('forgot password → emailed link → new password → old password stops w
   await page.fill('#email', 'tara@shop.test'); await page.fill('#password', 'Tara-New-Pass-22');
   await page.click('button:has-text("Sign in")');
   await page.waitForURL(/\/dashboard/);
-  await page.getByText('Finish setting up').waitFor();
+  await page.getByRole('heading', { name: 'Choose your plan' }).waitFor();
   assert.deepEqual(errors, []);
 });
 

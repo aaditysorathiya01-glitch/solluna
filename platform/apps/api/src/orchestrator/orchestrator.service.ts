@@ -65,7 +65,7 @@ export class OrchestratorService implements OnModuleInit {
   ) {}
 
   onModuleInit() {
-    this.billing.onActivated = (orgId) => this.reverify(orgId);
+    this.billing.activationListeners.push((orgId) => this.reverify(orgId));
   }
 
   // ───────────────────────── Intake (Steps 1–4) ─────────────────────────

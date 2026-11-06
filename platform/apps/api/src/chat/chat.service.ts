@@ -9,7 +9,7 @@ import { parse } from '../common/zod';
 import { DispatcherService } from '../connectors/dispatcher.service';
 import { OrchestratorService } from '../orchestrator/orchestrator.service';
 import type { AuthUser } from '../auth/auth.types';
-import { AuthService } from '../auth/auth.service';
+import { BillingService, type ActivationInfo } from '../billing/billing.service';
 
 /** Live events. Customers only ever receive their own org's non-internal events (filtered at the stream). */
 export type ChatEvent =
@@ -53,9 +53,10 @@ export class ChatService {
     private readonly audit: AuditService,
     private readonly dispatch: DispatcherService,
     private readonly orch: OrchestratorService,
-    auth: AuthService,
+    billing: BillingService,
   ) {
-    auth.onRegistered = (orgId) => this.autoAssign(orgId);
+    // The manager is assigned when a plan starts (not at sign-up) and welcomes the client for that plan.
+    billing.activationListeners.push((orgId, info) => this.welcomeOnActivation(orgId, info));
   }
 
   private async conversation(orgId: string) {
@@ -199,6 +200,95 @@ export class ChatService {
     await this.db.managerAssignment.create({ data: { organizationId: orgId, managerId: pick.id, isPrimary: true } });
     await this.audit.log({ action: 'manager.auto_assign', entity: 'Organization', entityId: orgId, organizationId: orgId, after: { managerId: pick.id } });
     return pick.id;
+  }
+
+  /**
+   * After a plan starts: make sure the client has an active primary manager (least-loaded, see autoAssign), then
+   * post the manager's welcome for that plan into Manager Chat. Renewals send nothing; a plan change lists what is
+   * newly included. Without any available manager, admins are alerted and the client is told one is being assigned.
+   */
+  async welcomeOnActivation(orgId: string, info: ActivationInfo) {
+    if (info.kind === 'renewal') return null;
+    const current = await this.db.managerAssignment.findFirst({ where: { organizationId: orgId, isPrimary: true, endedAt: null }, include: { manager: { select: { id: true, isActive: true } } } });
+    let managerId = current?.manager.isActive ? current.manager.id : null;
+    if (!managerId) {
+      if (current) await this.db.managerAssignment.update({ where: { id: current.id }, data: { endedAt: new Date() } });
+      managerId = await this.autoAssign(orgId);
+    }
+    if (!managerId) {
+      await this.dispatch.notifyStaff({ roles: ['SUPER_ADMIN', 'OPERATIONS_MANAGER'], organizationId: orgId, type: 'admin.manager_needed', title: 'Assign a manager', body: `A client started the ${info.planName} plan but no active manager is available. Assign one in Client workspace.` });
+      await this.dispatch.emit({ type: 'manager.pending', organizationId: orgId, title: 'Your manager is being assigned', body: 'Your dedicated SOLLUNA manager will message you here shortly.' });
+      return null;
+    }
+    const [manager, client, org] = await Promise.all([
+      this.db.user.findUniqueOrThrow({ where: { id: managerId }, select: { id: true, name: true } }),
+      this.db.user.findFirst({ where: { organizationId: orgId, type: 'CUSTOMER', isActive: true }, orderBy: { createdAt: 'asc' }, select: { name: true } }),
+      this.db.organization.findUniqueOrThrow({ where: { id: orgId }, select: { legalName: true, brandName: true } }),
+    ]);
+    const body = await this.welcomeText(info, manager.name, client?.name ?? '');
+    const conv = await this.conversation(orgId);
+    const message = await this.db.$transaction(async (tx) => {
+      const m = await tx.message.create({ data: { conversationId: conv.id, senderId: manager.id, senderType: 'STAFF', body } });
+      await tx.conversation.update({ where: { id: conv.id }, data: { lastMessageAt: m.createdAt } });
+      return tx.message.findUniqueOrThrow({ where: { id: m.id }, select: MESSAGE_SELECT });
+    });
+    this.events.next({ type: 'message', organizationId: orgId, internal: false, message: message as ChatMessage });
+    await this.dispatch.emit({ type: 'chat.message', organizationId: orgId, title: `${manager.name} is your SOLLUNA manager`, body: `Your ${info.planName} plan is active. ${manager.name.split(' ')[0]} has sent you a welcome message in Manager Chat.`, data: { messageId: message.id } });
+    await this.db.notification.create({ data: { organizationId: orgId, userId: manager.id, type: 'manager.new_client', title: `${info.kind === 'change' ? 'Plan changed' : 'New client'}: ${org.brandName ?? org.legalName}`, body: `${info.planName} plan${info.preview ? ' (preview test)' : ''}. Your welcome message has been sent — follow up on onboarding.` } });
+    await this.audit.log({ action: 'manager.welcome', entity: 'Organization', entityId: orgId, organizationId: orgId, after: { managerId: manager.id, plan: info.planCode, kind: info.kind } });
+    return message;
+  }
+
+  private async welcomeText(info: ActivationInfo, managerName: string, clientName: string) {
+    const enabled = async (code: string | null) => {
+      if (!code) return new Map<string, { limit: number | null; mode?: string }>();
+      const plan = await this.db.plan.findUnique({ where: { code }, include: { features: { where: { enabled: true } } } });
+      return new Map((plan?.features ?? []).map((f) => [f.featureKey, { limit: f.limitValue, mode: (f.meta as { mode?: string } | null)?.mode }]));
+    };
+    const now = await enabled(info.planCode);
+    const before = info.kind === 'change' ? await enabled(info.previousPlanCode) : new Map();
+    const label = (k: string) => (FEATURES as Record<string, { label: string }>)[k]?.label.replace(' / Month', '') ?? k;
+    const first = clientName.split(' ')[0] || 'there';
+    const listings = (k: string) => { const f = now.get(k); return f ? (f.limit == null ? 'unlimited' : `${f.limit} per month`) : null; };
+    const call = now.get('CALL_SUPPORT')?.mode;
+
+    const sections: [string, string[]][] = [
+      ['Account & catalog', ['SELLER_ACCOUNT_REGISTRATION', 'BRAND_APPROVAL', 'CATALOG_MAPPING', 'SEO_KEYWORD_OPTIMIZATION']],
+      ['Reports & support', ['MONTHLY_PERFORMANCE_REPORT', 'MONTHLY_PL_REPORT', 'CA_DOCUMENTATION', 'MARKETPLACE_SUPPORT']],
+      ['Growth', ['ADS_MANAGEMENT', 'PROMOTIONAL_MANAGEMENT', 'LOW_STOCK_ALERTS', 'COMPETITOR_PRICE_MONITORING', 'LISTING_HEALTH_MONITORING', 'INVENTORY_REPLENISHMENT']],
+      ['Shipping & branding', ['SHIPPING_LABEL_GENERATION', 'DAILY_LABEL_PROCESSING', 'PERSONALIZED_THANK_YOU_NOTES', 'CUSTOM_THANK_YOU_DESIGN']],
+      ['Strategy', ['PRODUCT_RESEARCH', 'BUSINESS_GROWTH_SUGGESTIONS', 'COMPETITOR_STRATEGY', 'BUSINESS_EXPANSION', 'PROFITABILITY_PRICING', 'NEW_PRODUCT_LAUNCH']],
+    ];
+    const lines: string[] = [];
+    const amz = listings('NEW_LISTING_AMAZON'), fk = listings('NEW_LISTING_FLIPKART');
+    if (info.kind === 'change') {
+      const added = [...now.keys()].filter((k) => !before.has(k));
+      lines.push(`Namaste ${first}! Your plan is now ${info.planName}.`, '');
+      if (added.length) lines.push('Newly included for you:', ...added.map((k) => `• ${label(k)}`));
+      if (amz || fk) lines.push(`• New listings: Amazon ${amz ?? '—'}, Flipkart ${fk ?? '—'}`);
+      lines.push('', 'Tell me what you would like to start with and I will plan it for this month.');
+    } else {
+      lines.push(
+        `Namaste ${first}, welcome to SOLLUNA! 🙏`, '',
+        `I'm ${managerName}, your dedicated account manager. Your ${info.planName} plan is active, and I will personally coordinate your Amazon and Flipkart work from here.`, '',
+        `What your ${info.planName} plan covers:`,
+      );
+      if (amz || fk) lines.push(`• New listings: Amazon ${amz ?? '—'}, Flipkart ${fk ?? '—'}`);
+      for (const [title, keys] of sections) {
+        const inc = keys.filter((k) => now.has(k)).map(label);
+        if (inc.length) lines.push(`• ${title}: ${inc.join(', ')}`);
+      }
+      lines.push(`• Manager Chat Support${call ? ` + call support (${call === 'PRIORITY' ? 'priority' : 'on request'})` : ''}`);
+      lines.push('', "Let's get you started (about 10 minutes):",
+        '1. Catalog → add your Amazon and Flipkart seller details. We never ask for passwords or OTPs.',
+        '2. Documents → upload your GST certificate and any brand documents.',
+        '3. Reply here with the first products you want us to list or map.');
+      if (info.planCode === 'PREMIUM') lines.push('', 'As a Premium client you also get priority calls, custom thank-you note design and monthly strategy reviews. Share a good time this week for a 20-minute kick-off call.');
+      else if (info.planCode === 'GROWTH') lines.push('', 'Once your catalog is in, I will share an ads plan for your approval and switch on low-stock alerts and daily label processing.');
+      else lines.push('', 'Need ads, shipping labels or stock alerts later? You can move to Growth any time from Billing.');
+      lines.push('', `Message me here any time — I reply during business hours (Mon–Sat, 10 AM–7 PM IST).`, `— ${managerName}`);
+    }
+    return lines.join('\n');
   }
 
   async clients() {

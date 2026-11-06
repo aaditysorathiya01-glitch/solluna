@@ -23,6 +23,7 @@ interface Approval { id: string; actionType: string; parameters: Record<string, 
 interface BillingProfile { legalName: string; gstin: string | null; address: string | null; city: string | null; pincode: string | null; stateCode: string | null }
 interface Billing {
   paymentsConfigured: boolean;
+  previewActivation?: boolean;
   profile: BillingProfile;
   profileComplete: boolean;
   gst: { rateBps: number; supplierState: string | null };
@@ -31,7 +32,9 @@ interface Billing {
   payments: { id: string; amountPaise: number; status: string; failureReason: string | null; createdAt: string }[];
   invoices: { id: string; number: string; amountPaise: number; taxablePaise: number; gstPaise: number; issuedAt: string }[];
 }
-interface Plan { code: string; name: string; pricePaise: number; features: { enabled: boolean }[] }
+interface PlanFeatureRow { key: string; label: string; section: string; enabled: boolean; limit: number | null; meta: { mode?: string } | null }
+interface Plan { code: string; name: string; pricePaise: number; features: PlanFeatureRow[] }
+interface ChatSummary { managers: { id: string; name: string; staffRole: string }[]; messages: { id: string; body: string; senderType: string; createdAt: string; sender: { id: string; name: string } }[] }
 interface Notification { id: string; title: string; body: string; createdAt: string; readAt: string | null }
 
 const TABS = ['overview', 'services', 'requests', 'approvals', 'catalog', 'labels', 'inventory', 'tickets', 'chat', 'reports', 'documents', 'billing', 'settings'] as const;
@@ -39,6 +42,7 @@ type Tab = (typeof TABS)[number];
 
 export { Status, human } from './ui';
 import { Status, human, NotificationBell } from './ui';
+import { CONTACT } from './Site';
 
 export function Dashboard() {
   const router = useRouter();
@@ -54,6 +58,7 @@ export function Dashboard() {
   const [flash, setFlash] = useState<{ kind: 'ok' | 'err'; text: string } | null>(null);
   const [requestFor, setRequestFor] = useState<Feature | null>(null);
   const [onboarding, setOnboarding] = useState<Onboarding | null>(null);
+  const [chat, setChat] = useState<ChatSummary | null>(null);
 
   const load = useCallback(async () => {
     try {
@@ -64,6 +69,7 @@ export function Dashboard() {
         api<Catalog>('/features'), api<Req[]>('/requests'), api<Approval[]>('/approvals'), api<Billing>('/billing'), api<Plan[]>('/plans'), api<Notification[]>('/notifications'), api<Onboarding>('/onboarding'),
       ]);
       setCatalog(c); setRequests(r); setApprovals(a); setBilling(b); setPlans(p); setNotes(n); setOnboarding(o);
+      if (c.plan) setChat(await api<ChatSummary>('/chat').catch(() => null));
     } catch (e) {
       if ((e as ApiError).status === 401) router.replace('/login');
       else setFlash({ kind: 'err', text: (e as Error).message });
@@ -81,43 +87,106 @@ export function Dashboard() {
     return <main className="flex min-h-screen items-center justify-center text-ink-3">{flash?.text ?? 'Loading your dashboard…'}</main>;
   }
 
-  return (
-    <div className="min-h-screen">
-      <header className="border-b border-ink/10 bg-white">
-        <div className="mx-auto flex max-w-6xl items-center justify-between px-4 py-4 sm:px-6">
-          <Logo />
-          <div className="flex items-center gap-3 text-sm">
-            <span className="hidden text-ink-3 sm:inline">{me.organization?.brandName ?? me.organization?.legalName}</span>
-            <NotificationBell />
-            <button className="btn-ghost py-1.5" onClick={logout}>Sign out</button>
-          </div>
+  const hasPlan = Boolean(catalog.plan);
+  const allowed = (k: string) => catalog.features.some((f) => f.key === k && (f.access === 'ALLOWED' || f.access === 'LIMIT_REACHED'));
+  // Before the first plan: plans only. After a plan has lapsed: renew, plus read access to past work.
+  const lapsed = !hasPlan && billing.subscriptions.some((x) => ['ACTIVE', 'GRACE_PERIOD', 'PAST_DUE', 'EXPIRED', 'CANCELLED'].includes(x.status) && x.currentPeriodEnd);
+  const visible: Tab[] = hasPlan
+    ? TABS.filter((t) => (t === 'labels' ? allowed('SHIPPING_LABEL_GENERATION') || allowed('PERSONALIZED_THANK_YOU_NOTES') : t === 'inventory' ? allowed('LOW_STOCK_ALERTS') : true))
+    : lapsed ? ['overview', 'chat', 'reports', 'documents', 'billing', 'settings'] : [];
+  const current: Tab = visible.includes(tab) ? tab : 'overview';
+  const go = (t: Tab) => { setTab(t); window.history.replaceState(null, '', `?tab=${t}`); };
+  const header = (
+    <header className="border-b border-ink/10 bg-white">
+      <div className="mx-auto flex max-w-6xl items-center justify-between px-4 py-4 sm:px-6">
+        <Logo />
+        <div className="flex items-center gap-3 text-sm">
+          <span className="hidden text-ink-3 sm:inline">{me.organization?.brandName ?? me.organization?.legalName}</span>
+          {visible.length > 0 && <NotificationBell />}
+          <button className="btn-ghost py-1.5" onClick={logout}>Sign out</button>
         </div>
+      </div>
+      {visible.length > 0 && (
         <nav className="mx-auto flex max-w-6xl gap-1 overflow-x-auto px-4 sm:px-6" aria-label="Dashboard">
-          {TABS.map((t) => (
-            <button key={t} onClick={() => { setTab(t); window.history.replaceState(null, '', `?tab=${t}`); }} className={`relative whitespace-nowrap px-3 py-3 text-sm font-medium capitalize ${tab === t ? 'text-ink' : 'text-ink-3 hover:text-ink'}`}>
-              {t}{t === 'approvals' && pendingApprovals.length > 0 && <span className="ml-1.5 chip bg-sun text-ink">{pendingApprovals.length}</span>}
-              {tab === t && <span className="absolute inset-x-2 bottom-0 h-0.5 rounded bg-sun" />}
+          {visible.map((t) => (
+            <button key={t} onClick={() => go(t)} className={`relative whitespace-nowrap px-3 py-3 text-sm font-medium capitalize ${current === t ? 'text-ink' : 'text-ink-3 hover:text-ink'}`}>
+              {TAB_LABEL[t] ?? t}{t === 'approvals' && pendingApprovals.length > 0 && <span className="ml-1.5 chip bg-sun text-ink">{pendingApprovals.length}</span>}
+              {current === t && <span className="absolute inset-x-2 bottom-0 h-0.5 rounded bg-sun" />}
             </button>
           ))}
         </nav>
-      </header>
+      )}
+    </header>
+  );
+  const flashBox = flash && (
+    <div role="status" className={`mb-6 rounded-xl px-4 py-3 text-sm ${flash.kind === 'ok' ? 'bg-emerald-50 text-emerald-900' : 'bg-red-50 text-red-900'}`}>
+      {flash.text} <button className="ml-2 underline" onClick={() => setFlash(null)}>Dismiss</button>
+    </div>
+  );
 
+  if (!hasPlan && (current === 'overview' || !lapsed)) {
+    return (
+      <div className="min-h-screen">
+        {header}
+        <main className="mx-auto max-w-6xl px-4 py-8 sm:px-6">
+          {flashBox}
+          <PlanPicker
+            firstName={me.user.name.split(' ')[0]} billing={billing} plans={plans} preselect={params.get('plan')} lapsed={lapsed}
+            verifying={catalog.subscriptionVerified === null}
+            onDone={(m, activated) => { setFlash(m); if (activated) go('overview'); load(); }}
+          />
+        </main>
+      </div>
+    );
+  }
+
+  const manager = chat?.managers[0] ?? null;
+  const managerNote = manager ? [...(chat?.messages ?? [])].reverse().find((x) => x.senderType === 'STAFF' && x.sender.id === manager.id) : undefined;
+  const included = catalog.features.filter((f) => f.access === 'ALLOWED' || f.access === 'LIMIT_REACHED');
+  const locked = catalog.features.filter((f) => !(f.access === 'ALLOWED' || f.access === 'LIMIT_REACHED'));
+
+  return (
+    <div className="min-h-screen">
+      {header}
       <main className="mx-auto max-w-6xl px-4 py-8 sm:px-6">
-        {flash && (
-          <div role="status" className={`mb-6 rounded-xl px-4 py-3 text-sm ${flash.kind === 'ok' ? 'bg-emerald-50 text-emerald-900' : 'bg-red-50 text-red-900'}`}>
-            {flash.text} <button className="ml-2 underline" onClick={() => setFlash(null)}>Dismiss</button>
-          </div>
-        )}
+        {flashBox}
 
-        {tab === 'overview' && (
+        {current === 'overview' && catalog.plan && (
           <div className="space-y-6">
             <h1 className="font-display text-3xl">Welcome, {me.user.name.split(' ')[0]}</h1>
-            <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-              <Stat label="Plan" value={catalog.plan ? catalog.plan.name : 'No active plan'} sub={catalog.plan ? `Renews ${new Date(catalog.plan.currentPeriodEnd).toLocaleDateString('en-IN')}` : catalog.subscriptionVerified === null ? 'Payment being verified' : 'Choose a plan to start'} />
-              <Stat label="Services included" value={`${catalog.features.filter((f) => f.access === 'ALLOWED' || f.access === 'LIMIT_REACHED').length} / 28`} />
-              <Stat label="Open requests" value={String(openRequests.length)} />
-              <Stat label="Awaiting your approval" value={String(pendingApprovals.length)} highlight={pendingApprovals.length > 0} />
+            <div className="grid gap-4 lg:grid-cols-3">
+              <section className="card p-6 lg:col-span-2" aria-label="Your account manager">
+                {manager ? (
+                  <>
+                    <div className="flex items-center gap-4">
+                      <span className="flex h-12 w-12 shrink-0 items-center justify-center rounded-full bg-ink font-display text-lg text-sun-2" aria-hidden>{manager.name.split(' ').map((w) => w[0]).slice(0, 2).join('')}</span>
+                      <div><p className="label !mb-0">Your account manager</p><p className="font-display text-xl">{manager.name}</p><p className="text-xs text-ink-3">{human(manager.staffRole)} · Mon–Sat, 10 AM–7 PM IST</p></div>
+                    </div>
+                    {managerNote && <p className="mt-4 line-clamp-6 whitespace-pre-line rounded-xl bg-ivory p-4 text-sm text-ink-2">{managerNote.body}</p>}
+                    <button className="btn-primary mt-4" onClick={() => go('chat')}>{managerNote ? `Reply to ${manager.name.split(' ')[0]}` : `Message ${manager.name.split(' ')[0]}`}</button>
+                  </>
+                ) : (
+                  <><p className="label">Your account manager</p><p className="font-display text-xl">Being assigned</p><p className="mt-1 text-sm text-ink-3">Your dedicated manager will message you in Manager chat shortly.</p></>
+                )}
+              </section>
+              <section className="card p-6" aria-label="Your plan">
+                <p className="label">Your plan</p>
+                <p className="font-display text-2xl">{catalog.plan.name}</p>
+                <p className="mt-1 text-xs text-ink-3">Renews {new Date(catalog.plan.currentPeriodEnd).toLocaleDateString('en-IN', { dateStyle: 'medium' })}</p>
+                <p className="mt-4 text-sm">Services included <strong>{included.length} / 28</strong></p>
+                {['NEW_LISTING_AMAZON', 'NEW_LISTING_FLIPKART'].map((k) => {
+                  const f = catalog.features.find((x) => x.key === k)!;
+                  return <p key={k} className="mt-1 text-sm text-ink-2">{f.label.replace('New ', '').replace(' / Month', '')}: <strong>{f.limit === null ? `${f.used ?? 0} used · Unlimited` : `${f.used ?? 0} of ${f.limit} used`}</strong></p>;
+                })}
+                <button className="btn-ghost mt-4 py-1.5 text-xs" onClick={() => go('billing')}>Manage plan</button>
+              </section>
             </div>
+            {pendingApprovals.length > 0 && (
+              <button className="card flex w-full items-center justify-between gap-4 p-5 text-left ring-2 ring-sun" onClick={() => go('approvals')}>
+                <span><span className="font-semibold">{pendingApprovals.length} item{pendingApprovals.length > 1 ? 's' : ''} need{pendingApprovals.length > 1 ? '' : 's'} your approval</span><span className="block text-xs text-ink-3">Nothing is spent or changed until you approve.</span></span>
+                <span className="btn-gold py-1.5 text-xs">Review</span>
+              </button>
+            )}
             {onboarding && !onboarding.complete && (
               <section className="card p-6" aria-label="Onboarding checklist">
                 <div className="flex flex-wrap items-center justify-between gap-2"><h2 className="font-semibold">Finish setting up</h2><span className="text-sm text-ink-3">{onboarding.steps.filter((x) => x.done).length} of {onboarding.steps.length} done</span></div>
@@ -125,7 +194,7 @@ export function Dashboard() {
                 <ul className="mt-4 grid gap-2 sm:grid-cols-2">
                   {onboarding.steps.map((st) => (
                     <li key={st.key}>
-                      <button className="flex w-full items-center gap-3 rounded-xl px-3 py-2 text-left text-sm hover:bg-ivory" onClick={() => setTab(st.tab as Tab)} disabled={st.done}>
+                      <button className="flex w-full items-center gap-3 rounded-xl px-3 py-2 text-left text-sm hover:bg-ivory" onClick={() => go((visible.includes(st.tab as Tab) ? st.tab : 'overview') as Tab)} disabled={st.done}>
                         <span className={`flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-[11px] ${st.done ? 'bg-emerald-600 text-white' : 'border border-ink/25'}`}>{st.done ? '✓' : ''}</span>
                         <span className={st.done ? 'text-ink-3 line-through' : ''}>{st.label}</span>
                       </button>
@@ -134,15 +203,10 @@ export function Dashboard() {
                 </ul>
               </section>
             )}
-            {!catalog.plan && <div className="card flex flex-wrap items-center justify-between gap-4 p-6"><p>Activate a plan to start submitting requests.</p><button className="btn-gold" onClick={() => setTab('billing')}>View plans</button></div>}
-            {catalog.plan && (
-              <div className="grid gap-4 md:grid-cols-2">
-                {['NEW_LISTING_AMAZON', 'NEW_LISTING_FLIPKART'].map((k) => {
-                  const f = catalog.features.find((x) => x.key === k)!;
-                  return <Stat key={k} label={`${f.label.replace(' / Month', '')} this billing month`} value={f.limit === null ? `${f.used ?? 0} used · Unlimited` : `${f.used ?? 0} of ${f.limit} used`} />;
-                })}
-              </div>
-            )}
+            <div className="grid gap-4 sm:grid-cols-2">
+              <Stat label="Open requests" value={String(openRequests.length)} />
+              <Stat label="Awaiting your approval" value={String(pendingApprovals.length)} highlight={pendingApprovals.length > 0} />
+            </div>
             <section className="card p-6">
               <h2 className="font-semibold">Recent updates</h2>
               <ul className="mt-4 divide-y divide-ink/5">
@@ -155,33 +219,49 @@ export function Dashboard() {
           </div>
         )}
 
-        {tab === 'services' && (
+        {current === 'services' && (
           <div className="space-y-8">
-            <div><h1 className="font-display text-3xl">Services</h1><p className="mt-1 text-sm text-ink-3">Each service is delivered by a SOLLUNA specialist following a documented operating procedure.</p></div>
-            {SECTIONS.map((s) => (
-              <section key={s}>
-                <h2 className="label">{SECTION_LABEL[s]}</h2>
-                <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-                  {catalog.features.filter((f) => f.section === s).map((f) => (
-                    <div key={f.key} className={`card flex flex-col p-5 ${f.access === 'ALLOWED' ? '' : 'opacity-70'}`}>
-                      <div className="flex items-start justify-between gap-2">
-                        <h3 className="text-sm font-semibold">{f.label}</h3>
-                        {f.access === 'ALLOWED' ? <span className="chip bg-emerald-50 text-emerald-800">Included</span> : f.access === 'LIMIT_REACHED' ? <span className="chip bg-amber-50 text-amber-800">Limit used</span> : <span className="chip bg-ink/5 text-ink-3">Not in plan</span>}
+            <div><h1 className="font-display text-3xl">Your services</h1><p className="mt-1 text-sm text-ink-3">Everything in your {catalog.plan?.name} plan. Each service is delivered by a SOLLUNA specialist following a documented operating procedure.</p></div>
+            {SECTIONS.map((sec) => {
+              const list = included.filter((f) => f.section === sec);
+              if (!list.length) return null;
+              return (
+                <section key={sec}>
+                  <h2 className="label">{SECTION_LABEL[sec]}</h2>
+                  <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+                    {list.map((f) => (
+                      <div key={f.key} className="card flex flex-col p-5">
+                        <div className="flex items-start justify-between gap-2">
+                          <h3 className="text-sm font-semibold">{f.label}</h3>
+                          {f.access === 'ALLOWED' ? <span className="chip bg-emerald-50 text-emerald-800">Included</span> : <span className="chip bg-amber-50 text-amber-800">Limit used</span>}
+                        </div>
+                        {f.limit !== null && f.enabled && <p className="mt-1 text-xs text-ink-3">{f.used ?? 0} of {f.limit} used this month</p>}
+                        {f.meta?.mode && <p className="mt-1 text-xs text-ink-3">{human(f.meta.mode)}</p>}
+                        <button className="btn-ghost mt-4 self-start py-1.5 text-xs" onClick={() => setRequestFor(f)}>Request</button>
                       </div>
-                      {f.limit !== null && f.enabled && <p className="mt-1 text-xs text-ink-3">{f.used ?? 0} of {f.limit} used this month</p>}
-                      {f.meta?.mode && <p className="mt-1 text-xs text-ink-3">{human(f.meta.mode)}</p>}
-                      <button className="btn-ghost mt-4 self-start py-1.5 text-xs" disabled={!catalog.plan} onClick={() => setRequestFor(f)}>Request</button>
+                    ))}
+                  </div>
+                </section>
+              );
+            })}
+            {locked.length > 0 && (
+              <section aria-label="Available on higher plans">
+                <div className="flex flex-wrap items-end justify-between gap-2"><h2 className="label">Available on higher plans</h2><button className="text-xs font-semibold underline" onClick={() => go('billing')}>Compare plans</button></div>
+                <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+                  {locked.map((f) => (
+                    <div key={f.key} className="card flex items-start justify-between gap-2 p-5 opacity-70">
+                      <h3 className="text-sm font-semibold">{f.label}</h3><span className="chip bg-ink/5 text-ink-3">Not in plan</span>
                     </div>
                   ))}
                 </div>
               </section>
-            ))}
+            )}
           </div>
         )}
 
-        {tab === 'requests' && <Requests requests={requests} onNew={() => setTab('services')} />}
+        {current === 'requests' && <Requests requests={requests} onNew={() => go('services')} />}
 
-        {tab === 'approvals' && (
+        {current === 'approvals' && (
           <div className="space-y-4">
             <h1 className="font-display text-3xl">Approvals</h1>
             <p className="text-sm text-ink-3">SOLLUNA never spends your money, changes prices or shares your data without your explicit approval of the exact parameters below.</p>
@@ -204,22 +284,18 @@ export function Dashboard() {
           </div>
         )}
 
-        {tab === 'catalog' && <ClientCatalog />}
-        {tab === 'labels' && <ClientFulfilment />}
-        {tab === 'inventory' && <ClientInventory />}
-        {tab === 'tickets' && <ClientTickets />}
-        {tab === 'settings' && <AccountSettings me={me} onDone={(m) => { setFlash(m); api<Me>('/auth/me').then(setMe).catch(() => undefined); }} />}
-
-        {tab === 'chat' && <ChatPanel mode="client" />}
-
-        {tab === 'reports' && <ClientReporting />}
-
-        {tab === 'documents' && <div className="space-y-4"><h1 className="font-display text-3xl">Documents</h1><DocumentsPanel myId={me.user.id} /></div>}
-
-        {tab === 'billing' && <BillingTab billing={billing} plans={plans} current={catalog.plan?.code} preselect={params.get('plan')} onDone={(m) => { setFlash(m); load(); }} />}
+        {current === 'catalog' && <ClientCatalog />}
+        {current === 'labels' && <ClientFulfilment />}
+        {current === 'inventory' && <ClientInventory />}
+        {current === 'tickets' && <ClientTickets />}
+        {current === 'settings' && <AccountSettings me={me} onDone={(m) => { setFlash(m); api<Me>('/auth/me').then(setMe).catch(() => undefined); }} />}
+        {current === 'chat' && <ChatPanel mode="client" />}
+        {current === 'reports' && <ClientReporting />}
+        {current === 'documents' && <div className="space-y-4"><h1 className="font-display text-3xl">Documents</h1><DocumentsPanel myId={me.user.id} /></div>}
+        {current === 'billing' && <BillingTab billing={billing} plans={plans} current={catalog.plan?.code} preselect={params.get('plan')} onDone={(m) => { setFlash(m); load(); }} />}
       </main>
 
-      {requestFor && <RequestModal feature={requestFor} onClose={() => setRequestFor(null)} onCreated={(msg) => { setRequestFor(null); setFlash({ kind: 'ok', text: msg }); setTab('requests'); load(); }} />}
+      {requestFor && <RequestModal feature={requestFor} onClose={() => setRequestFor(null)} onCreated={(msg) => { setRequestFor(null); setFlash({ kind: 'ok', text: msg }); go('requests'); load(); }} />}
     </div>
   );
 
@@ -230,6 +306,134 @@ export function Dashboard() {
       load();
     } catch (e) { setFlash({ kind: 'err', text: (e as Error).message }); }
   }
+}
+
+const TAB_LABEL: Partial<Record<Tab, string>> = { chat: 'Manager chat', inventory: 'Low stock', labels: 'Labels' };
+
+const PLAN_PITCH: Record<string, string> = {
+  RESELLER: 'For sellers starting out: catalog, listings, reports and a dedicated manager.',
+  GROWTH: 'We run your ads, stock alerts and daily shipping labels as you scale.',
+  PREMIUM: 'Everything, plus strategy, priority calls and branded thank-you notes.',
+};
+
+/** Opens Razorpay Checkout for a plan; activation happens only after server-side signature verification. */
+async function startCheckout(code: string, onDone: (m: { kind: 'ok' | 'err'; text: string }, activated?: boolean) => void, setBusy: (b: string | null) => void) {
+  setBusy(code);
+  try {
+    const order = await api<{ orderId: string; amount: number; currency: string; keyId: string; plan: { name: string } }>('/billing/checkout', { method: 'POST', body: { planCode: code } });
+    await loadRazorpay();
+    const rzp = new window.Razorpay!({
+      key: order.keyId, order_id: order.orderId, amount: order.amount, currency: order.currency,
+      name: 'SOLLUNA', description: `${order.plan.name} plan · 1 month`, theme: { color: '#12131C' },
+      handler: async (resp: { razorpay_order_id: string; razorpay_payment_id: string; razorpay_signature: string }) => {
+        try {
+          await api('/billing/verify', { method: 'POST', body: resp });
+          onDone({ kind: 'ok', text: `Payment verified. Your ${order.plan.name} plan is active.` }, true);
+        } catch (e) { onDone({ kind: 'err', text: (e as Error).message }); }
+        setBusy(null);
+      },
+      modal: { ondismiss: () => setBusy(null) },
+    });
+    rzp.on('payment.failed', () => { onDone({ kind: 'err', text: 'Payment failed. Your plan has not changed. Please try again.' }); setBusy(null); });
+    rzp.open();
+  } catch (e) { onDone({ kind: 'err', text: (e as Error).message }); setBusy(null); }
+}
+
+function PlanPicker({ firstName, billing, plans, preselect, lapsed, verifying, onDone }: {
+  firstName: string; billing: Billing; plans: Plan[]; preselect: string | null; lapsed: boolean; verifying: boolean;
+  onDone: (m: { kind: 'ok' | 'err'; text: string }, activated?: boolean) => void;
+}) {
+  const [selected, setSelected] = useState<string | null>(plans.some((p) => p.code === preselect) ? preselect : null);
+  const [busy, setBusy] = useState<string | null>(null);
+  const plan = plans.find((p) => p.code === selected) ?? null;
+  useEffect(() => { if (selected) document.getElementById('activate')?.scrollIntoView({ behavior: 'smooth', block: 'start' }); }, [selected]);
+
+  async function previewActivate(code: string) {
+    setBusy(code);
+    try {
+      const r = await api<{ plan: { name: string } }>('/billing/preview-activate', { method: 'POST', body: { planCode: code } });
+      onDone({ kind: 'ok', text: `${r.plan.name} plan activated for testing (no payment). Your manager has sent you a welcome message.` }, true);
+    } catch (e) { onDone({ kind: 'err', text: (e as Error).message }); }
+    setBusy(null);
+  }
+
+  return (
+    <div className="space-y-8">
+      <div className="mx-auto max-w-2xl text-center">
+        <p className="label">{lapsed ? 'Your plan has ended' : `Welcome, ${firstName}`}</p>
+        <h1 className="font-display text-3xl sm:text-4xl">{lapsed ? 'Renew to continue your services' : 'Choose your plan'}</h1>
+        <p className="mt-2 text-sm text-ink-3">Your dedicated SOLLUNA manager is assigned the moment your plan starts. Prices are monthly and exclude GST (18%).</p>
+      </div>
+      {verifying && <p role="status" className="rounded-xl bg-amber-50 px-4 py-3 text-center text-sm text-amber-900">We are verifying your payment. This page will update once it is confirmed.</p>}
+
+      <div className="grid gap-4 lg:grid-cols-3">
+        {plans.map((p) => {
+          const on = (k: string) => p.features.find((f) => f.key === k && f.enabled);
+          const listing = (k: string) => { const f = on(k); return f ? (f.limit === null ? 'Unlimited' : String(f.limit)) : '—'; };
+          const call = on('CALL_SUPPORT')?.meta?.mode;
+          const popular = p.code === 'GROWTH';
+          const isSel = selected === p.code;
+          return (
+            <section key={p.code} aria-label={`${p.name} plan`} className={`card relative flex flex-col p-6 ${isSel ? 'ring-2 ring-ink' : popular ? 'ring-2 ring-sun' : ''}`}>
+              {popular && <span className="chip absolute -top-3 left-6 bg-sun text-ink">Most popular</span>}
+              <p className="label">{p.name}</p>
+              <p className="font-display text-4xl">{inr(p.pricePaise)}<span className="font-sans text-sm text-ink-3"> /month + GST</span></p>
+              <p className="mt-2 min-h-10 text-sm text-ink-2">{PLAN_PITCH[p.code]}</p>
+              <dl className="mt-4 grid grid-cols-2 gap-2 rounded-xl bg-ivory p-3 text-center text-xs">
+                <div><dt className="text-ink-3">New listings / month</dt><dd className="font-semibold">Amazon {listing('NEW_LISTING_AMAZON')} · Flipkart {listing('NEW_LISTING_FLIPKART')}</dd></div>
+                <div><dt className="text-ink-3">Services</dt><dd className="font-semibold">{p.features.filter((f) => f.enabled).length} of {p.features.length}</dd></div>
+              </dl>
+              <ul className="mt-4 flex-1 space-y-3 text-sm">
+                {SECTIONS.map((sec) => {
+                  const inc = p.features.filter((f) => f.enabled && f.section === sec && !f.key.startsWith('NEW_LISTING_'));
+                  if (!inc.length) return null;
+                  return (
+                    <li key={sec}>
+                      <p className="text-[11px] font-semibold uppercase tracking-wider text-ink-3">{SECTION_LABEL[sec]}</p>
+                      <ul className="mt-1 space-y-1">
+                        {inc.map((f) => <li key={f.key} className="flex gap-2"><span className="text-emerald-700" aria-hidden>✓</span><span>{f.key === 'CALL_SUPPORT' && call ? `Call support (${human(call).toLowerCase()})` : f.label}</span></li>)}
+                      </ul>
+                    </li>
+                  );
+                })}
+              </ul>
+              <button className={`${isSel ? 'btn-primary' : popular ? 'btn-gold' : 'btn-ghost'} mt-6 w-full`} onClick={() => setSelected(p.code)} aria-pressed={isSel}>
+                {isSel ? `${p.name} selected ✓` : `Select ${p.name}`}
+              </button>
+            </section>
+          );
+        })}
+      </div>
+
+      {plan && (
+        <section id="activate" className="mx-auto max-w-3xl space-y-4" aria-label="Activate your plan">
+          <h2 className="font-display text-2xl">Activate {plan.name}</h2>
+          <BillingProfileForm billing={billing} onSaved={(m) => onDone(m)} />
+          <div className="card p-6">
+            <div className="flex flex-wrap items-baseline justify-between gap-2 text-sm"><span>{plan.name} plan · 1 month</span><span>{inrExact(plan.pricePaise)}</span></div>
+            {billing.profileComplete && billing.gst.supplierState ? (
+              <>
+                <div className="mt-1 flex justify-between text-sm text-ink-3"><span>{gstTotal(plan.pricePaise, billing).label}</span><span>{inrExact(gstTotal(plan.pricePaise, billing).total - plan.pricePaise)}</span></div>
+                <p className="mt-3 flex justify-between border-t border-ink/10 pt-3 font-semibold" data-testid={`total-${plan.code}`}><span>Payable</span><span>{inrExact(gstTotal(plan.pricePaise, billing).total)}</span></p>
+              </>
+            ) : <p className="mt-2 text-xs text-ink-3">Save your billing details above to see GST and the total.</p>}
+            {!billing.paymentsConfigured && (
+              <p className="mt-4 rounded-xl bg-amber-50 px-4 py-3 text-sm text-amber-900">Online payments are not configured yet. To start now, write to <a className="underline" href={`mailto:${CONTACT.email}`}>{CONTACT.email}</a> and we will activate your plan.</p>
+            )}
+            <button className="btn-primary mt-4 w-full" disabled={!billing.paymentsConfigured || !billing.profileComplete || busy !== null} onClick={() => startCheckout(plan.code, onDone, setBusy)}>
+              {busy === plan.code ? 'Opening checkout…' : `Pay & activate ${plan.name}`}
+            </button>
+            {billing.previewActivation && (
+              <div className="mt-4 rounded-xl border border-dashed border-amber-400 p-4">
+                <p className="text-xs text-amber-900">Test environment only: activate this plan without payment to try the plan dashboard. No payment or invoice is created.</p>
+                <button className="btn-ghost mt-3 w-full" disabled={busy !== null} onClick={() => previewActivate(plan.code)}>{busy === plan.code ? 'Activating…' : `Activate ${plan.name} for testing (no payment)`}</button>
+              </div>
+            )}
+          </div>
+        </section>
+      )}
+    </div>
+  );
 }
 
 function Stat({ label, value, sub, highlight }: { label: string; value: string; sub?: string; highlight?: boolean }) {
@@ -328,27 +532,7 @@ function BillingTab({ billing, plans, current, preselect, onDone }: { billing: B
   const [busy, setBusy] = useState<string | null>(null);
   const sorted = useMemo(() => plans, [plans]);
 
-  async function choose(code: string) {
-    setBusy(code);
-    try {
-      const order = await api<{ orderId: string; amount: number; currency: string; keyId: string; plan: { name: string } }>('/billing/checkout', { method: 'POST', body: { planCode: code } });
-      await loadRazorpay();
-      const rzp = new window.Razorpay!({
-        key: order.keyId, order_id: order.orderId, amount: order.amount, currency: order.currency,
-        name: 'SOLLUNA', description: `${order.plan.name} plan · 1 month`, theme: { color: '#12131C' },
-        handler: async (resp: { razorpay_order_id: string; razorpay_payment_id: string; razorpay_signature: string }) => {
-          try {
-            await api('/billing/verify', { method: 'POST', body: resp });
-            onDone({ kind: 'ok', text: `Payment verified. Your ${order.plan.name} plan is active.` });
-          } catch (e) { onDone({ kind: 'err', text: (e as Error).message }); }
-          setBusy(null);
-        },
-        modal: { ondismiss: () => setBusy(null) },
-      });
-      rzp.on('payment.failed', () => { onDone({ kind: 'err', text: 'Payment failed. Your plan has not changed. Please try again.' }); setBusy(null); });
-      rzp.open();
-    } catch (e) { onDone({ kind: 'err', text: (e as Error).message }); setBusy(null); }
-  }
+  const choose = (code: string) => startCheckout(code, onDone, setBusy);
 
   return (
     <div className="space-y-8">

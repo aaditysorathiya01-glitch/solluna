@@ -106,7 +106,7 @@ if (WRITE) {
     await page.fill('#password', `Check-${stamp}-Pass1`); await page.check('input[name="terms"]');
     await page.click('button:has-text("Create account")');
     await page.waitForURL(/\/dashboard/, { timeout: 15000 });
-    await page.getByText('Finish setting up').waitFor({ timeout: 15000 });
+    await page.getByRole('heading', { name: 'Choose your plan' }).waitFor({ timeout: 15000 });
     return email;
   });
   await check('Session cookie is Secure + HttpOnly', async () => {
@@ -114,7 +114,7 @@ if (WRITE) {
     assert(c && c.secure && c.httpOnly, JSON.stringify(c));
   });
   await check('Billing: GST shown separately, checkout disabled while Razorpay is off', async () => {
-    await page.goto(BASE + '/dashboard?tab=billing');
+    await page.goto(BASE + '/dashboard?plan=RESELLER');
     await page.fill('#address', '1 Deployment Check Road'); await page.fill('#city', 'Anjar'); await page.fill('#pincode', '370110');
     await page.selectOption('#stateCode', '24');
     await page.click('button:has-text("Save billing details")');
@@ -122,22 +122,21 @@ if (WRITE) {
     const total = await page.getByTestId('total-RESELLER').innerText();
     assert(total.includes('₹2,358.82'), `Reseller payable shown as: ${total}`);
     const cfg = await page.getByText('Online payments are not configured', { exact: false }).count();
-    if (cfg) assert(await page.getByRole('button', { name: 'Choose Reseller' }).isDisabled(), 'checkout button should be disabled');
+    if (cfg) assert(await page.getByRole('button', { name: 'Pay & activate Reseller' }).isDisabled(), 'checkout button should be disabled');
     return cfg ? 'Razorpay off → buttons disabled, no simulated payment' : 'Razorpay configured';
   });
-  await check('Dashboard tabs load (catalog, tickets, settings, documents, reports)', async () => {
-    for (const t of ['catalog', 'tickets', 'settings', 'documents', 'reports', 'labels', 'inventory']) {
+  await check('New client without a plan sees only plans and benefits (no dashboard tabs)', async () => {
+    for (const t of ['catalog', 'reports', 'labels']) {
       await page.goto(`${BASE}/dashboard?tab=${t}`);
-      await page.locator('main h1').first().waitFor({ timeout: 10000 });
+      await page.getByRole('heading', { name: 'Choose your plan' }).waitFor({ timeout: 10000 });
+      assert((await page.locator('nav[aria-label="Dashboard"]').count()) === 0, `tab ${t} reachable without a plan`);
     }
   });
-  await check('Support ticket: create and list', async () => {
-    await page.goto(BASE + '/dashboard?tab=tickets');
-    await page.click('button:has-text("New ticket")');
-    await page.fill('#t-sub', 'Deployment check ticket'); await page.fill('#t-desc', 'Automated post-deployment check. Safe to close.');
-    await page.selectOption('#t-pri', 'P4');
-    await page.click('button:has-text("Create ticket")');
-    await page.getByText('Deployment check ticket').first().waitFor({ timeout: 10000 });
+  await check('Support ticket API: create and list (session cookie)', async () => {
+    const r = await req.post(BASE + '/api/tickets', { data: { category: 'ACCOUNT_REGISTRATION', subject: 'Deployment check ticket', description: 'Automated post-deployment check. Safe to close.', priority: 'P4' } });
+    assert(r.ok(), `HTTP ${r.status()} ${await r.text()}`);
+    const list = await (await req.get(BASE + '/api/tickets')).json();
+    assert(list.some((t) => t.subject === 'Deployment check ticket'), 'ticket not listed');
   });
   await check('Contact form → admin enquiry inbox', async () => {
     const r = await req.post(BASE + '/api/public/contact', { data: { name: 'Deployment Check', email, topic: 'GENERAL', message: `Automated post-deployment check ${stamp}. Please ignore.` } });

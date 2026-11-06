@@ -594,9 +594,32 @@ test('chat: auto-assigned manager, live delivery both ways, internal notes stay 
   // Make sup1 the least-loaded candidate, then register a new client → auto-assigned (onboarding step 7).
   await db.managerAssignment.deleteMany({});
   S.d = await registerCustomer('Devika');
+  const before = ok(await call('GET', '/chat', { token: S.d }));
+  S.dOrg = before.organizationId;
+  assert.equal(before.managers.length, 0, 'no manager until a plan starts');
+  // A paying client gets the least-loaded manager and a welcome for their plan.
+  const esha = await registerCustomer('Esha');
+  await pay(esha, 'GROWTH');
+  const eHist = ok(await call('GET', '/chat', { token: esha }));
+  assert.equal(eHist.managers.length, 1, 'a manager is assigned when the plan starts');
+  const eManager = eHist.managers[0];
+  const welcome = eHist.messages.find((m) => m.senderType === 'STAFF' && m.sender.id === eManager.id);
+  assert.ok(welcome, 'the manager welcomes the client in Manager Chat');
+  assert.match(welcome.body, /Growth plan is active/);
+  assert.match(welcome.body, /New listings: Amazon 25 per month, Flipkart 25 per month/);
+  assert.match(welcome.body, /Growth: Ads Management/);
+  assert.doesNotMatch(welcome.body, /Product Research/, 'only services in the plan are listed');
+  assert.ok(await db.notification.findFirst({ where: { userId: eManager.id, type: 'manager.new_client' } }), 'manager told about the new client');
+  await pay(esha, 'GROWTH');
+  await pay(esha, 'PREMIUM');
+  const after = ok(await call('GET', '/chat', { token: esha })).messages.filter((m) => m.senderType === 'STAFF');
+  assert.equal(after.length, 2, 'renewal sends nothing; plan change sends one update');
+  assert.match(after[1].body, /Your plan is now Premium/);
+  assert.match(after[1].body, /Product Research & Suggestions/);
+  assert.doesNotMatch(after[1].body, /Ads Management/, 'only newly included services');
+  assert.equal((await call('POST', '/billing/preview-activate', { token: esha, body: { planCode: 'RESELLER' } })).status, 404, 'test activation exists only in preview environments');
+  ok(await call('POST', `/admin/clients/${S.dOrg}/managers`, { token: S.admin, body: { managerId: S.sup1.id } }));
   const dHist = ok(await call('GET', '/chat', { token: S.d }));
-  S.dOrg = dHist.organizationId;
-  assert.equal(dHist.managers.length, 1, 'a manager is assigned at registration');
   const assigned = dHist.managers[0];
   assert.ok(['SUPPORT_EXECUTIVE', 'OPERATIONS_MANAGER'].includes(assigned.staffRole));
   if (assigned.id !== S.sup1.id) ok(await call('POST', `/admin/clients/${S.dOrg}/managers`, { token: S.admin, body: { managerId: S.sup1.id } }));
