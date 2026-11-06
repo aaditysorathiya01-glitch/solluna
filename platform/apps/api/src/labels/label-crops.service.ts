@@ -135,7 +135,7 @@ export class LabelCropsService implements OnModuleInit {
         if (want === 'OTHER') invoices = [];
       }
       if (!labels.length) throw new Error(`No ${want === 'OTHER' ? 'shipping' : other(want)} labels were recognised in this PDF. Use Manual crop to mark the label area.`);
-      const out = await compose(new Uint8Array(src), labels, invoices, { layout: job.layout as 'A4_4UP' | 'A4_6UP' | 'SINGLE' | 'THERMAL_4X6', specialised: job.mode === 'SPECIAL', includeInvoices: job.includeInvoices, style: want === 'OTHER' ? 'GENERIC' : want });
+      const out = await compose(new Uint8Array(src), labels, invoices, { layout: job.layout as 'A4_4UP' | 'A4_6UP' | 'SINGLE' | 'THERMAL_4X6', specialised: job.mode === 'SPECIAL', includeInvoices: job.includeInvoices, style: want === 'OTHER' ? 'GENERIC' : want, itemBox: want === 'AMAZON' });
       const outputKey = await this.storage.put(Buffer.from(out));
       await this.db.labelCropJob.update({ where: { id }, data: { status: 'DONE', outputKey, labelCount: labels.length, invoiceCount: invoices.length, unrecognisedPages: hybrid.failed.map((p) => p + 1), reviewPages: hybrid.review.map((p) => p + 1), finishedAt: new Date() } });
       const notes = [hybrid.failed.length ? `${hybrid.failed.length} page(s) could not be cropped automatically — use Manual crop for them` : '', hybrid.review.length ? `${hybrid.review.length} page(s) were cropped with lower confidence — please check them` : ''].filter(Boolean).join('; ');

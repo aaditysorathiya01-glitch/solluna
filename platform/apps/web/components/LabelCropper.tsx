@@ -17,8 +17,8 @@ const MARKETS: Record<Market, { name: string; how: string; layouts: Layout[]; sp
   OTHER: { name: 'Other courier', how: 'Any other courier label PDF. We look for the label edge (cut line, border, invoice text) on every page.', layouts: ['A4_4UP', 'A4_6UP', 'THERMAL_4X6'], specialised: false, invoices: false, preset: { box: 'TOP_HALF', apply: 'ALL' } },
 };
 const MODE_INFO: Record<Mode, { title: string; body: (m: Market) => string; plan: string }> = {
-  AUTO: { title: 'Auto crop', body: () => 'We find every label, drop the invoices and lay the labels out to print.', plan: 'Growth' },
-  SPECIAL: { title: 'Auto + specialised', body: (m) => `Auto crop plus a product description & qty box ${m === 'AMAZON' ? 'on' : 'under'} each label, sorted by SKU, with a picklist page.`, plan: 'Premium' },
+  AUTO: { title: 'Auto crop', body: (m) => (m === 'AMAZON' ? 'We find every label, drop the invoices and add the item name, SKU and qty line on each label.' : 'We find every label, drop the invoices and lay the labels out to print.'), plan: 'Growth' },
+  SPECIAL: { title: 'Auto + specialised', body: (m) => (m === 'AMAZON' ? 'Auto crop with the item line, labels sorted by SKU, plus a picklist page.' : 'Auto crop plus a product description & qty box under each label, sorted by SKU, with a picklist page.'), plan: 'Premium' },
   MANUAL: { title: 'Manual crop', body: () => 'Adjust the label box on the preview once; it is applied to every label page.', plan: 'All plans' },
 };
 const LAYOUT_NAME: Record<Layout, string> = { A4_4UP: '4 labels per A4', A4_6UP: '6 labels per A4', SINGLE: 'Single labels (one per page)', THERMAL_4X6: '1 label per page (4×6 thermal)' };

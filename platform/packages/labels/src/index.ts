@@ -22,7 +22,8 @@ export interface Detection { marketplace: Marketplace | 'MIXED'; labels: LabelPi
 export type Layout = 'A4_4UP' | 'A4_6UP' | 'SINGLE' | 'THERMAL_4X6';
 /** How the specialised description box is drawn (from the original SOLLUNA label cropper). */
 export type BoxStyle = 'FLIPKART' | 'AMAZON' | 'GENERIC';
-export interface ComposeOptions { layout: Layout; specialised: boolean; includeInvoices: boolean; style?: BoxStyle; generatedAt?: Date }
+/** itemBox: draw the item description & qty box without the specialised sort/picklist (Amazon auto, as in the original cropper). */
+export interface ComposeOptions { layout: Layout; specialised: boolean; includeInvoices: boolean; style?: BoxStyle; itemBox?: boolean; generatedAt?: Date }
 
 const has = (p: PageText, re: RegExp) => p.items.some((i) => re.test(i.str));
 const find = (p: PageText, re: RegExp) => p.items.find((i) => re.test(i.str));
@@ -191,15 +192,16 @@ export async function compose(src: Uint8Array | ArrayBuffer, labelsIn: LabelPiec
   if (opts.specialised) drawPicklist(out, labels, font, bold, opts);
 
   /** Draws one label (plus its specialised box) scaled into a w x h area at (x0, y0). */
+  const withBox = opts.specialised || Boolean(opts.itemBox);
   const drawLabel = async (page: PDFPage, l: LabelPiece, x0: number, y0: number, aw: number, ah: number) => {
     const emb = await embed(l.page, l.box);
-    const text = opts.specialised ? boxText(l) : '';
-    const under = opts.specialised && style !== 'AMAZON' ? FK_BOX_H : 0; // Flipkart / other: box below the label
+    const text = withBox ? boxText(l) : '';
+    const under = withBox && style !== 'AMAZON' ? FK_BOX_H : 0; // Flipkart / other: box below the label
     const s = Math.min(aw / l.box.w, ah / (l.box.h + under));
     const w = l.box.w * s, h = (l.box.h + under) * s;
     const x = x0 + (aw - w) / 2, y = y0 + (ah - h) / 2;
     page.drawPage(emb, { x, y: y + under * s, xScale: s, yScale: s });
-    if (!opts.specialised) return;
+    if (!withBox) return;
     if (style === 'AMAZON') {
       // Box drawn in the label page's blank band (original cropper: x 50, y 170.2, 520 x 29.8 on the A4 label page).
       const bx = x + (AMZ_BOX.x - l.box.x) * s, by = y + (AMZ_BOX.y - l.box.y) * s, bw = AMZ_BOX.w * s, bh = AMZ_BOX.h * s;
@@ -221,7 +223,7 @@ export async function compose(src: Uint8Array | ArrayBuffer, labelsIn: LabelPiec
   if (opts.layout === 'SINGLE') {
     // One label per page at its own size (Flipkart: label + box; Amazon: the label page).
     for (const l of labels) {
-      const under = opts.specialised && style !== 'AMAZON' ? FK_BOX_H : 0;
+      const under = withBox && style !== 'AMAZON' ? FK_BOX_H : 0;
       const p = out.addPage([l.box.w, l.box.h + under]);
       await drawLabel(p, l, 0, 0, l.box.w, l.box.h + under);
     }
