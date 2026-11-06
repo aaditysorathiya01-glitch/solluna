@@ -1,0 +1,56 @@
+# SOLLUNA 2.0 production stack: Caddy (automatic Let's Encrypt HTTPS) → web (Next.js) → api (NestJS) → Postgres.
+# From the repository root on the server:
+#   docker compose -f platform/deploy/docker-compose.prod.yml --env-file platform/deploy/.env.production up -d --build
+name: solluna
+services:
+  postgres:
+    image: postgres:16
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: solluna
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}
+      POSTGRES_DB: solluna
+    volumes: [pgdata:/var/lib/postgresql/data]
+    healthcheck: { test: ["CMD-SHELL", "pg_isready -U solluna"], interval: 5s, retries: 20 }
+
+  api:
+    build: { context: ../.., dockerfile: platform/deploy/Dockerfile, target: api }
+    restart: unless-stopped
+    depends_on: { postgres: { condition: service_healthy } }
+    env_file: .env.production
+    environment:
+      DATABASE_URL: postgresql://solluna:${POSTGRES_PASSWORD}@postgres:5432/solluna
+      COOKIE_SECURE: "true"
+      EXPOSE_AUTH_LINKS: "false"
+    healthcheck: { test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:4000/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"], interval: 10s, retries: 12 }
+
+  web:
+    build: { context: ../.., dockerfile: platform/deploy/Dockerfile, target: web }
+    restart: unless-stopped
+    depends_on: { api: { condition: service_healthy } }
+    environment:
+      API_URL: http://api:4000
+
+  caddy:
+    image: caddy:2
+    restart: unless-stopped
+    depends_on: [web]
+    ports: ["80:80", "443:443"]
+    environment:
+      SITE_DOMAIN: ${SITE_DOMAIN:-solluna.co.in}
+      ACME_EMAIL: ${ACME_EMAIL:-solluna.play@gmail.com}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+
+  # Nightly pg_dump (newest 14 kept). Waits for the API so the first dump includes the migrated schema.
+  backup:
+    image: postgres:16
+    restart: unless-stopped
+    depends_on: { api: { condition: service_healthy } }
+    environment: { PGPASSWORD: "${POSTGRES_PASSWORD}" }
+    volumes: [backups:/backups, ./backup.sh:/backup.sh:ro]
+    entrypoint: ["sh", "/backup.sh"]
+
+volumes: { pgdata: {}, caddy_data: {}, caddy_config: {}, backups: {} }

@@ -1,0 +1,13 @@
+**/node_modules
+**/.next
+**/dist
+**/.env
+**/.env.*
+!**/.env.example
+!**/.env.production.example
+**/test/screenshots
+.git
+images
+*.html
+*.css
+script.js
