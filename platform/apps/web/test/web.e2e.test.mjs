@@ -678,25 +678,27 @@ test('label cropper: Growth auto-crops a Flipkart PDF on the server; manual crop
   assert.ok(await c.locator('input[name="crop-mode"][value="AUTO"]').isChecked(), 'Growth defaults to auto');
   assert.ok(await c.locator('input[name="crop-mode"][value="SPECIAL"]').isDisabled(), 'specialised is Premium only');
   await c.setInputFiles('#crop-file', { name: 'invoice_labels.pdf', mimeType: 'application/pdf', buffer: pdf });
-  await c.click('button:has-text("Crop labels")');
+  await c.click('button:has-text("Crop Flipkart labels")');
   const files = c.getByRole('region', { name: 'Cropped files' });
   await files.getByRole('link', { name: 'Download PDF' }).first().waitFor({ timeout: 30000 });
-  await files.getByText('6 labels (Flipkart)', { exact: false }).first().waitFor();
+  await files.getByText('Flipkart · Auto', { exact: false }).first().waitFor();
+  await files.getByText('6 labels', { exact: false }).first().waitFor();
   const [dl] = await Promise.all([c.waitForEvent('download'), files.getByRole('link', { name: 'Download PDF' }).first().click()]);
   const auto = await PDFDocument.load(await (await import('node:fs/promises')).readFile(await dl.path()));
   assert.equal(auto.getPageCount(), 2, '6 labels → 2 A4 pages (4-up)');
   await c.screenshot({ path: join(SHOTS, '13-label-cropper.png'), fullPage: true });
+  // Amazon tab: its own layouts (no 6-up), specialised still Premium-only.
+  await c.getByRole('tab', { name: 'Amazon' }).click();
+  assert.deepEqual(await c.locator('#crop-layout option').allInnerTexts(), ['4 labels per A4', 'Single labels (one per page)', '1 label per page (4×6 thermal)']);
+  await c.getByRole('tab', { name: 'Flipkart' }).click();
 
-  // Manual: draw the box on the preview; the PDF is built in the browser.
+  // Manual: the usual Flipkart label area is pre-marked, so the client can crop straight away; built in the browser.
   await c.check('input[name="crop-mode"][value="MANUAL"]');
   await c.selectOption('#crop-layout', 'A4_6UP');
-  await c.setInputFiles('#crop-file', { name: 'other-courier.pdf', mimeType: 'application/pdf', buffer: pdf });
+  await c.setInputFiles('#crop-file', { name: 'manual.pdf', mimeType: 'application/pdf', buffer: pdf });
   const surface = c.getByTestId('crop-surface');
   await surface.waitFor({ timeout: 15000 });
   await c.waitForTimeout(800);
-  const b = await surface.boundingBox();
-  await c.mouse.move(b.x + b.width * 0.3, b.y + b.height * 0.03); await c.mouse.down();
-  await c.mouse.move(b.x + b.width * 0.7, b.y + b.height * 0.45, { steps: 8 }); await c.mouse.up();
   await c.screenshot({ path: join(SHOTS, '14-manual-crop.png'), fullPage: true });
   const [mdl] = await Promise.all([c.waitForEvent('download'), c.click('button:has-text("Crop and download")')]);
   const manual = await PDFDocument.load(await (await import('node:fs/promises')).readFile(await mdl.path()));

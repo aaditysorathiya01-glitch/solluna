@@ -18,8 +18,9 @@ const KEEP_DAYS = 7;
 /** PlanFeature.meta.mode for LABEL_CROPPER → what the client may run. Manual runs in the browser. */
 const MODES: Record<string, ('MANUAL' | 'AUTO' | 'SPECIAL')[]> = { MANUAL: ['MANUAL'], AUTO_MANUAL: ['AUTO', 'MANUAL'], AUTO_SPECIAL_MANUAL: ['AUTO', 'SPECIAL', 'MANUAL'] };
 const CreateSchema = z.object({
+  marketplace: z.enum(['FLIPKART', 'AMAZON', 'OTHER']),
   mode: z.enum(['AUTO', 'SPECIAL']),
-  layout: z.enum(['A4_4UP', 'A4_6UP', 'THERMAL_4X6']).default('A4_4UP'),
+  layout: z.enum(['A4_4UP', 'A4_6UP', 'SINGLE', 'THERMAL_4X6']).default('A4_4UP'),
   includeInvoices: z.preprocess((v) => v === true || v === 'true' || v === 'on', z.boolean()).default(false),
 });
 const PUBLIC = { id: true, mode: true, layout: true, includeInvoices: true, fileName: true, status: true, marketplace: true, labelCount: true, invoiceCount: true, unrecognisedPages: true, reviewPages: true, error: true, createdAt: true, finishedAt: true, expiresAt: true } as const;
@@ -74,10 +75,10 @@ export class LabelCropsService implements OnModuleInit {
     }
     const sourceKey = await this.storage.put(file.buffer);
     const job = await this.db.labelCropJob.create({
-      data: { organizationId: orgId, createdById: user.id, mode: d.mode, layout: d.layout, includeInvoices: d.includeInvoices, fileName: safeName(file.originalname), sourceKey, unrecognisedPages: [], reviewPages: [], expiresAt: new Date(Date.now() + KEEP_DAYS * 86_400_000) },
+      data: { organizationId: orgId, createdById: user.id, marketplace: d.marketplace, mode: d.mode, layout: d.layout, includeInvoices: d.includeInvoices, fileName: safeName(file.originalname), sourceKey, unrecognisedPages: [], reviewPages: [], expiresAt: new Date(Date.now() + KEEP_DAYS * 86_400_000) },
       select: PUBLIC,
     });
-    await this.audit.log({ actor: user, action: 'labels.crop_requested', entity: 'LabelCropJob', entityId: job.id, after: { mode: d.mode, layout: d.layout, bytes: file.size } });
+    await this.audit.log({ actor: user, action: 'labels.crop_requested', entity: 'LabelCropJob', entityId: job.id, after: { marketplace: d.marketplace, mode: d.mode, layout: d.layout, bytes: file.size } });
     setImmediate(() => this.tick().catch((e) => this.log.error(e)));
     return job;
   }
@@ -114,15 +115,29 @@ export class LabelCropsService implements OnModuleInit {
       const src = await this.storage.get(job.sourceKey);
       const pages = await extractPages(new Uint8Array(src));
       if (pages.length > MAX_PAGES) throw new Error(`This PDF has ${pages.length} pages; the limit is ${MAX_PAGES}`);
+      // Each marketplace is cropped its own way (original SOLLUNA label cropper): Flipkart label + invoice on one page,
+      // Amazon label page + invoice page; other couriers use the hybrid detector.
+      const want = job.marketplace as 'FLIPKART' | 'AMAZON' | 'OTHER';
       const found = detect(pages);
-      // Pages the marketplace parsers do not know go to the hybrid detector from the original label cropper.
-      const hybrid = await hybridDetect(new Uint8Array(src), found.unrecognisedPages);
-      const labels = [...found.labels, ...hybrid.labels].sort((a, b) => a.page - b.page);
-      if (!labels.length) throw new Error('No shipping labels were recognised in this PDF. Use Manual crop to mark the label area.');
-      const marketplace = hybrid.labels.length ? (found.labels.length ? 'MIXED' : 'OTHER') : found.marketplace;
-      const out = await compose(new Uint8Array(src), labels, found.invoices, { layout: job.layout as 'A4_4UP' | 'A4_6UP' | 'THERMAL_4X6', specialised: job.mode === 'SPECIAL', includeInvoices: job.includeInvoices });
+      const other = (m: string) => (m === 'AMAZON' ? 'Amazon' : 'Flipkart');
+      const kinds = new Set(found.labels.map((l) => l.marketplace));
+      if (want !== 'OTHER' && kinds.size && !kinds.has(want)) throw new Error(`This looks like a ${other([...kinds][0])} label PDF. Upload it in the ${other([...kinds][0])} tab.`);
+      let labels = found.labels.filter((l) => want === 'OTHER' || l.marketplace === want);
+      let invoices = want === 'OTHER' ? [] : found.invoices;
+      let hybrid = { labels: [] as typeof labels, review: [] as number[], failed: [] as number[] };
+      if (want === 'AMAZON' && !labels.length && pages.every((p) => !p.items.length)) {
+        // Amazon label-only download (no invoices, no text layer): every page is a label.
+        labels = pages.map((p, page) => ({ page, box: { x: 0, y: 0, w: p.width, h: p.height }, marketplace: 'AMAZON' as const, orderId: null, items: [] }));
+      } else if (want !== 'AMAZON') {
+        const rest = want === 'OTHER' ? pages.map((_, i) => i) : found.unrecognisedPages;
+        hybrid = await hybridDetect(new Uint8Array(src), rest);
+        labels = [...labels, ...hybrid.labels].sort((a, b) => a.page - b.page);
+        if (want === 'OTHER') invoices = [];
+      }
+      if (!labels.length) throw new Error(`No ${want === 'OTHER' ? 'shipping' : other(want)} labels were recognised in this PDF. Use Manual crop to mark the label area.`);
+      const out = await compose(new Uint8Array(src), labels, invoices, { layout: job.layout as 'A4_4UP' | 'A4_6UP' | 'SINGLE' | 'THERMAL_4X6', specialised: job.mode === 'SPECIAL', includeInvoices: job.includeInvoices, style: want === 'OTHER' ? 'GENERIC' : want });
       const outputKey = await this.storage.put(Buffer.from(out));
-      await this.db.labelCropJob.update({ where: { id }, data: { status: 'DONE', outputKey, marketplace, labelCount: labels.length, invoiceCount: found.invoices.length, unrecognisedPages: hybrid.failed.map((p) => p + 1), reviewPages: hybrid.review.map((p) => p + 1), finishedAt: new Date() } });
+      await this.db.labelCropJob.update({ where: { id }, data: { status: 'DONE', outputKey, labelCount: labels.length, invoiceCount: invoices.length, unrecognisedPages: hybrid.failed.map((p) => p + 1), reviewPages: hybrid.review.map((p) => p + 1), finishedAt: new Date() } });
       const notes = [hybrid.failed.length ? `${hybrid.failed.length} page(s) could not be cropped automatically — use Manual crop for them` : '', hybrid.review.length ? `${hybrid.review.length} page(s) were cropped with lower confidence — please check them` : ''].filter(Boolean).join('; ');
       await this.dispatch.emit({ type: 'labels.ready', organizationId: job.organizationId, title: `Cropped labels ready: ${labels.length} labels`, body: `${job.fileName} is ready to print${notes ? ` (${notes})` : ''}. Download it in Labels within ${KEEP_DAYS} days.` });
     } catch (e) {

@@ -1207,7 +1207,7 @@ test('label cropper: plan modes enforced by the API; auto crop and specialised p
   }
   async function crop(token, fields, buf = null) {
     const fd = new FormData(); fd.append('file', new Blob([buf ?? await flipkartPdf(5)], { type: 'application/pdf' }), 'invoice_labels.pdf');
-    for (const [k, v] of Object.entries(fields)) fd.append(k, String(v));
+    for (const [k, v] of Object.entries({ marketplace: 'FLIPKART', ...fields })) fd.append(k, String(v));
     const r = await fetch(`${base}/label-crops`, { method: 'POST', headers: { authorization: `Bearer ${token}` }, body: fd });
     return { status: r.status, body: await r.json() };
   }
@@ -1241,6 +1241,12 @@ test('label cropper: plan modes enforced by the API; auto crop and specialised p
   const row = await db.labelCropJob.findUnique({ where: { id: gj.id } });
   assert.equal(row.sourceKey, null, 'uploaded original (buyer addresses) deleted after processing');
   assert.equal((await fetch(`${base}/label-crops/${gj.id}/download`, { headers: { authorization: `Bearer ${premium}` } })).status, 404, 'tenant isolation');
+
+  // Each marketplace has its own tab: a Flipkart file uploaded as Amazon is refused with a clear message.
+  const wrong = await done(growth, (await crop(growth, { mode: 'AUTO', marketplace: 'AMAZON' })).body.id);
+  assert.equal(wrong.status, 'FAILED'); assert.match(wrong.error, /Flipkart label PDF\. Upload it in the Flipkart tab/);
+  const single = await done(growth, (await crop(growth, { mode: 'AUTO', layout: 'SINGLE' })).body.id);
+  assert.equal(single.labelCount, 5);
 
   const p = await crop(premium, { mode: 'SPECIAL', layout: 'A4_4UP', includeInvoices: 'true' });
   const pj = await done(premium, p.body.id);

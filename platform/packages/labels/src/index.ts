@@ -13,13 +13,16 @@ export interface TextItem { str: string; x: number; y: number; w: number; h: num
 export interface PageText { width: number; height: number; items: TextItem[] }
 /** PDF user-space rectangle, origin bottom-left. */
 export interface Box { x: number; y: number; w: number; h: number }
-export interface LineItem { sku: string; name: string; qty: number }
+/** text = the description line as printed by the marketplace (used for the specialised box). */
+export interface LineItem { sku: string; name: string; qty: number; text?: string }
 export type Marketplace = 'FLIPKART' | 'AMAZON' | 'UNKNOWN';
 export interface LabelPiece { page: number; box: Box; marketplace: Marketplace; orderId: string | null; items: LineItem[] }
 export interface InvoicePiece { page: number; box: Box }
 export interface Detection { marketplace: Marketplace | 'MIXED'; labels: LabelPiece[]; invoices: InvoicePiece[]; unrecognisedPages: number[] }
-export type Layout = 'A4_4UP' | 'A4_6UP' | 'THERMAL_4X6';
-export interface ComposeOptions { layout: Layout; specialised: boolean; includeInvoices: boolean; generatedAt?: Date }
+export type Layout = 'A4_4UP' | 'A4_6UP' | 'SINGLE' | 'THERMAL_4X6';
+/** How the specialised description box is drawn (from the original SOLLUNA label cropper). */
+export type BoxStyle = 'FLIPKART' | 'AMAZON' | 'GENERIC';
+export interface ComposeOptions { layout: Layout; specialised: boolean; includeInvoices: boolean; style?: BoxStyle; generatedAt?: Date }
 
 const has = (p: PageText, re: RegExp) => p.items.some((i) => re.test(i.str));
 const find = (p: PageText, re: RegExp) => p.items.find((i) => re.test(i.str));
@@ -59,7 +62,7 @@ function flipkartItems(p: PageText): LineItem[] {
   return rows.map((r) => {
     const text = r.desc.join(' ').replace(/\s+/g, ' ').trim();
     const [sku, ...rest] = text.split('|');
-    return { sku: sku.trim(), name: rest.join('|').trim() || sku.trim(), qty: r.qty || 1 };
+    return { sku: sku.trim(), name: rest.join('|').trim() || sku.trim(), qty: r.qty || 1, text };
   }).filter((r) => r.sku);
 }
 
@@ -80,7 +83,7 @@ export function amazonInvoiceItems(p: PageText): LineItem[] {
     const qty = Number(/₹\s*[\d,.]+\s+(\d+)\b/.exec(qtyText)?.[1] ?? 1);
     const [name, ref = ''] = desc.split(/\s\|\s(?=[^|]*$)/);
     const sku = /\(\s*([^)]+?)\s*\)/.exec(ref)?.[1] ?? (ref.trim() || name.slice(0, 24));
-    return { sku: sku.trim(), name: name.trim(), qty };
+    return { sku: sku.trim(), name: name.trim(), qty, text: desc };
   });
 }
 
@@ -140,7 +143,26 @@ const A4 = { w: 595.28, h: 841.89 };
 const THERMAL = { w: 288, h: 432 };
 /** Standard fonts only support WinAnsi; keep text printable. */
 const safe = (s: string) => s.replace(/₹/g, 'Rs ').replace(/[·–—]/g, '-').replace(/[^\x20-\x7E]/g, '?');
-const headerText = (l: LabelPiece) => l.items.map((i) => `${i.sku} | ${i.name} | Qty ${i.qty}`).join('  ;  ') || (l.orderId ?? '');
+/** Description & quantity text, as in the original cropper: "<description> (Qty: n)" per item. */
+const boxText = (l: LabelPiece) => l.items.map((i) => `${i.text ?? `${i.sku} | ${i.name}`} (Qty: ${i.qty})`).join(' | ');
+function wrap(text: string, font: PDFFont, size: number, maxWidth: number): string[] {
+  const lines: string[] = []; let cur = '';
+  for (const word of safe(text).split(/\s+/)) {
+    const test = cur ? `${cur} ${word}` : word;
+    if (font.widthOfTextAtSize(test, size) <= maxWidth) cur = test; else { if (cur) lines.push(cur); cur = word; }
+  }
+  if (cur) lines.push(cur);
+  return lines;
+}
+/** Up to two lines, shrinking the font like the original cropper; the second line is truncated if still too long. */
+function fitTwoLines(text: string, font: PDFFont, sizes: number[], maxWidth: number) {
+  for (const size of sizes) { const lines = wrap(text, font, size, maxWidth); if (lines.length <= 2) return { size, lines }; }
+  const size = sizes[sizes.length - 1]; const lines = wrap(text, font, size, maxWidth);
+  return { size, lines: [lines[0], fit(font, lines.slice(1).join(' '), size, maxWidth)] };
+}
+// Original cropper geometry: Flipkart box under the label; Amazon box in the blank band below the declaration table.
+const FK_BOX_H = 32;
+const AMZ_BOX = { x: 50, y: 170.2, w: 520, h: 29.8 };
 function fit(font: PDFFont, text: string, size: number, width: number) {
   let t = safe(text);
   while (t.length > 3 && font.widthOfTextAtSize(t, size) > width) t = `${t.slice(0, -4)}...`;
@@ -163,37 +185,61 @@ export async function compose(src: Uint8Array | ArrayBuffer, labelsIn: LabelPiec
   const labels = opts.specialised
     ? [...labelsIn].sort((a, b) => (a.items[0]?.sku ?? '~').localeCompare(b.items[0]?.sku ?? '~') || (a.items[0]?.name ?? '').localeCompare(b.items[0]?.name ?? '') || a.page - b.page)
     : labelsIn;
+  const style: BoxStyle = opts.style ?? 'GENERIC';
+  const times = await out.embedFont(StandardFonts.TimesRomanBold);
 
   if (opts.specialised) drawPicklist(out, labels, font, bold, opts);
 
-  const HEADER = opts.specialised ? 13 : 0;
-  const place = async (page: PDFPage, l: LabelPiece, cx: number, cy: number, cw: number, ch: number, margin: number) => {
+  /** Draws one label (plus its specialised box) scaled into a w x h area at (x0, y0). */
+  const drawLabel = async (page: PDFPage, l: LabelPiece, x0: number, y0: number, aw: number, ah: number) => {
     const emb = await embed(l.page, l.box);
-    const aw = cw - margin * 2, ah = ch - margin * 2 - HEADER;
-    const s = Math.min(aw / l.box.w, ah / l.box.h);
-    const w = l.box.w * s, h = l.box.h * s;
-    const x = cx + (cw - w) / 2, y = cy + margin + (ah - h) / 2;
-    page.drawPage(emb, { x, y, xScale: s, yScale: s });
-    if (opts.specialised) {
-      const text = headerText(l);
-      if (text) page.drawText(fit(bold, text, 7, w), { x, y: y + h + 4, size: 7, font: bold, color: rgb(0, 0, 0) });
+    const text = opts.specialised ? boxText(l) : '';
+    const under = opts.specialised && style !== 'AMAZON' ? FK_BOX_H : 0; // Flipkart / other: box below the label
+    const s = Math.min(aw / l.box.w, ah / (l.box.h + under));
+    const w = l.box.w * s, h = (l.box.h + under) * s;
+    const x = x0 + (aw - w) / 2, y = y0 + (ah - h) / 2;
+    page.drawPage(emb, { x, y: y + under * s, xScale: s, yScale: s });
+    if (!opts.specialised) return;
+    if (style === 'AMAZON') {
+      // Box drawn in the label page's blank band (original cropper: x 50, y 170.2, 520 x 29.8 on the A4 label page).
+      const bx = x + (AMZ_BOX.x - l.box.x) * s, by = y + (AMZ_BOX.y - l.box.y) * s, bw = AMZ_BOX.w * s, bh = AMZ_BOX.h * s;
+      page.drawRectangle({ x: bx, y: by, width: bw, height: bh, borderColor: rgb(0, 0, 0), borderWidth: Math.max(0.5, s) });
+      if (!text) return;
+      const { size, lines } = fitTwoLines(text, times, [11, 10, 9, 8.5].map((z) => z * s), bw - 10 * s);
+      if (lines.length === 1) page.drawText(lines[0], { x: bx + 5 * s, y: by + (bh - size) / 2 + s, size, font: times });
+      else { page.drawText(lines[0], { x: bx + 5 * s, y: by + 14.8 * s, size, font: times }); page.drawText(lines[1], { x: bx + 5 * s, y: by + 4.9 * s, size, font: times }); }
+    } else {
+      const bh = FK_BOX_H * s;
+      page.drawRectangle({ x, y, width: w, height: bh, borderColor: rgb(0, 0, 0), borderWidth: Math.max(0.5, s) });
+      if (!text) return;
+      const { size, lines } = fitTwoLines(text, times, [10, 8.5, 7.5].map((z) => z * s), w - 16 * s);
+      if (lines.length === 1) page.drawText(lines[0], { x: x + 8 * s, y: y + (bh - size) / 2 + s, size, font: times });
+      else { page.drawText(lines[0], { x: x + 8 * s, y: y + bh - size - 4 * s, size, font: times }); page.drawText(lines[1], { x: x + 8 * s, y: y + 5 * s, size, font: times }); }
     }
   };
 
-  if (opts.layout === 'THERMAL_4X6') {
-    for (const l of labels) { const p = out.addPage([THERMAL.w, THERMAL.h]); await place(p, l, 0, 0, THERMAL.w, THERMAL.h, 6); }
+  if (opts.layout === 'SINGLE') {
+    // One label per page at its own size (Flipkart: label + box; Amazon: the label page).
+    for (const l of labels) {
+      const under = opts.specialised && style !== 'AMAZON' ? FK_BOX_H : 0;
+      const p = out.addPage([l.box.w, l.box.h + under]);
+      await drawLabel(p, l, 0, 0, l.box.w, l.box.h + under);
+    }
+  } else if (opts.layout === 'THERMAL_4X6') {
+    for (const l of labels) { const p = out.addPage([THERMAL.w, THERMAL.h]); await drawLabel(p, l, 6, 6, THERMAL.w - 12, THERMAL.h - 12); }
   } else {
-    // A4 grid: 2 x 2 (4-in-1) or 2 x 3 (6-in-1), with dashed cut guides.
-    const rows = opts.layout === 'A4_6UP' ? 3 : 2, per = rows * 2;
-    const cw = A4.w / 2, ch = A4.h / rows;
+    // A4 grid: 2 x 2 (4-in-1) or 2 x 3 (6-in-1) with margins and gutters as in the original cropper.
+    const rows = opts.layout === 'A4_6UP' ? 3 : 2, cols = 2, per = rows * cols;
+    const mx = 10, my = 10, gx = 10, gy = 10;
+    const cw = (A4.w - mx * 2 - gx * (cols - 1)) / cols, ch = (A4.h - my * 2 - gy * (rows - 1)) / rows;
     for (let i = 0; i < labels.length; i += per) {
       const p = out.addPage([A4.w, A4.h]);
-      const dash = { color: rgb(0.6, 0.6, 0.6), thickness: 0.6, dashArray: [4, 3] };
-      p.drawLine({ start: { x: cw, y: 0 }, end: { x: cw, y: A4.h }, ...dash });
-      for (let r = 1; r < rows; r++) p.drawLine({ start: { x: 0, y: r * ch }, end: { x: A4.w, y: r * ch }, ...dash });
+      const dash = { color: rgb(0.6, 0.6, 0.6), thickness: 0.5, dashArray: [4, 3] };
+      p.drawLine({ start: { x: A4.w / 2, y: 0 }, end: { x: A4.w / 2, y: A4.h }, ...dash });
+      for (let r = 1; r < rows; r++) { const yy = A4.h - my - r * ch - (r - 0.5) * gy; p.drawLine({ start: { x: 0, y: yy }, end: { x: A4.w, y: yy }, ...dash }); }
       for (let k = 0; k < per && i + k < labels.length; k++) {
-        const col = k % 2, row = Math.floor(k / 2);
-        await place(p, labels[i + k], col * cw, A4.h - (row + 1) * ch, cw, ch, rows === 3 ? 10 : 14);
+        const col = k % cols, row = Math.floor(k / cols);
+        await drawLabel(p, labels[i + k], mx + col * (cw + gx), A4.h - my - (row + 1) * ch - row * gy, cw, ch);
       }
     }
   }

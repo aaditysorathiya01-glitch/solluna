@@ -1,23 +1,33 @@
 'use client';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { compose, manualPieces, type Box, type Layout } from '../../../packages/labels/src';
+import { SubTabs } from './ui';
 import { api, ApiError } from '@/lib/api';
 import { Status } from './ui';
 
 type Mode = 'AUTO' | 'SPECIAL' | 'MANUAL';
 interface Job { id: string; mode: string; layout: string; includeInvoices: boolean; fileName: string; status: string; marketplace: string | null; labelCount: number; invoiceCount: number; unrecognisedPages: number[]; reviewPages: number[]; error: string | null; createdAt: string; expiresAt: string }
 
-const MODE_INFO: Record<Mode, { title: string; body: string; plan: string }> = {
-  AUTO: { title: 'Auto crop', body: 'Upload the Amazon or Flipkart label PDF. We find every label, drop the invoices and lay them out to print.', plan: 'Growth' },
-  SPECIAL: { title: 'Auto + specialised', body: 'Auto crop plus a SKU / product / qty line above each label, labels sorted by SKU and a picklist page.', plan: 'Premium' },
-  MANUAL: { title: 'Manual crop', body: 'Draw the label area once on the preview; we apply it to every page. Works with any courier format.', plan: 'All plans' },
+type Market = 'FLIPKART' | 'AMAZON' | 'OTHER';
+type Apply = 'ALL' | 'ODD' | 'EVEN';
+/** Each marketplace is cropped its own way (original SOLLUNA label cropper). */
+const MARKETS: Record<Market, { name: string; how: string; layouts: Layout[]; specialised: boolean; invoices: boolean; preset: { box: 'FLIPKART' | 'FULL' | 'TOP_HALF'; apply: Apply } }> = {
+  FLIPKART: { name: 'Flipkart', how: 'Upload the Flipkart "invoice_labels" PDF: the label on the top half of each page is kept, the tax invoice below is removed.', layouts: ['A4_4UP', 'A4_6UP', 'SINGLE', 'THERMAL_4X6'], specialised: true, invoices: true, preset: { box: 'FLIPKART', apply: 'ALL' } },
+  AMAZON: { name: 'Amazon', how: 'Upload the Amazon label PDF: each label page is paired with the tax invoice page after it; the invoice is removed.', layouts: ['A4_4UP', 'SINGLE', 'THERMAL_4X6'], specialised: true, invoices: true, preset: { box: 'FULL', apply: 'ODD' } },
+  OTHER: { name: 'Other courier', how: 'Any other courier label PDF. We look for the label edge (cut line, border, invoice text) on every page.', layouts: ['A4_4UP', 'A4_6UP', 'THERMAL_4X6'], specialised: false, invoices: false, preset: { box: 'TOP_HALF', apply: 'ALL' } },
 };
-const LAYOUTS: [Layout, string][] = [['A4_4UP', '4 labels per A4'], ['A4_6UP', '6 labels per A4'], ['THERMAL_4X6', '1 label per page (4×6 thermal)']];
+const MODE_INFO: Record<Mode, { title: string; body: (m: Market) => string; plan: string }> = {
+  AUTO: { title: 'Auto crop', body: () => 'We find every label, drop the invoices and lay the labels out to print.', plan: 'Growth' },
+  SPECIAL: { title: 'Auto + specialised', body: (m) => `Auto crop plus a product description & qty box ${m === 'AMAZON' ? 'on' : 'under'} each label, sorted by SKU, with a picklist page.`, plan: 'Premium' },
+  MANUAL: { title: 'Manual crop', body: () => 'Adjust the label box on the preview once; it is applied to every label page.', plan: 'All plans' },
+};
+const LAYOUT_NAME: Record<Layout, string> = { A4_4UP: '4 labels per A4', A4_6UP: '6 labels per A4', SINGLE: 'Single labels (one per page)', THERMAL_4X6: '1 label per page (4×6 thermal)' };
 
 /** Label Cropping Tool. Auto / specialised run on the server (plan-checked); manual runs entirely in the browser. */
 export function LabelCropper() {
   const [modes, setModes] = useState<Mode[] | null>(null);
   const [jobs, setJobs] = useState<Job[]>([]);
+  const [market, setMarket] = useState<Market>('FLIPKART');
   const [mode, setMode] = useState<Mode>('MANUAL');
   const [layout, setLayout] = useState<Layout>('A4_4UP');
   const [invoices, setInvoices] = useState(false);
@@ -34,11 +44,19 @@ export function LabelCropper() {
   const pending = jobs.some((j) => j.status === 'QUEUED' || j.status === 'PROCESSING');
   useEffect(() => { if (!pending) return; const t = setInterval(() => { load().catch(() => undefined); }, 2500); return () => clearInterval(t); }, [pending, load]);
 
+  const cfg = MARKETS[market];
+  const allowedHere = (m: Mode) => Boolean(modes?.includes(m)) && (m !== 'SPECIAL' || cfg.specialised);
+  function switchMarket(m: Market) {
+    setMarket(m); setFile(null); setMsg({});
+    if (!MARKETS[m].layouts.includes(layout)) setLayout('A4_4UP');
+    if (mode === 'SPECIAL' && !MARKETS[m].specialised) setMode(modes?.includes('AUTO') ? 'AUTO' : 'MANUAL');
+  }
+
   async function submitAuto() {
     if (!file) return setMsg({ err: 'Choose the label PDF first.' });
     setBusy(true); setMsg({});
     const fd = new FormData();
-    fd.append('file', file); fd.append('mode', mode); fd.append('layout', layout); fd.append('includeInvoices', String(invoices));
+    fd.append('file', file); fd.append('marketplace', market); fd.append('mode', mode); fd.append('layout', layout); fd.append('includeInvoices', String(invoices && cfg.invoices));
     try {
       const r = await fetch('/api/label-crops', { method: 'POST', body: fd, credentials: 'same-origin' });
       const j = await r.json().catch(() => ({}));
@@ -54,33 +72,36 @@ export function LabelCropper() {
   return (
     <div className="space-y-6">
       <section className="card space-y-5 p-6" aria-label="Label cropper">
-        <div><h2 className="font-semibold">Crop your marketplace labels</h2><p className="text-xs text-ink-3">Official labels are never edited — only cropped and arranged for printing.</p></div>
+        <div><h2 className="font-semibold">Crop your marketplace labels</h2><p className="text-xs text-ink-3">Official labels are only cropped and arranged for printing — barcodes and addresses are never edited.</p></div>
+        <SubTabs tabs={[['FLIPKART', 'Flipkart'], ['AMAZON', 'Amazon'], ['OTHER', 'Other courier']] as const} value={market} onChange={switchMarket} />
+        <p className="text-sm text-ink-2">{cfg.how}</p>
         <div className="grid gap-3 md:grid-cols-3" role="radiogroup" aria-label="Crop mode">
-          {(['AUTO', 'SPECIAL', 'MANUAL'] as Mode[]).map((m) => {
-            const on = modes.includes(m);
+          {(['AUTO', 'SPECIAL', 'MANUAL'] as Mode[]).filter((m) => m !== 'SPECIAL' || cfg.specialised).map((m) => {
+            const on = allowedHere(m);
             return (
               <label key={m} className={`card flex cursor-pointer flex-col gap-1 p-4 ${mode === m ? 'ring-2 ring-ink' : ''} ${on ? '' : 'cursor-not-allowed opacity-60'}`}>
                 <span className="flex items-center justify-between gap-2">
                   <span className="flex items-center gap-2 text-sm font-semibold"><input type="radio" name="crop-mode" value={m} checked={mode === m} disabled={!on} onChange={() => setMode(m)} />{MODE_INFO[m].title}</span>
                   {!on && <span className="chip bg-ink/5 text-ink-3">{MODE_INFO[m].plan}</span>}
                 </span>
-                <span className="text-xs text-ink-3">{MODE_INFO[m].body}</span>
+                <span className="text-xs text-ink-3">{MODE_INFO[m].body(market)}</span>
               </label>
             );
           })}
         </div>
         <div className="grid gap-3 sm:grid-cols-[1.4fr_1fr]">
-          <div><label className="label" htmlFor="crop-file">Label PDF</label><input id="crop-file" type="file" accept="application/pdf,.pdf" className="input" onChange={(e) => { setFile(e.target.files?.[0] ?? null); setMsg({}); }} /></div>
+          <div><label className="label" htmlFor="crop-file">{cfg.name} label PDF</label><input key={market} id="crop-file" type="file" accept="application/pdf,.pdf" className="input" onChange={(e) => { setFile(e.target.files?.[0] ?? null); setMsg({}); }} /></div>
           <div><label className="label" htmlFor="crop-layout">Print layout</label>
-            <select id="crop-layout" className="input" value={layout} onChange={(e) => setLayout(e.target.value as Layout)}>{LAYOUTS.map(([v, l]) => <option key={v} value={v}>{l}</option>)}</select></div>
+            <select id="crop-layout" className="input" value={layout} onChange={(e) => setLayout(e.target.value as Layout)}>{cfg.layouts.map((v) => <option key={v} value={v}>{LAYOUT_NAME[v]}</option>)}</select></div>
         </div>
         {mode !== 'MANUAL' && (
           <>
-            <label className="flex items-center gap-2 text-sm"><input id="crop-invoices" type="checkbox" checked={invoices} onChange={(e) => setInvoices(e.target.checked)} /> Also include the tax invoices (to pack inside each parcel)</label>
-            <button className="btn-primary" disabled={busy || !file} onClick={submitAuto}>{busy ? 'Uploading…' : mode === 'SPECIAL' ? 'Crop with SKU lines + picklist' : 'Crop labels'}</button>
+            {cfg.invoices && <label className="flex items-center gap-2 text-sm"><input id="crop-invoices" type="checkbox" checked={invoices} onChange={(e) => setInvoices(e.target.checked)} /> Also include the tax invoices (to pack inside each parcel)</label>}
+            <button className="btn-primary" disabled={busy || !file} onClick={submitAuto}>{busy ? 'Uploading…' : !file ? 'Choose a PDF to crop' : mode === 'SPECIAL' ? `Crop ${cfg.name} labels with description boxes` : `Crop ${cfg.name} labels`}</button>
           </>
         )}
-        {mode === 'MANUAL' && file && <ManualCrop file={file} layout={layout} onDone={(t) => setMsg({ ok: t })} onError={(t) => setMsg({ err: t })} />}
+        {mode === 'MANUAL' && !file && <p className="rounded-xl bg-ivory px-3 py-2 text-sm text-ink-2">Choose the PDF above — a preview opens with the label area already marked.</p>}
+        {mode === 'MANUAL' && file && <ManualCrop key={`${market}:${file.name}:${file.size}`} file={file} layout={layout} preset={cfg.preset} onDone={(t) => setMsg({ ok: t })} onError={(t) => setMsg({ err: t })} />}
         {msg.ok && <p role="status" className="rounded-xl bg-emerald-50 px-3 py-2 text-sm text-emerald-900">{msg.ok}</p>}
         {msg.err && <p role="alert" className="rounded-xl bg-red-50 px-3 py-2 text-sm text-red-800">{msg.err}</p>}
       </section>
@@ -95,8 +116,8 @@ export function LabelCropper() {
                 <div className="min-w-0">
                   <p className="truncate font-medium">{j.fileName}</p>
                   <p className="text-xs text-ink-3">
-                    {j.mode === 'SPECIAL' ? 'Specialised' : 'Auto'} · {LAYOUTS.find((l) => l[0] === j.layout)?.[1]} · {new Date(j.createdAt).toLocaleString('en-IN', { day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit' })}
-                    {j.status === 'DONE' && ` · ${j.labelCount} labels${j.marketplace && !['OTHER', 'MIXED'].includes(j.marketplace) ? ` (${j.marketplace === 'AMAZON' ? 'Amazon' : 'Flipkart'})` : ''}`}
+                    {j.marketplace ? `${MARKETS[j.marketplace as Market]?.name ?? j.marketplace} · ` : ''}{j.mode === 'SPECIAL' ? 'Specialised' : 'Auto'} · {LAYOUT_NAME[j.layout as Layout] ?? j.layout} · {new Date(j.createdAt).toLocaleString('en-IN', { day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit' })}
+                    {j.status === 'DONE' && ` · ${j.labelCount} labels`}
                   </p>
                   {(j.unrecognisedPages ?? []).length > 0 && <p className="text-xs text-amber-800">Pages {j.unrecognisedPages.join(', ')} could not be cropped automatically — use Manual crop for them.</p>}
                   {(j.reviewPages ?? []).length > 0 && <p className="text-xs text-amber-800">Please check pages {j.reviewPages.join(', ')} (lower confidence).</p>}
@@ -115,14 +136,17 @@ export function LabelCropper() {
 const PREVIEW_W = 520;
 
 /** Browser-only manual crop: preview with pdf.js, draw the label box, lay out with the shared composer. */
-function ManualCrop({ file, layout, onDone, onError }: { file: File; layout: Layout; onDone: (m: string) => void; onError: (m: string) => void }) {
+/** Standard Flipkart label position on the A4 "invoice_labels" page (points, bottom-left origin). */
+const FLIPKART_LABEL: Box = { x: 186, y: 458, w: 221, h: 359 };
+
+function ManualCrop({ file, layout, preset, onDone, onError }: { file: File; layout: Layout; preset: { box: 'FLIPKART' | 'FULL' | 'TOP_HALF'; apply: Apply }; onDone: (m: string) => void; onError: (m: string) => void }) {
   const canvas = useRef<HTMLCanvasElement>(null);
   const [doc, setDoc] = useState<{ pages: number; get: (n: number) => Promise<unknown> } | null>(null);
   const [pageNo, setPageNo] = useState(1);
   const [view, setView] = useState<{ scale: number; w: number; h: number; ox: number; oy: number } | null>(null);
   const [sel, setSel] = useState<{ x: number; y: number; w: number; h: number } | null>(null);
   const [drag, setDrag] = useState<{ x: number; y: number } | null>(null);
-  const [apply, setApply] = useState<'ALL' | 'ODD' | 'EVEN'>('ALL');
+  const [apply, setApply] = useState<Apply>(preset.apply);
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
@@ -149,6 +173,13 @@ function ManualCrop({ file, layout, onDone, onError }: { file: File; layout: Lay
       const c = canvas.current!;
       c.width = Math.ceil(vp.width); c.height = Math.ceil(vp.height);
       setView({ scale, w: vp.width, h: vp.height, ox: page.view[0], oy: page.view[1] });
+      // Start with the usual label area marked, so the client only adjusts it.
+      setSel((cur) => {
+        if (cur) return cur;
+        const pw = base.width, ph = base.height;
+        const b: Box = preset.box === 'FULL' ? { x: 0, y: 0, w: pw, h: ph } : preset.box === 'TOP_HALF' ? { x: 0, y: ph / 2, w: pw, h: ph / 2 } : FLIPKART_LABEL;
+        return { x: b.x * scale, y: (ph - b.y - b.h) * scale, w: b.w * scale, h: b.h * scale };
+      });
       task = page.render({ canvasContext: c.getContext('2d')!, viewport: vp, canvas: c });
       await (task as unknown as { promise: Promise<void> }).promise.catch(() => undefined);
     })();
@@ -177,14 +208,14 @@ function ManualCrop({ file, layout, onDone, onError }: { file: File; layout: Lay
   if (!doc) return <p className="text-sm text-ink-3">Opening preview…</p>;
   return (
     <div className="space-y-3" aria-label="Manual crop">
-      <p className="text-sm">Drag a box around <strong>one label</strong> on the preview. The same area is cropped on every chosen page.</p>
+      <p className="text-sm">The yellow box marks the label. If it is not exactly around <strong>one label</strong>, drag a new box on the preview. The same area is cropped on every chosen page.</p>
       <div className="flex flex-wrap items-center gap-3 text-sm">
         <button className="btn-ghost py-1 text-xs" disabled={pageNo <= 1} onClick={() => setPageNo(pageNo - 1)}>Previous page</button>
         <span>Page {pageNo} of {doc.pages}</span>
         <button className="btn-ghost py-1 text-xs" disabled={pageNo >= doc.pages} onClick={() => setPageNo(pageNo + 1)}>Next page</button>
         <label className="ml-auto flex items-center gap-2" htmlFor="crop-apply">Apply to
-          <select id="crop-apply" className="input w-auto py-1" value={apply} onChange={(e) => setApply(e.target.value as 'ALL' | 'ODD' | 'EVEN')}>
-            <option value="ALL">every page</option><option value="ODD">odd pages (1, 3, 5…)</option><option value="EVEN">even pages (2, 4, 6…)</option>
+          <select id="crop-apply" className="input w-auto py-1" value={apply} onChange={(e) => setApply(e.target.value as Apply)}>
+            <option value="ALL">every page</option><option value="ODD">odd pages (1, 3, 5…) — Amazon labels</option><option value="EVEN">even pages (2, 4, 6…)</option>
           </select>
         </label>
       </div>
@@ -197,7 +228,7 @@ function ManualCrop({ file, layout, onDone, onError }: { file: File; layout: Lay
           {sel && <div className="pointer-events-none absolute border-2 border-sun bg-sun/10" style={{ left: sel.x, top: sel.y, width: sel.w, height: sel.h }} />}
         </div>
       </div>
-      <button className="btn-primary" disabled={busy || !sel || sel.w < 10} onClick={generate}>{busy ? 'Building PDF…' : 'Crop and download'}</button>
+      <button className="btn-primary" disabled={busy} onClick={generate}>{busy ? 'Building PDF…' : 'Crop and download'}</button>
       <p className="text-xs text-ink-3">Manual crop runs in your browser — the file never leaves your computer.</p>
     </div>
   );
