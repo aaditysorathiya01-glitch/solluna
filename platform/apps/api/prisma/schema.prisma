@@ -1032,3 +1032,33 @@ model LabelCropJob {
   @@index([organizationId, createdAt])
   @@index([status])
 }
+
+/// A listing / mapping request submitted through the Listings & Mapping forms (packages/catalog-forms).
+model CatalogForm {
+  id             String   @id @default(cuid())
+  organizationId String
+  marketplace    String // FLIPKART | AMAZON
+  kind           String // MAPPING | NEW_LISTING
+  title          String
+  data           Json
+  requestId      String?
+  createdById    String
+  createdAt      DateTime @default(now())
+
+  @@index([organizationId, createdAt])
+}
+
+/// Saved form values a client can start the next similar listing from (same product family, MOQ, combo …).
+model CatalogTemplate {
+  id             String   @id @default(cuid())
+  organizationId String
+  marketplace    String
+  kind           String
+  name           String
+  data           Json
+  createdById    String
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  @@unique([organizationId, marketplace, kind, name])
+}

@@ -1,5 +1,5 @@
 export class ApiError extends Error {
-  constructor(public status: number, message: string, public issues?: { path: string; message: string }[]) { super(message); }
+  constructor(public status: number, message: string, public issues?: { path: string; message: string }[], public body?: Record<string, unknown>) { super(message); }
 }
 
 /** Gateway statuses returned while a sleeping server is starting (e.g. free hosting cold starts). */
@@ -29,7 +29,7 @@ export async function api<T = unknown>(path: string, init: { method?: string; bo
     if (!json) data = { message: res.ok ? undefined : waking ? WAKING_MESSAGE : 'Something went wrong. Please try again.' };
     if (!res.ok) {
       const msg = Array.isArray(data?.message) ? data.message.join(', ') : data?.message ?? `Request failed (${res.status})`;
-      throw new ApiError(res.status, msg, data?.issues);
+      throw new ApiError(res.status, msg, data?.issues, (data ?? undefined) as Record<string, unknown> | undefined);
     }
     return data as unknown as T;
   }

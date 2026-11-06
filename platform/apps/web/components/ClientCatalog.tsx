@@ -25,7 +25,7 @@ export function ClientCatalog() {
   );
 }
 
-function MarketplaceAccounts({ onFlash }: { onFlash: (m: FlashMsg) => void }) {
+export function MarketplaceAccounts({ onFlash }: { onFlash: (m: FlashMsg) => void }) {
   const rows = useApi<MarketplaceRow[]>('/marketplaces');
   return (
     <div className="space-y-4">

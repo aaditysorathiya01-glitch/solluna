@@ -7,7 +7,8 @@ import Link from 'next/link';
 import { Logo } from './Logo';
 import { ChatPanel, DocumentsPanel } from './Chat';
 import { ClientReporting } from './Reporting';
-import { ClientCatalog } from './ClientCatalog';
+import { MarketplaceAccounts } from './ClientCatalog';
+import { CatalogForms } from './CatalogForms';
 import { ClientFulfilment } from './Fulfilment';
 import { LabelCropper } from './LabelCropper';
 import { SubTabs } from './ui';
@@ -36,12 +37,12 @@ interface Notification { id: string; title: string; body: string; createdAt: str
 
 /** Client navigation: five work areas. Settings, plan & billing and documents live in the account menu (top right). */
 const TABS = ['chat', 'listings', 'labels', 'reports', 'notifications'] as const;
-const MENU = ['settings', 'billing', 'documents'] as const;
+const MENU = ['accounts', 'settings', 'billing', 'documents'] as const;
 type Tab = (typeof TABS)[number] | (typeof MENU)[number];
 const ALL: readonly string[] = [...TABS, ...MENU];
 /** Older links (?tab=overview, catalog, approvals …) still land somewhere sensible. */
 const ALIAS: Record<string, Tab> = { overview: 'chat', services: 'chat', requests: 'notifications', approvals: 'notifications', tickets: 'notifications', inventory: 'notifications', catalog: 'listings' };
-const TAB_LABEL: Record<Tab, string> = { chat: 'Manager Chat', listings: 'Listings & Mapping', labels: 'Labels', reports: 'Reports', notifications: 'Notifications', settings: 'Settings', billing: 'Plan & billing', documents: 'Documents' };
+const TAB_LABEL: Record<Tab, string> = { chat: 'Manager Chat', listings: 'Listings & Mapping', labels: 'Labels', reports: 'Reports', notifications: 'Notifications', accounts: 'Seller accounts', settings: 'Settings', billing: 'Plan & billing', documents: 'Documents' };
 const toTab = (p: string | null): Tab => (p && ALL.includes(p) ? (p as Tab) : (p && ALIAS[p]) || 'chat');
 
 export { Status, human } from './ui';
@@ -166,7 +167,8 @@ export function Dashboard() {
             <ChatPanel mode="client" />
           </div>
         )}
-        {current === 'listings' && <ClientCatalog />}
+        {current === 'listings' && <CatalogForms />}
+        {current === 'accounts' && <div className="space-y-4"><h1 className="font-display text-3xl">Seller accounts</h1><MarketplaceAccounts onFlash={(m) => setFlash(m)} /></div>}
         {current === 'labels' && <LabelsArea managerLabels={allowed('SHIPPING_LABEL_GENERATION') || allowed('PERSONALIZED_THANK_YOU_NOTES')} />}
         {current === 'reports' && <div className="space-y-8">{hasPlan && <CaRequest onDone={setFlash} />}<ClientReporting /></div>}
         {current === 'notifications' && <NotificationsCenter approvals={pendingApprovals} onDecide={decide} onRead={refreshUnread} />}

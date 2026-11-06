@@ -150,7 +150,11 @@ async function readPages(doc: { pages: number; get: (n: number) => Promise<unkno
   return out;
 }
 
-/** Browser-only manual crop: preview with pdf.js, draw the label box, lay out with the shared composer. */
+/**
+ * Browser-only manual crop: preview with pdf.js, draw the label box, lay out with the shared composer.
+ * FROZEN — approved by the owner on 6 Nov 2026 ("perfect, never change"). Do not change its behaviour or output
+ * without the owner's explicit approval.
+ */
 /** Standard Flipkart label position on the A4 "invoice_labels" page (points, bottom-left origin). */
 const FLIPKART_LABEL: Box = { x: 186, y: 458, w: 221, h: 359 };
 

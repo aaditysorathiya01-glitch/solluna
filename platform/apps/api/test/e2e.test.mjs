@@ -1256,6 +1256,39 @@ test('label cropper: plan modes enforced by the API; auto crop and specialised p
   assert.ok(await db.notification.findFirst({ where: { type: 'labels.ready', title: { contains: '5 labels' } } }), 'client notified when ready');
 });
 
+test('listing & mapping forms: validation, mapping + new-listing workflow records, quota, templates', async () => {
+  const c = await registerCustomer('Farah'); await pay(c, 'RESELLER');
+  const base = { sellerSku: 'TC-1L', listingStatus: 'Active', mrp: 199, sellingPrice: 189, fulfilmentBy: 'Seller', procurementSlaDays: 2, stock: 50, hsn: '38249900', taxCode: 'GST_18', countryOfOrigin: 'India', manufacturerDetails: 'Pidilite Industries, Mumbai', packerDetails: 'Pidilite Industries, Mumbai' };
+  const bad = await call('POST', '/catalog-forms', { token: c, body: { marketplace: 'FLIPKART', kind: 'MAPPING', data: { ...base, sellerSku: '', mrp: 100, sellingPrice: 150, hsn: '12' } } });
+  assert.equal(bad.status, 400);
+  assert.ok(bad.body.fieldErrors.productLink && bad.body.fieldErrors.sellerSku && bad.body.fieldErrors.sellingPrice && bad.body.fieldErrors.hsn, JSON.stringify(bad.body.fieldErrors));
+
+  const m = ok(await call('POST', '/catalog-forms', { token: c, body: { marketplace: 'FLIPKART', kind: 'MAPPING', data: { ...base, productLink: 'https://www.flipkart.com/p/itm123?pid=TCLFX12345', productName: 'Tile Cleaner 1L' }, saveTemplateAs: 'Tile cleaner 1L' } }));
+  assert.equal(m.template.name, 'Tile cleaner 1L');
+  const req = await db.serviceRequest.findUnique({ where: { id: m.request.id } });
+  assert.equal(req.featureKey, 'CATALOG_MAPPING'); assert.equal(req.details.fields.sellingPrice, 189); assert.match(req.title, /Flipkart mapping: Tile Cleaner 1L \(SKU TC-1L\)/);
+  assert.ok(await db.catalogMapping.findFirst({ where: { serviceRequestId: req.id, sellerSku: 'TC-1L' } }), 'mapping row for the manager');
+
+  const listing = { ...base, productTitle: 'Roff Tile Cleaner 1L', brand: 'Roff', category: 'Cleaning > Tile cleaner', keyFeatures: 'Removes stains', description: 'Professional tile cleaner', imageLinks: 'https://drive.google.com/x', condition: 'New', fulfilmentChannel: 'Easy Ship (Amazon delivers)' };
+  for (let i = 1; i <= 3; i++) ok(await call('POST', '/catalog-forms', { token: c, body: { marketplace: 'AMAZON', kind: 'NEW_LISTING', data: { ...listing, sellerSku: `RT-${i}` } } }));
+  const lr = await db.listingRequest.findMany({ where: { product: { sku: { in: ['RT-1', 'RT-2', 'RT-3'] } } } });
+  assert.equal(lr.length, 3, 'new listing form creates product + listing for the lifecycle');
+  const fourth = await call('POST', '/catalog-forms', { token: c, body: { marketplace: 'AMAZON', kind: 'NEW_LISTING', data: { ...listing, sellerSku: 'RT-4' } } });
+  assert.equal(fourth.status, 201); assert.equal(fourth.body.request.entitlement, 'LIMIT_REACHED', 'Reseller: 3 new Amazon listings a month');
+  assert.equal((await call('POST', '/catalog-forms', { token: c, body: { marketplace: 'AMAZON', kind: 'NEW_LISTING', data: { ...listing, sellerSku: 'RT-1' } } })).status, 409, 'same SKU twice');
+
+  // Templates: partial values allowed, same name updates, scoped to the client.
+  const t = ok(await call('POST', '/catalog-forms/templates', { token: c, body: { marketplace: 'FLIPKART', kind: 'MAPPING', name: 'Tile cleaner 1L', data: { minOrderQty: '2', stock: 10 } } }));
+  const list = ok(await call('GET', '/catalog-forms', { token: c }));
+  assert.equal(list.templates.length, 1); assert.deepEqual(list.templates[0].data, { minOrderQty: '2', stock: 10 });
+  assert.equal(list.submissions.length, 5);
+  assert.equal((await call('POST', '/catalog-forms/templates', { token: c, body: { marketplace: 'FLIPKART', kind: 'MAPPING', name: 'Empty', data: {} } })).status, 400);
+  const other = await registerCustomer('Gita'); await pay(other, 'GROWTH');
+  assert.equal((await call('DELETE', `/catalog-forms/templates/${t.id}`, { token: other })).status, 404, 'tenant isolation');
+  ok(await call('DELETE', `/catalog-forms/templates/${t.id}`, { token: c }));
+  assert.equal(ok(await call('GET', '/catalog-forms', { token: c })).templates.length, 0);
+});
+
 test('security: login brute force is rate limited per IP', async () => {
   let limited = false;
   for (let i = 0; i < 45 && !limited; i++) {

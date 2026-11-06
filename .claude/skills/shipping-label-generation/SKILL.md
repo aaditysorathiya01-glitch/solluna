@@ -149,6 +149,7 @@ Clients crop their own Amazon / Flipkart label PDFs in Dashboard → Labels. Mod
 | Premium | `AUTO_SPECIAL_MANUAL` | Auto + a SKU / product / qty line above each label, labels sorted by SKU, and a picklist page first. |
 
 Rules:
+0. **Manual crop is frozen** — approved by the owner on 6 Nov 2026. Do not change its behaviour or output without the owner's explicit approval.
 1. Never alter the label: regions are embedded as vector content and scaled uniformly; nothing is drawn over a label. The specialised line sits outside the label box.
 2. Layouts: 4 per A4, 6 per A4, or 1 per page (4×6 thermal). Tax invoices can be included for packing; they are never edited.
 3. Pages the detector cannot crop confidently are reported (never guessed) — the client uses Manual crop for them; lower-confidence pages are flagged for checking.

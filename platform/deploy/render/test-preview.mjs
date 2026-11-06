@@ -203,7 +203,7 @@ const shot = async (p, name) => { if (SHOTS) await p.screenshot({ path: join(SHO
 await check('UI', 'Client dashboard: chat, listings, labels, notifications + approval, reports, billing (Riya, Growth)', async () => {
   const p = await asUser('riya@demo.solluna.co.in', E.CLIENT_PASSWORD);
   await p.waitForURL(/\/dashboard/, { timeout: 20000 }); await p.getByRole('region', { name: 'Your account manager' }).waitFor(); await shot(p, 'client-chat');
-  for (const [tab, text, sub] of [['listings', 'Brass Diya Set of 4', 'Products & listings'], ['labels', '18 orders', 'From your manager'], ['notifications', 'Needs your approval'], ['reports', 'P&L report'], ['billing', 'GSTIN 24ABCDE1234F1Z6']]) {
+  for (const [tab, text, sub] of [['listings', 'Flipkart — map to an existing product'], ['labels', '18 orders', 'From your manager'], ['notifications', 'Needs your approval'], ['reports', 'P&L report'], ['billing', 'GSTIN 24ABCDE1234F1Z6']]) {
     await p.goto(`${BASE}/dashboard?tab=${tab}`); if (sub) await p.getByRole('tab', { name: sub }).click();
     await p.getByText(text, { exact: false }).first().waitFor({ timeout: 15000 }); await shot(p, `client-${tab}`);
   }

@@ -227,7 +227,7 @@ test('register → billing details → GST total → Razorpay checkout → verif
 
   // The plan dashboard opens on Manager Chat; only the five work areas are in the menu.
   await page.getByRole('region', { name: 'Your account manager' }).waitFor();
-  assert.deepEqual(await page.locator('nav[aria-label="Dashboard"] button').allInnerTexts(), ['Manager Chat', 'Listings & Mapping', 'Labels', 'Reports', 'Notifications']);
+  assert.deepEqual((await page.locator('nav[aria-label="Dashboard"] button').allInnerTexts()).map((t) => t.replace(/\d+$/, '').trim()), ['Manager Chat', 'Listings & Mapping', 'Labels', 'Reports', 'Notifications']);
   await accountMenu(page, 'Plan & billing');
   await page.click('text=View tax invoice');
   await page.waitForURL(/\/invoices\//);
@@ -513,27 +513,51 @@ test('forgot password → emailed link → new password → old password stops w
 test('client: onboarding checklist, marketplace details (no passwords), product → listing request, support ticket, email verification', async () => {
   const c = S.customer;
   await c.goto(`${webBase}/dashboard`);
-  await c.click('nav[aria-label="Dashboard"] >> text=Listings & Mapping');
+  // Seller account details live in the account menu.
+  await accountMenu(c, 'Seller accounts');
   await c.getByText('We never need your password or OTP.').waitFor();
   await c.fill('#AMAZON-store', 'Riya Lifestyle'); await c.fill('#AMAZON-sid', 'A2RIYA12345');
   await c.locator('form:has(#AMAZON-store) button:has-text("Save")').click();
   await c.getByText('Amazon details saved', { exact: false }).waitFor();
   await c.getByText('Awaiting verification').first().waitFor();
 
-  await c.click('button[role="tab"]:has-text("Products & listings")');
-  await c.click('button:has-text("Add product")');
-  await c.fill('#pr-name', 'Jute Table Runner'); await c.fill('#pr-brand', 'Riya'); await c.fill('#pr-cat', 'Home Decor');
-  await c.fill('#pr-sku', 'JTR-01'); await c.fill('#pr-hsn', '6304'); await c.fill('#pr-mrp', '899'); await c.fill('#pr-sp', '1099');
-  await c.click('button:has-text("Save product")');
-  await c.getByText('Selling price cannot be above MRP', { exact: false }).waitFor();
-  await c.fill('#pr-sp', '649'); await c.selectOption('#pr-gst', '12');
-  await c.click('button:has-text("Save product")');
-  await c.getByRole('cell', { name: /Jute Table Runner/ }).waitFor();
-  await c.click('button:has-text("Request listing")');
-  await c.check('input[name="mp"][value="FLIPKART"]');
-  await c.click('div[role="dialog"] button:has-text("Submit")');
-  await c.getByText('Amazon: request received', { exact: false }).waitFor();
-  await c.getByText('Flipkart: request received', { exact: false }).waitFor();
+  // Listings & Mapping: marketplace → Mapping / New listing → form; templates prefill the next one.
+  await c.click('nav[aria-label="Dashboard"] >> text=Listings & Mapping');
+  await c.getByRole('tab', { name: 'Flipkart' }).click();
+  await c.getByRole('tab', { name: 'Mapping' }).click();
+  await c.getByRole('heading', { name: 'Flipkart — map to an existing product' }).waitFor();
+  for (const label of ['Seller SKU ID', 'Listing Status', 'MRP', 'Your selling price', 'Minimum Order Quantity (MinOQ)', 'Fullfilment by', 'Procurement type', 'Procurement SLA', 'Stock', 'Shipping provider', 'Local handling fee', 'Zonal handling fee', 'National handling fee', 'Length', 'Breadth', 'Height', 'Weight', 'HSN', 'Luxury Cess', 'Tax Code', 'Country Of Origin', 'Manufacturer Details', 'Packer Details', 'Importer Details', 'Manufacturing date', 'Shelf Life']) {
+    assert.equal(await c.locator('label', { hasText: label }).count() >= 1, true, `field ${label}`);
+  }
+  await c.click('button:has-text("Submit mapping request")');
+  await c.getByText('Please fix the highlighted fields').waitFor();
+  await c.getByText('Seller SKU ID is required').waitFor();
+  await c.fill('#f-productLink', 'https://www.flipkart.com/jute-runner/p/itm123?pid=JTRFX12345');
+  await c.fill('#f-sellerSku', 'JTR-FK-1'); await c.selectOption('#f-listingStatus', 'Active');
+  await c.fill('#f-mrp', '899'); await c.fill('#f-sellingPrice', '649'); await c.selectOption('#f-minOrderQty', '2');
+  await c.selectOption('#f-fulfilmentBy', 'Seller'); await c.selectOption('#f-procurementType', 'Instock'); await c.fill('#f-procurementSlaDays', '2'); await c.fill('#f-stock', '40');
+  await c.selectOption('#f-shippingProvider', 'Flipkart'); await c.fill('#f-weightKg', '0.4');
+  await c.fill('#f-hsn', '6304'); await c.selectOption('#f-taxCode', 'GST_12');
+  await c.selectOption('#f-countryOfOrigin', 'India'); await c.fill('#f-manufacturerDetails', 'Riya Lifestyle, Mumbai'); await c.fill('#f-packerDetails', 'Riya Lifestyle, Mumbai');
+  await c.check('text=Save these details as a template for similar products');
+  await c.fill('#tpl-name', 'Jute runner — pack of 2');
+  await c.screenshot({ path: join(SHOTS, '10-listing-form.png'), fullPage: true });
+  await c.click('button:has-text("Submit mapping request")');
+  await c.getByText('Request sent to your manager and saved as template "Jute runner — pack of 2"', { exact: false }).waitFor();
+  await c.getByRole('region', { name: 'Your listing requests' }).getByText('(SKU JTR-FK-1)', { exact: false }).waitFor();
+  // The template brings the details back for the next similar product.
+  await c.selectOption('#tpl-pick', { label: 'Jute runner — pack of 2' });
+  assert.equal(await c.inputValue('#f-mrp'), '899'); assert.equal(await c.inputValue('#f-minOrderQty'), '2'); assert.equal(await c.inputValue('#f-manufacturerDetails'), 'Riya Lifestyle, Mumbai');
+
+  // New listing on Amazon creates the product + listing the manager tracks to live.
+  await c.getByRole('tab', { name: 'Amazon' }).click();
+  await c.getByRole('tab', { name: 'New listing' }).click();
+  const fill = { productTitle: 'Jute Table Runner', brand: 'Riya', category: 'Home Decor', keyFeatures: 'Hand-woven jute', description: 'Natural jute table runner, 13 x 72 in', imageLinks: 'https://drive.google.com/runner', sellerSku: 'JTR-01', mrp: '899', sellingPrice: '649', stock: '25', hsn: '6304', manufacturerDetails: 'Riya Lifestyle, Mumbai', packerDetails: 'Riya Lifestyle, Mumbai' };
+  for (const [k, v] of Object.entries(fill)) await c.fill(`#f-${k}`, v);
+  await c.selectOption('#f-condition', 'New'); await c.selectOption('#f-fulfilmentChannel', 'Easy Ship (Amazon delivers)'); await c.selectOption('#f-taxCode', 'GST_12'); await c.selectOption('#f-countryOfOrigin', 'India');
+  await c.click('button:has-text("Submit new listing request")');
+  await c.getByText('Request sent to your manager', { exact: false }).waitFor();
+  await c.getByText('Amazon new listing: Jute Table Runner (SKU JTR-01)').waitFor();
   await c.screenshot({ path: join(SHOTS, '10-catalog.png'), fullPage: true });
 
   // Tickets are raised with the manager; their updates arrive in Notifications.
@@ -611,9 +635,8 @@ test('ops workspace: verify marketplace with evidence, mark listing live, publis
   const [dl] = await Promise.all([c.waitForEvent('download'), c.click('text=Download labels (PDF)')]);
   const got = await (await import('node:fs/promises')).readFile(await dl.path());
   assert.deepEqual(got, pdf, 'client receives the official label byte-for-byte');
-  await c.goto(`${webBase}/dashboard?tab=catalog`);
-  await c.click('button[role="tab"]:has-text("Products & listings")');
-  await c.getByRole('link', { name: 'View live' }).first().waitFor();
+  await c.goto(`${webBase}/dashboard?tab=notifications`);
+  await c.getByText('Jute Table Runner (Amazon): Live', { exact: false }).first().waitFor();
   await c.goto(`${webBase}/dashboard?tab=notifications`);
   await c.getByText(/Ticket #\d+: Resolved/).first().waitFor();
   assert.deepEqual(errors, []);
