@@ -6,7 +6,8 @@
 export type Marketplace = 'FLIPKART' | 'AMAZON';
 export type FormKind = 'MAPPING' | 'NEW_LISTING';
 /** list = several values (Enter or comma after each), stored one per line. images = uploaded image document ids, comma-separated. */
-export type FieldType = 'text' | 'textarea' | 'number' | 'money' | 'select' | 'date' | 'url' | 'list' | 'images';
+/** checks = tick any of the options (stored one per line). */
+export type FieldType = 'text' | 'textarea' | 'number' | 'money' | 'select' | 'date' | 'url' | 'list' | 'images' | 'checks';
 export interface Field {
   key: string; label: string; type: FieldType; required?: boolean; options?: string[]; unit?: string;
   help?: string; placeholder?: string; min?: number; max?: number; maxLength?: number;
@@ -208,13 +209,12 @@ export const FORMS: FormDef[] = [
         { key: 'productLink', label: 'Amazon product link or ASIN', type: 'text', required: true, maxLength: 500, placeholder: 'https://www.amazon.in/dp/… or ASIN', help: 'No need to add the product name — we take it from the Amazon listing' },
       ] },
       { title: 'Add price and inventory', fields: [
-        { key: 'audience', label: 'Audience', type: 'select', options: ['Sell on Amazon', 'Amazon Business (B2B)'], blankAs: 'Sell on Amazon', help: 'Who this offer is for. Leave blank for “Sell on Amazon” (default)' },
+        { key: 'audience', label: 'Audience', type: 'checks', options: ['Sell on Amazon', 'Amazon Business (B2B)'], blankAs: 'Sell on Amazon', help: 'Enable one or both. Nothing ticked = “Sell on Amazon” (default)' },
         { key: 'sellerSku', label: 'SKU', type: 'text', maxLength: 40, autoSku: true, placeholder: 'Example: ABC123', help: 'Optional — leave blank and SOLLUNA creates one for you' },
         { key: 'hsn', label: 'External Product Information (HSN)', type: 'text', required: true, placeholder: 'Example: 610510, 61051010', help: '6 to 8-digit HSN for the India marketplace' },
         { key: 'fulfilmentChannel', label: 'Fulfillment Channel', type: 'select', required: true, options: ['Fulfilled by Amazon (FBA)', 'Merchant Fulfilled (Self Ship / Easy Ship)'], help: 'FBA: Amazon stores, ships and handles customer service. Merchant Fulfilled: you ship yourself, or you pack and Amazon picks up (Easy Ship)' },
         { key: 'sellingPrice', label: 'Your Price', type: 'money', required: true, unit: 'INR', min: 1, help: 'Base price the buyer pays — not your bank settlement. Amazon fees, shipping and tax are deducted from it; ask your manager for your exact settlement' },
         { key: 'mrp', label: 'Maximum Retail Price', type: 'money', required: true, unit: 'INR', min: 1, help: 'The MRP printed on the pack (Legal Metrology Act). The most you can charge a customer' },
-        { key: 'pricingRule', label: 'Pricing Rule', type: 'select', options: ['No rule — keep my price', 'Automate my pricing'], blankAs: 'No rule — keep my price', help: 'Automated pricing adjusts your price within limits. Your manager sets it up only after you approve the minimum and maximum price' },
       ] },
     ],
   },
@@ -278,6 +278,10 @@ export function validateForm(def: FormDef, input: Record<string, unknown>, { par
       if (f.maxLength && joined.length > f.maxLength) { errors[f.key] = `${f.label} is too long (max ${f.maxLength})`; continue; }
       if (!items.length) { if (f.required) errors[f.key] = `${f.label} is required`; continue; }
       data[f.key] = joined;
+    } else if (f.type === 'checks') {
+      const picked = [...new Set(str.split('\n').map((x) => x.trim()).filter(Boolean))];
+      if (picked.some((x) => !f.options?.includes(x))) { errors[f.key] = `Choose a valid ${f.label}`; continue; }
+      data[f.key] = (f.options ?? []).filter((o) => picked.includes(o)).join('\n');
     } else if (f.type === 'images') {
       const ids = [...new Set(str.split(',').map((x) => x.trim()).filter(Boolean))];
       if (ids.some((x) => !/^[a-z0-9]{20,40}$/i.test(x))) { errors[f.key] = `${f.label}: upload the images again`; continue; }

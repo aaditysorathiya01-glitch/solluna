@@ -200,6 +200,17 @@ function FieldInput({ f, value, error, onChange, note, fromWeb, action }: { f: F
   let control;
   if (f.type === 'list') {
     control = <ListInput id={id} cls={cls} f={f} value={value} onChange={onChange} />;
+  } else if (f.type === 'checks') {
+    const picked = value ? value.split('\n') : [];
+    control = (
+      <div id={id} role="group" aria-label={f.label} className="flex flex-wrap gap-4 py-2">
+        {f.options!.map((o) => (
+          <label key={o} className="flex items-center gap-2 text-sm">
+            <input type="checkbox" checked={picked.includes(o)} onChange={(e) => onChange(f.options!.filter((x) => (x === o ? e.target.checked : picked.includes(x))).join('\n'))} />{o}
+          </label>
+        ))}
+      </div>
+    );
   } else if (f.type === 'images') {
     control = <ImageInput id={id} f={f} value={value} onChange={onChange} />;
   } else if (f.type === 'select') {

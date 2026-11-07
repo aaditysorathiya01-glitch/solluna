@@ -563,7 +563,9 @@ test('client: onboarding checklist, marketplace details (no passwords), product 
   assert.equal(await c.getByText('Sellers who accepted Flipkart recommended price', { exact: false }).count(), 0, 'recommended-price note removed');
   // Amazon mapping: only the owner's fields.
   await c.getByRole('tab', { name: 'Amazon' }).click(); await c.getByRole('tab', { name: 'Mapping' }).click();
-  assert.deepEqual(await c.locator('fieldset label.label').allTextContents().then((l) => l.map((x) => x.replace(/\*$/, '').trim())), ['Amazon product link or ASIN', 'Audience', 'SKU', 'External Product Information (HSN)', 'Fulfillment Channel', 'Your Price', 'Maximum Retail Price', 'Pricing Rule']);
+  assert.deepEqual(await c.locator('fieldset label.label').allTextContents().then((l) => l.map((x) => x.replace(/\*$/, '').trim())), ['Amazon product link or ASIN', 'Audience', 'SKU', 'External Product Information (HSN)', 'Fulfillment Channel', 'Your Price', 'Maximum Retail Price']);
+  await c.getByRole('checkbox', { name: 'Sell on Amazon' }).check(); await c.getByRole('checkbox', { name: 'Amazon Business (B2B)' }).check();
+  assert.equal(await c.getByRole('group', { name: 'Audience' }).getByRole('checkbox', { checked: true }).count(), 2, 'both audiences can be enabled');
   await c.getByRole('tab', { name: 'Flipkart' }).click();
   // Flipkart new listing: owner's field list, 5-image upload, multi-value fields.
   await c.getByRole('tab', { name: 'New listing' }).click();
