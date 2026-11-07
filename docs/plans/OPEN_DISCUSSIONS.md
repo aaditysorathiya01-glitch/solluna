@@ -18,6 +18,16 @@ Note: a Claude Pro subscription cannot power a server feature for clients — ap
 Checked and rejected: the GitHub "public-apis" list (github.com/public-apis/public-apis) is a directory of free APIs, not a product-data source — no Amazon.in / Flipkart product details, HSN or manufacturer data; barcode APIs there cover mostly US/EU products. Amazon Product Advertising API and the Flipkart Affiliate API give product titles/images for free, but their terms are for affiliate promotion and need ongoing affiliate sales — not a safe basis for filling seller listings. SP-API Catalog (option D) remains the free, seller-approved route.
 F. Free stack from the public-apis list (checked 7 Nov 2026, not yet tested live): ContextFetch (web search, no key) + TidyTools / ReplyNodes (page → text, no key, rate limited) + a free-tier LLM (Gemini / Groq / Mistral) to turn text into fields. ₹0 within limits, but three small third-party dependencies, marketplace pages often block such fetchers, and lower quality than E. Amazon "scraper" APIs on the list (Pangolinfo, Amazonscraperapi, ScrapingBot …) rely on scraping — rejected.
 
+**Live test of option F — 7 Nov 2026, FSN `BCRFZTDTASCF3G6V`: FAILED, not deployed.**
+| Step | Result |
+|---|---|
+| ReplyNodes (page → text) on the Flipkart product URL | Flipkart bot-block page ("Wow, looks like all of India is here!") |
+| ContextFetch contents (page fetch) | `CRAWL_NOT_FOUND` — HTTP 429 from Flipkart |
+| Microlink (metadata) | Flipkart homepage title only, no product data |
+| ContextFetch search "BCRFZTDTASCF3G6V", "… flipkart", "pid=…" | 0 relevant results — the FSN is not in its index |
+Conclusion: free fetchers are blocked by Flipkart and free search indexes don't know raw FSNs, so option F cannot fill the form. Only a search-grounded LLM (B or E) or official APIs (D / Flipkart API) can.
+India GST HSN API (gst-hsn-sac-api.vercel.app) tested live: HSN search works, no GST rates — usable as an HSN-finder helper only.
+
 Recommendation when revisited: A now, D once SP-API is approved, E only if instant auto-fill proves worth paying for.
 
 ### Free helper APIs from the same list (low risk, candidates to build)
