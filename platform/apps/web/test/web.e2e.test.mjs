@@ -44,6 +44,7 @@ function start(cmd, args, cwd, env) {
   return { p, logs: () => log };
 }
 
+let claude; // mock Claude API for the product lookup
 before(async () => {
   execSync(`psql "${PG}" -c "DROP DATABASE IF EXISTS ${DB}" -c "CREATE DATABASE ${DB} OWNER solluna"`, { stdio: 'pipe' });
   execSync('npx prisma migrate deploy --schema apps/api/prisma/schema.prisma', { cwd: platformDir, env: { ...process.env, DATABASE_URL }, stdio: 'pipe' });
@@ -56,7 +57,7 @@ before(async () => {
     });
   });
   const rzpPort = await listen(rzp);
-  const claude = await (await import('../../api/test/claude-mock.mjs')).startClaudeMock();
+  claude = await (await import('../../api/test/claude-mock.mjs')).startClaudeMock();
   const apiPort = 4800 + Math.floor(Math.random() * 100), webPort = 3800 + Math.floor(Math.random() * 100);
   apiBase = `http://127.0.0.1:${apiPort}/api`; webBase = `http://127.0.0.1:${webPort}`;
 
@@ -74,6 +75,7 @@ before(async () => {
 });
 
 after(async () => {
+  claude?.close();
   await browser?.close();
   for (const p of procs) { try { process.kill(-p.pid, 'SIGTERM'); } catch {} } // whole group: npx → next-server
   rzp?.close();
