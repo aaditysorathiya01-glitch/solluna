@@ -3,6 +3,7 @@
 Parked topics with the options already worked out. Nothing here is live unless marked. Updated 7 Nov 2026.
 
 ## 1. Product details from a link (Listings & Mapping forms)
+**Decision (7 Nov 2026): stay manual — parked, revisit later.**
 **Now (live):** clients fill product details manually; templates prefill repeat products ("Save template & submit"). The link's ASIN / FSN is detected and sent to the manager.
 **Built but switched off:** online auto-fill (Claude web search + web fetch, background job, 7-day reuse, daily limit). It turns on only when `ANTHROPIC_API_KEY` is set on the server; without it the button stays hidden. Code: `platform/apps/api/src/catalog-forms/product-lookup.service.ts`.
 
