@@ -40,7 +40,10 @@ Recommendation when revisited: A now, D once SP-API is approved, E only if insta
 | Razorpay IFSC | IFSC → bank and branch (future bank details) | No |
 Each must be tested live before use, with the form working manually if the API is down.
 
-## 2. Listing forms — all four final (7 Nov 2026)
+## 2. Listings & Mapping section — PARKED (owner, 7 Nov 2026)
+Whole section moved to discussion: forms need to be designed category-wise (each Flipkart vertical / Amazon product type has its own attributes). The four current forms stay live as they are until then; no further changes without owner sign-off.
+
+Current state — all four forms final for the owner's example categories:
 Flipkart Mapping, Flipkart New listing (5 images), Amazon Mapping (condition New; audience = enable one or both) and Amazon New listing (9 images; condition New; no pricing rule) follow the owner's Seller Hub / Seller Central field lists. Schema: `platform/packages/catalog-forms/src/index.ts`.
 Open points:
 - New-listing attributes follow the owner's example category (Flipkart: cleaners; Amazon: Bonding Adhesives). Other verticals / product types have different attributes — decide whether to add per-category attribute sets.
