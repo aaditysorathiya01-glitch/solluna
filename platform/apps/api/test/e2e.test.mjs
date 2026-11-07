@@ -1369,6 +1369,35 @@ test('product lookup: link → background web lookup → only valid form fields;
   assert.equal((await call('GET', `/catalog-forms/lookup/${start.id}`, { token: other })).status, 404, 'tenant isolation');
 });
 
+test('monthly report cycle: on the 5th one reporting request per client for last month; client schedule', async () => {
+  const c = await registerCustomer('Rekha'); await pay(c, 'RESELLER');
+  const orgId = ok(await call('GET', '/auth/me', { token: c })).organization.id;
+  await db.subscription.updateMany({ where: { organizationId: orgId, status: 'ACTIVE' }, data: { currentPeriodStart: new Date('2026-09-15T00:00:00Z') } });
+  const ops = await staff('OPERATIONS_MANAGER', S.admin);
+  const run = async (date) => ok(await call('POST', '/ops/reports/cycle/run', { token: ops.token, body: { date } }));
+  assert.equal((await run('2026-10-04')).period, null, 'nothing before the 5th');
+  const r = await run('2026-10-05');
+  assert.equal(r.period, '2026-09'); assert.ok(r.opened >= 1);
+  const reqs = await db.serviceRequest.findMany({ where: { organizationId: orgId, featureKey: 'MONTHLY_PERFORMANCE_REPORT' }, include: { tasks: true } });
+  assert.equal(reqs.length, 1);
+  assert.equal(reqs[0].details.period, '2026-09'); assert.equal(reqs[0].createdById, 'system'); assert.equal(reqs[0].entitlement, 'ALLOWED', 'Reseller includes monthly reports');
+  assert.deepEqual(reqs[0].tasks.map((t) => t.stepKey).sort(), ['performance', 'pl']);
+  assert.match(reqs[0].title, /September 2026 report/);
+  await run('2026-10-06');
+  assert.equal(await db.serviceRequest.count({ where: { organizationId: orgId, featureKey: 'MONTHLY_PERFORMANCE_REPORT', details: { path: ['period'], equals: '2026-09' } } }), 1, 'once per month');
+  const note = await db.notification.findFirst({ where: { organizationId: orgId, type: 'report.preparing' } });
+  assert.match(note.body, /ready by 7 Oct 2026/);
+  const other = await registerCustomer('Sonal'); await pay(other, 'RESELLER');
+  const otherOrg = ok(await call('GET', '/auth/me', { token: other })).organization.id;
+  assert.equal(await db.serviceRequest.count({ where: { organizationId: otherOrg, featureKey: 'MONTHLY_PERFORMANCE_REPORT' } }), 0, 'no report for a month before the plan started');
+  assert.equal((await call('POST', '/ops/reports/cycle/run', { token: c, body: {} })).status, 403, 'clients cannot run the cycle');
+
+  const sched = ok(await call('GET', '/reports/schedule', { token: c }));
+  assert.equal(sched[0].status, 'MONTH_RUNNING');
+  assert.ok(sched.length >= 2 && sched.slice(1).every((x) => ['PREPARING', 'WAITING_MARKETPLACE', 'READY'].includes(x.status)), JSON.stringify(sched));
+  assert.match(sched[1].readyBy, /^7 /); assert.match(sched[1].marketplaceReportsOn, /^5 /);
+});
+
 test('security: login brute force is rate limited per IP', async () => {
   let limited = false;
   for (let i = 0; i < 45 && !limited; i++) {

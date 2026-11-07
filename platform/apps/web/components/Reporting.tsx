@@ -19,14 +19,38 @@ function Msg({ ok, err }: { ok?: string | null; err?: string | null }) {
 
 // ───────────────────────── Client ─────────────────────────
 
+interface Cycle { period: string; label: string; status: 'MONTH_RUNNING' | 'WAITING_MARKETPLACE' | 'PREPARING' | 'READY'; marketplaceReportsOn: string; readyBy: string; reports: { id: string; kind: string }[] }
+const CYCLE_LABEL: Record<Cycle['status'], string> = { MONTH_RUNNING: 'Month in progress', WAITING_MARKETPLACE: 'Waiting for marketplace reports', PREPARING: 'Being prepared', READY: 'Ready' };
+const CYCLE_CHIP: Record<Cycle['status'], string> = { MONTH_RUNNING: 'bg-ivory text-ink-2', WAITING_MARKETPLACE: 'bg-sky-50 text-sky-800', PREPARING: 'bg-amber-50 text-amber-800', READY: 'bg-emerald-50 text-emerald-800' };
+const CYCLE_TEXT: Record<Cycle['status'], (c: Cycle) => string> = {
+  MONTH_RUNNING: (c) => `Amazon and Flipkart publish this month's reports on ${c.marketplaceReportsOn}. Your report: by ${c.readyBy}.`,
+  WAITING_MARKETPLACE: (c) => `Amazon and Flipkart publish the reports on ${c.marketplaceReportsOn}. Your report: by ${c.readyBy}.`,
+  PREPARING: (c) => `Marketplace reports are out. Your manager is preparing your report — ready by ${c.readyBy}.`,
+  READY: () => 'Your report is ready.',
+};
+
 export function ClientReporting() {
   const [reports, setReports] = useState<any[]>([]);
   const [period, setPeriod] = useState(lastMonth());
-  useEffect(() => { api<any[]>('/reports').then(setReports).catch(() => {}); }, []);
+  const [cycle, setCycle] = useState<Cycle[]>([]);
+  useEffect(() => { api<any[]>('/reports').then(setReports).catch(() => {}); api<Cycle[]>('/reports/schedule').then(setCycle).catch(() => {}); }, []);
   return (
     <div className="space-y-8">
       <section className="space-y-3">
         <h1 className="font-display text-3xl">Reports</h1>
+        <p className="text-sm text-ink-3">Every month: the month closes → Amazon and Flipkart publish their reports on the 5th → your manager prepares your report from them and shares it here.</p>
+        {cycle.length > 0 && (
+          <div className="card divide-y divide-ink/5" aria-label="Monthly report schedule">
+            {cycle.map((c) => (
+              <div key={c.period} className="flex flex-wrap items-center justify-between gap-2 p-4" data-testid={`cycle-${c.period}`}>
+                <div><p className="font-medium">{c.label}</p><p className="text-xs text-ink-3">{CYCLE_TEXT[c.status](c)}</p></div>
+                {c.status === 'READY'
+                  ? <div className="flex gap-2">{c.reports.map((r) => <Link key={r.id} href={`/reports/${r.id}`} className="btn-ghost py-1 text-xs">{r.kind === 'PL' ? 'P&L report' : 'Performance report'}</Link>)}</div>
+                  : <span className={`chip ${CYCLE_CHIP[c.status]}`}>{CYCLE_LABEL[c.status]}</span>}
+              </div>
+            ))}
+          </div>
+        )}
         <div className="card divide-y divide-ink/5">
           {reports.map((r) => (
             <Link key={r.id} href={`/reports/${r.id}`} className="flex flex-wrap items-center justify-between gap-2 p-4 hover:bg-ivory" data-testid="report-row">

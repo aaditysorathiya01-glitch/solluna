@@ -13,6 +13,13 @@ The report must explain what happened during the reporting period, identify mean
 
 Never fabricate figures, fill missing values with guesses, or claim that SOLLUNA caused a result without evidence.
 
+### SOLLUNA monthly cycle (owner, 7 Nov 2026)
+1. The month closes.
+2. On the **5th** Amazon and Flipkart publish the month's reports. On/after the 5th (IST) the platform opens one monthly-reporting request per active client for the previous month (`apps/api/src/reports/report-cycle.service.ts`) and tells the client the report is being prepared.
+3. The manager builds the client's report **from those marketplace reports**, edits/cleans where needed, and publishes by the **7th** (`REPORT_READY_DAY`).
+4. The client sees each month's status in Reports: Month in progress → Waiting for marketplace reports → Being prepared → Ready.
+The detailed data pipeline (which marketplace files, what is edited) is to be defined by the owner.
+
 ## 2. Objectives
 
 1. Collect and validate the month's marketplace data.

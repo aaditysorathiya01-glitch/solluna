@@ -626,6 +626,10 @@ test('client: onboarding checklist, marketplace details (no passwords), product 
 
   // Reports: ask SOLLUNA to send the month's pack to the client's CA.
   await c.click('nav[aria-label="Dashboard"] >> text=Reports');
+  await c.getByText('publish their reports on the 5th', { exact: false }).waitFor();
+  const cycleRow = (await c.locator('[aria-label="Monthly report schedule"] [data-testid^="cycle-"]').first().innerText()).replace(/\s+/g, ' ');
+  assert.ok(cycleRow.includes('Month in progress'), cycleRow);
+  assert.match(cycleRow, /on 5 .* Your report: by 7 /);
   await c.click('button:has-text("Request CA pack")');
   await c.fill('#caEmail', 'ca@firm.test');
   await c.click('button:has-text("Send request")');

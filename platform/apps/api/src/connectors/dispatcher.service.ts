@@ -5,7 +5,7 @@ import { config } from '../common/config';
 
 export type EventType =
   | 'request.created' | 'request.status_changed' | 'task.status_changed' | 'approval.requested' | 'approval.decided'
-  | 'subscription.activated' | 'payment.failed' | 'chat.message' | 'report.published' | 'subscription.renewal_reminder' | 'subscription.grace_period' | 'subscription.past_due'
+  | 'subscription.activated' | 'payment.failed' | 'chat.message' | 'report.published' | 'report.preparing' | 'subscription.renewal_reminder' | 'subscription.grace_period' | 'subscription.past_due'
   | 'subscription.cancel_scheduled' | 'subscription.expired' | 'ticket.created' | 'ticket.status_changed' | 'ticket.reply' | 'listing.status_changed' | 'mapping.updated'
   | 'labels.ready' | 'stock.alert' | 'thank_you.review' | 'thank_you.decided' | 'marketplace.status_changed' | 'announcement' | 'account.suspended' | 'manager.pending';
 

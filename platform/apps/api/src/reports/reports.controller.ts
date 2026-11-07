@@ -3,6 +3,7 @@ import type { Response } from 'express';
 import { CurrentUser, CustomerOnly, StaffOnly } from '../auth/decorators';
 import type { AuthUser } from '../auth/auth.types';
 import { ReportsService } from './reports.service';
+import { ReportCycleService } from './report-cycle.service';
 
 const sendCsv = (res: Response, f: { fileName: string; csv: string }) => {
   res.set({ 'content-type': 'text/csv; charset=utf-8', 'content-disposition': `attachment; filename="${f.fileName}"`, 'cache-control': 'private, no-store' });
@@ -13,7 +14,9 @@ const sendCsv = (res: Response, f: { fileName: string; csv: string }) => {
 @Controller()
 @CustomerOnly()
 export class ClientReportsController {
-  constructor(private readonly reports: ReportsService) {}
+  constructor(private readonly reports: ReportsService, private readonly cycle: ReportCycleService) {}
+  /** Monthly cycle: month end → marketplace reports on the 5th → report ready by the 7th. */
+  @Get('reports/schedule') schedule(@CurrentUser() u: AuthUser) { return this.cycle.schedule(u.organizationId!); }
 
   @Get('reports') list(@CurrentUser() u: AuthUser) { return this.reports.list(u, u.organizationId!); }
   @Get('reports/:id') get(@CurrentUser() u: AuthUser, @Param('id') id: string) { return this.reports.get(u, id); }
@@ -34,7 +37,13 @@ export class ClientReportsController {
 @Controller('ops/reports')
 @StaffOnly('ACCOUNTS_EXECUTIVE', 'OPERATIONS_MANAGER')
 export class OpsReportsController {
-  constructor(private readonly reports: ReportsService) {}
+  constructor(private readonly reports: ReportsService, private readonly cycle: ReportCycleService) {}
+
+  /** Runs the monthly cycle now (it also runs on its own every 30 minutes). `date` (YYYY-MM-DD) is for testing a given day. */
+  @Post('cycle/run') @HttpCode(200) runCycle(@Body() b: { date?: string }) {
+    const at = b?.date && /^\d{4}-\d{2}-\d{2}$/.test(b.date) ? new Date(`${b.date}T06:00:00Z`) : new Date();
+    return this.cycle.run(at);
+  }
 
   @Get('clients') clients(@CurrentUser() u: AuthUser) { return this.reports.reportingClients(u); }
   @Get(':orgId/:period') workbench(@CurrentUser() u: AuthUser, @Param('orgId') o: string, @Param('period') p: string) { return this.reports.workbench(u, o, p); }

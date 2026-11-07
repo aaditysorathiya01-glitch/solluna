@@ -36,7 +36,7 @@ export default function Terms() {
         <H2>6. Seller account access and automation</H2>
         <ol className="list-decimal space-y-2 pl-5">
           <li>You add SOLLUNA as a user in Amazon Seller Central and/or Flipkart Seller Hub (&ldquo;Add a new user&rdquo;). SOLLUNA signs in with its own login, email and phone; one-time passwords go to SOLLUNA, never to you, and we never ask for your password or OTP.</li>
-          <li>You authorise SOLLUNA to use that access, including automated software tools operated by SOLLUNA (AI agents and browser automation), to deliver the services in your plan.</li>
+          <li>You authorise SOLLUNA to use that access, including automated software tools operated by SOLLUNA (such as browser automation), to deliver the services in your plan.</li>
           <li>SOLLUNA will never change your bank details, payment or settlement settings, or the users on your account. Price, advertising budget, offers, material listing changes and other actions listed in section 4 are made only after your approval in the dashboard. Every action is recorded and visible to you.</li>
           <li>Amazon and Flipkart prefer official APIs for automated work and may treat automated use of their seller portals as a policy concern, which can lead to verification requests or restrictions on your account. You understand and accept this risk. SOLLUNA applies safeguards (limited daily actions, no access to bank, payment or user settings) and moves your account to official API integrations (Amazon SP-API / Ads API, Flipkart Seller API) as soon as they are available to us.</li>
           <li>You may remove SOLLUNA&rsquo;s user access at any time; services that need access will pause until it is restored.</li>

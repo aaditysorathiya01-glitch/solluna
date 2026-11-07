@@ -98,6 +98,21 @@ export class OrchestratorService implements OnModuleInit {
     return { request, update };
   }
 
+  /** Request raised by SOLLUNA itself (e.g. the monthly report cycle), not by a person. Same plan check and task graph as intake. */
+  async systemIntake(orgId: string, featureKey: FeatureKey, title: string, details: Record<string, unknown>) {
+    const wf = workflowFor(featureKey);
+    const request = await this.db.$transaction(async (tx) => {
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${orgId}))`;
+      const req = await tx.serviceRequest.create({
+        data: { organizationId: orgId, featureKey, workflow: wf.id, title, details: { priority: 'P3', ...details } as Prisma.InputJsonValue, createdById: 'system', entitlement: 'PENDING_VERIFICATION', status: 'NEW' },
+      });
+      await this.expand(tx, req.id);
+      await this.audit.log({ actor: null, action: 'request.create', entity: 'ServiceRequest', entityId: req.id, organizationId: orgId, after: { featureKey, workflow: wf.id, source: details.source ?? 'system' } }, tx);
+      return tx.serviceRequest.findUniqueOrThrow({ where: { id: req.id } });
+    }, { timeout: 15_000 });
+    return request;
+  }
+
   /** Entitlement check + task graph creation for a request. Re-runnable for PLAN_VERIFICATION requests. */
   private async expand(tx: Tx, requestId: string) {
     const req = await tx.serviceRequest.findUniqueOrThrow({ where: { id: requestId } });
