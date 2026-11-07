@@ -534,7 +534,8 @@ test('client: onboarding checklist, marketplace details (no passwords), product 
   }
   await c.click('button:has-text("Submit mapping request")');
   await c.getByText('Please fix the highlighted fields').waitFor();
-  await c.getByText('Seller SKU ID is required').waitFor();
+  await c.getByText('Procurement type is required').waitFor();
+  assert.equal(await c.getByText('Seller SKU ID is required').count(), 0, 'SKU is optional');
   await c.fill('#f-productLink', 'https://www.flipkart.com/jute-runner/p/itm123?pid=JTRFXQ7ZGHK2LMNP&lid=LST1');
   await c.getByTestId('product-ref').getByText('FSN: JTRFXQ7ZGHK2LMNP').waitFor();
   // Pasting the link finds the product online and fills the empty product fields, marked for checking.
@@ -546,7 +547,7 @@ test('client: onboarding checklist, marketplace details (no passwords), product 
   await c.fill('#f-sellerSku', 'JTR-FK-1'); await c.selectOption('#f-listingStatus', 'Active');
   await c.fill('#f-mrp', '899'); await c.fill('#f-sellingPrice', '649'); await c.selectOption('#f-minOrderQty', '2');
   await c.selectOption('#f-fulfilmentBy', 'Seller'); await c.selectOption('#f-procurementType', 'Instock'); await c.fill('#f-procurementSlaDays', '2'); await c.fill('#f-stock', '40');
-  await c.selectOption('#f-shippingProvider', 'Flipkart'); await c.fill('#f-weightKg', '0.4');
+  await c.selectOption('#f-shippingProvider', 'Flipkart'); await c.fill('#f-lengthCm', '35'); await c.fill('#f-breadthCm', '25'); await c.fill('#f-heightCm', '3'); await c.fill('#f-weightKg', '0.4');
   await c.fill('#f-hsn', '6304'); await c.selectOption('#f-taxCode', 'GST_12');
   await c.selectOption('#f-countryOfOrigin', 'India'); await c.fill('#f-manufacturerDetails', 'Riya Lifestyle, Mumbai'); await c.fill('#f-packerDetails', 'Riya Lifestyle, Mumbai');
   assert.deepEqual(await c.locator('#f-minOrderQty option').allInnerTexts(), ['Select One', '1', '2'], 'MinOQ starts at 1 or 2');

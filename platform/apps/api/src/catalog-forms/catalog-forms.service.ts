@@ -41,7 +41,7 @@ export class CatalogFormsService {
     const def = formFor(d.marketplace as Marketplace, d.kind as FormKind);
     const { data, errors } = validateForm(def, d.data);
     if (Object.keys(errors).length) throw new FormInvalid(errors);
-    const label = String(data.productTitle ?? data.productName ?? data.productLink ?? data.sellerSku).slice(0, 80);
+    const label = String(data.productTitle ?? data.productName ?? data.productRef ?? data.productLink ?? data.sellerSku).slice(0, 80);
     const title = `${MP[d.marketplace]} ${d.kind === 'MAPPING' ? 'mapping' : 'new listing'}: ${label} (SKU ${data.sellerSku})`;
     // Reuse the catalog workflow so the manager's tools (mapping confidence, listing lifecycle, quota) work unchanged.
     let requestId: string;

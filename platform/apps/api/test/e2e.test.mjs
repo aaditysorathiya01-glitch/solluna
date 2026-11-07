@@ -1260,15 +1260,21 @@ test('label cropper: plan modes enforced by the API; auto crop and specialised p
 
 test('listing & mapping forms: validation, mapping + new-listing workflow records, quota, templates', async () => {
   const c = await registerCustomer('Farah'); await pay(c, 'RESELLER');
-  const base = { sellerSku: 'TC-1L', listingStatus: 'Active', mrp: 199, sellingPrice: 189, fulfilmentBy: 'Seller', procurementSlaDays: 2, stock: 50, hsn: '38249900', taxCode: 'GST_18', countryOfOrigin: 'India', manufacturerDetails: 'Pidilite Industries, Mumbai', packerDetails: 'Pidilite Industries, Mumbai' };
-  const bad = await call('POST', '/catalog-forms', { token: c, body: { marketplace: 'FLIPKART', kind: 'MAPPING', data: { ...base, productLink: 'abc', sellerSku: '', mrp: 100, sellingPrice: 150, hsn: '12', minOrderQty: '5' } } });
+  const base = { sellerSku: 'TC-1L', listingStatus: 'Active', mrp: 199, sellingPrice: 189, fulfilmentBy: 'Seller', procurementType: 'Instock', procurementSlaDays: 2, lengthCm: 10, breadthCm: 8, heightCm: 25, weightKg: 1.1, stock: 50, hsn: '38249900', taxCode: 'GST_18', countryOfOrigin: 'India', manufacturerDetails: 'Pidilite Industries, Mumbai', packerDetails: 'Pidilite Industries, Mumbai' };
+  const bad = await call('POST', '/catalog-forms', { token: c, body: { marketplace: 'FLIPKART', kind: 'MAPPING', data: { ...base, productLink: 'abc', sellerSku: '', procurementType: '', weightKg: '', mrp: 100, sellingPrice: 150, hsn: '12', minOrderQty: '5' } } });
   assert.equal(bad.status, 400);
-  assert.ok(bad.body.fieldErrors.productLink && bad.body.fieldErrors.sellerSku && bad.body.fieldErrors.sellingPrice && bad.body.fieldErrors.hsn && bad.body.fieldErrors.minOrderQty, JSON.stringify(bad.body.fieldErrors));
+  assert.ok(bad.body.fieldErrors.productLink && !bad.body.fieldErrors.sellerSku && bad.body.fieldErrors.procurementType && bad.body.fieldErrors.weightKg && bad.body.fieldErrors.sellingPrice && bad.body.fieldErrors.hsn && bad.body.fieldErrors.minOrderQty, JSON.stringify(bad.body.fieldErrors));
 
-  const m = ok(await call('POST', '/catalog-forms', { token: c, body: { marketplace: 'FLIPKART', kind: 'MAPPING', data: { ...base, productLink: 'https://www.flipkart.com/p/itm123?pid=TCLFX7ZGHYQ2KJWE&lid=X', productName: 'Tile Cleaner 1L' }, saveTemplateAs: 'Tile cleaner 1L' } }));
+  const m = ok(await call('POST', '/catalog-forms', { token: c, body: { marketplace: 'FLIPKART', kind: 'MAPPING', data: { ...base, productLink: 'https://www.flipkart.com/p/itm123?pid=TCLFX7ZGHYQ2KJWE&lid=X' }, saveTemplateAs: 'Tile cleaner 1L' } }));
   assert.equal(m.template.name, 'Tile cleaner 1L');
   const req = await db.serviceRequest.findUnique({ where: { id: m.request.id } });
-  assert.equal(req.featureKey, 'CATALOG_MAPPING'); assert.equal(req.details.fields.sellingPrice, 189); assert.equal(req.details.fields.productRef, 'TCLFX7ZGHYQ2KJWE', 'FSN taken from the link'); assert.match(req.title, /Flipkart mapping: Tile Cleaner 1L \(SKU TC-1L\)/);
+  assert.equal(req.featureKey, 'CATALOG_MAPPING'); assert.equal(req.details.fields.sellingPrice, 189); assert.equal(req.details.fields.productRef, 'TCLFX7ZGHYQ2KJWE', 'FSN taken from the link'); assert.match(req.title, /Flipkart mapping: TCLFX7ZGHYQ2KJWE \(SKU TC-1L\)/);
+  assert.equal(req.details.fields.productName, undefined, 'no product name field on Flipkart mapping');
+  // Blank optional fields get the agreed defaults; blank SKU gets a generated one.
+  assert.deepEqual([req.details.fields.localHandlingFee, req.details.fields.zonalHandlingFee, req.details.fields.nationalHandlingFee, req.details.fields.luxuryCessPct, req.details.fields.importerDetails], [0, 0, 0, 0, 'None']);
+  const auto = ok(await call('POST', '/catalog-forms', { token: c, body: { marketplace: 'FLIPKART', kind: 'MAPPING', data: { ...base, sellerSku: '', productLink: 'TCLFX7ZGHYQ2KJWF' } } }));
+  const autoReq = await db.serviceRequest.findUnique({ where: { id: auto.request.id } });
+  assert.match(autoReq.details.fields.sellerSku, /^SOL-FK-[2-9A-Z]{8}$/, 'blank SKU → SOLLUNA SKU');
   assert.ok(await db.catalogMapping.findFirst({ where: { serviceRequestId: req.id, sellerSku: 'TC-1L' } }), 'mapping row for the manager');
 
   const listing = { ...base, productTitle: 'Roff Tile Cleaner 1L', brand: 'Roff', category: 'Cleaning > Tile cleaner', keyFeatures: 'Removes stains', description: 'Professional tile cleaner', imageLinks: 'https://drive.google.com/x', condition: 'New', fulfilmentChannel: 'Easy Ship (Amazon delivers)' };
@@ -1283,7 +1289,7 @@ test('listing & mapping forms: validation, mapping + new-listing workflow record
   const t = ok(await call('POST', '/catalog-forms/templates', { token: c, body: { marketplace: 'FLIPKART', kind: 'MAPPING', name: 'Tile cleaner 1L', data: { minOrderQty: '2', stock: 10 } } }));
   const list = ok(await call('GET', '/catalog-forms', { token: c }));
   assert.equal(list.templates.length, 1); assert.deepEqual(list.templates[0].data, { minOrderQty: '2', stock: 10 });
-  assert.equal(list.submissions.length, 5);
+  assert.equal(list.submissions.length, 6);
   assert.equal((await call('POST', '/catalog-forms/templates', { token: c, body: { marketplace: 'FLIPKART', kind: 'MAPPING', name: 'Empty', data: {} } })).status, 400);
   const other = await registerCustomer('Gita'); await pay(other, 'GROWTH');
   assert.equal((await call('DELETE', `/catalog-forms/templates/${t.id}`, { token: other })).status, 404, 'tenant isolation');
@@ -1300,7 +1306,7 @@ test('product lookup: link → background web lookup → only valid form fields;
   assert.equal(start.status, 'QUEUED', 'runs in the background, not in the request');
   const r = await wait(start.id);
   assert.equal(r.status, 'DONE');
-  assert.deepEqual(r.fields, { productName: PRODUCT.product_name, mrp: 249, lengthCm: 9, breadthCm: 6, heightCm: 27, weightKg: 1.1, hsn: '34022090', taxCode: 'GST_18', countryOfOrigin: 'India', manufacturerDetails: PRODUCT.manufacturer, packerDetails: PRODUCT.packer, shelfLifeMonths: 24 }, 'only the mapping form\'s fields');
+  assert.deepEqual(r.fields, { mrp: 249, lengthCm: 9, breadthCm: 6, heightCm: 27, weightKg: 1.1, hsn: '34022090', taxCode: 'GST_18', countryOfOrigin: 'India', manufacturerDetails: PRODUCT.manufacturer, packerDetails: PRODUCT.packer, shelfLifeMonths: 24 }, 'only the mapping form\'s fields');
   assert.equal(r.fields.sellerSku, undefined, 'seller data is never invented');
   const req = claude.calls[claude.calls.length - 1];
   assert.equal(req.body.model, 'claude-opus-5-5'); assert.equal(req.body.fallbacks, 'default');

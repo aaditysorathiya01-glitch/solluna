@@ -9,6 +9,10 @@ export type FieldType = 'text' | 'textarea' | 'number' | 'money' | 'select' | 'd
 export interface Field {
   key: string; label: string; type: FieldType; required?: boolean; options?: string[]; unit?: string;
   help?: string; placeholder?: string; min?: number; max?: number; maxLength?: number;
+  /** Stored when the client leaves the field empty (shown as a hint). */
+  blankAs?: string | number;
+  /** Left empty → SOLLUNA generates a unique SKU code. */
+  autoSku?: boolean;
 }
 export interface Section { title: string; note?: string; fields: Field[] }
 export interface FormDef { marketplace: Marketplace; kind: FormKind; title: string; intro: string; draft: boolean; sections: Section[] }
@@ -39,15 +43,22 @@ const packageDetails: Section = {
   ],
 };
 
+const flipkartManufacturing: Section = {
+  ...manufacturing,
+  fields: manufacturing.fields.map((f) => (f.key === 'importerDetails' ? { ...f, blankAs: 'None', help: 'Leave blank if not imported — we enter "None"' } : f)),
+};
+const flipkartPackage: Section = { ...packageDetails, fields: packageDetails.fields.map((f) => ({ ...f, required: true, min: 0.01 })) };
+const zeroIfBlank = { blankAs: 0, help: 'Leave blank if you don’t charge it — we enter 0' };
+
 const flipkartCommercial: Section[] = [
-  { title: 'Listing information', fields: [{ key: 'sellerSku', label: 'Seller SKU ID', type: 'text', required: true, maxLength: 64, placeholder: 'Your own SKU code' }] },
+  { title: 'Listing information', fields: [{ key: 'sellerSku', label: 'Seller SKU ID', type: 'text', maxLength: 64, autoSku: true, placeholder: 'Your own SKU code', help: 'Optional — leave blank and SOLLUNA creates one for you' }] },
   { title: 'Status Details', fields: [{ key: 'listingStatus', label: 'Listing Status', type: 'select', required: true, options: ['Active', 'Inactive'] }] },
   {
     title: 'Price details',
     note: 'Recommended price: your manager checks Flipkart’s recommended price and your earnings (fees, shipping) before the listing goes live. Sellers who accepted Flipkart recommended price have realised 20% increase in units.',
     fields: [
       { key: 'mrp', label: 'MRP', type: 'money', required: true, unit: 'INR', min: 1 },
-      { key: 'sellingPrice', label: 'Your selling price', type: 'money', required: true, unit: 'INR', min: 1, help: 'You can change this price if needed' },
+      { key: 'sellingPrice', label: 'Your selling price', type: 'money', required: true, unit: 'INR', min: 1, help: 'This is the price the customer pays — not your bank settlement. Delivery charges, tax and Flipkart commission are deducted from it. Your exact bank settlement shows after the listing is live; ask your manager to check it for you.' },
       { key: 'minOrderQty', label: 'Minimum Order Quantity (MinOQ)', type: 'select', options: MINOQ, help: 'Only if Flipkart offers MinOQ in your category' },
     ],
   },
@@ -55,7 +66,7 @@ const flipkartCommercial: Section[] = [
     title: 'Inventory details',
     fields: [
       { key: 'fulfilmentBy', label: 'Fullfilment by', type: 'select', required: true, options: ['Seller', 'Flipkart (FBF)'] },
-      { key: 'procurementType', label: 'Procurement type', type: 'select', options: ['Instock', 'Express', 'Domestic procurement', 'International procurement', 'Made to order'] },
+      { key: 'procurementType', label: 'Procurement type', type: 'select', required: true, options: ['Instock', 'Express', 'Domestic procurement', 'International procurement', 'Made to order'] },
       { key: 'procurementSlaDays', label: 'Procurement SLA', type: 'number', required: true, unit: 'days', min: 0, max: 60 },
       { key: 'stock', label: 'Stock', type: 'number', required: true, min: 0, max: 1_000_000 },
     ],
@@ -64,21 +75,21 @@ const flipkartCommercial: Section[] = [
   {
     title: 'Handling Fee Charged To Customer',
     fields: [
-      { key: 'localHandlingFee', label: 'Local handling fee', type: 'money', unit: 'INR', min: 0 },
-      { key: 'zonalHandlingFee', label: 'Zonal handling fee', type: 'money', unit: 'INR', min: 0 },
-      { key: 'nationalHandlingFee', label: 'National handling fee', type: 'money', unit: 'INR', min: 0 },
+      { key: 'localHandlingFee', label: 'Local handling fee', type: 'money', unit: 'INR', min: 0, ...zeroIfBlank },
+      { key: 'zonalHandlingFee', label: 'Zonal handling fee', type: 'money', unit: 'INR', min: 0, ...zeroIfBlank },
+      { key: 'nationalHandlingFee', label: 'National handling fee', type: 'money', unit: 'INR', min: 0, ...zeroIfBlank },
     ],
   },
-  packageDetails,
+  flipkartPackage,
   {
     title: 'Tax details',
     fields: [
       { key: 'hsn', label: 'HSN', type: 'text', required: true, placeholder: '4–8 digit HSN code', help: 'Find relevant HSN codes on the GST portal or ask your manager' },
-      { key: 'luxuryCessPct', label: 'Luxury Cess', type: 'number', unit: 'Percentage', min: 0, max: 100 },
+      { key: 'luxuryCessPct', label: 'Luxury Cess', type: 'number', unit: 'Percentage', min: 0, max: 100, blankAs: 0, help: 'Leave blank if not applicable — we enter 0' },
       { key: 'taxCode', label: 'Tax Code', type: 'select', required: true, options: GST, help: 'Find relevant Tax codes: GST rate for your HSN' },
     ],
   },
-  manufacturing,
+  flipkartManufacturing,
 ];
 
 const amazonCommercial: Section[] = [
@@ -126,8 +137,7 @@ export const FORMS: FormDef[] = [
     intro: 'The product is already on Flipkart (it has an FSN). We add your offer to it.',
     sections: [
       { title: 'Request details', fields: [
-        { key: 'productLink', label: 'Flipkart product link or FSN', type: 'text', required: true, maxLength: 500, placeholder: 'https://www.flipkart.com/… or FSN' },
-        { key: 'productName', label: 'Product name', type: 'text', maxLength: 200 },
+        { key: 'productLink', label: 'Flipkart product link or FSN', type: 'text', required: true, maxLength: 500, placeholder: 'https://www.flipkart.com/… or FSN', help: 'No need to add the product name — we take it from the Flipkart listing' },
       ] },
       ...flipkartCommercial,
     ],
@@ -170,6 +180,12 @@ export function productRef(mp: Marketplace, value: string): { type: 'ASIN' | 'FS
   const m = /[?&]pid=([A-Z0-9]{16})(?=[&#]|$)/i.exec(v) ?? /^([A-Z0-9]{16})$/i.exec(v);
   return m ? { type: 'FSN', id: m[1].toUpperCase() } : null;
 }
+/** Unique SKU for clients who leave Seller SKU blank, e.g. SOL-FK-7K2M9QXA. */
+export function autoSku(mp: Marketplace) {
+  const abc = '23456789ABCDEFGHJKLMNPQRSTUVWXYZ';
+  const bytes = globalThis.crypto.getRandomValues(new Uint8Array(8));
+  return `SOL-${mp === 'AMAZON' ? 'AZ' : 'FK'}-${Array.from(bytes, (b) => abc[b % abc.length]).join('')}`;
+}
 const fields = (f: FormDef) => f.sections.flatMap((s) => s.fields);
 
 /** Normalises and validates submitted values. Returns clean data (known keys only) and per-field errors. */
@@ -179,7 +195,13 @@ export function validateForm(def: FormDef, input: Record<string, unknown>, { par
   for (const f of fields(def)) {
     const raw = input[f.key];
     const str = raw === undefined || raw === null ? '' : String(raw).trim();
-    if (!str) { if (f.required && !partial) errors[f.key] = `${f.label} is required`; continue; }
+    if (!str) {
+      if (partial) continue;
+      if (f.blankAs !== undefined) data[f.key] = f.blankAs;
+      else if (f.autoSku) data[f.key] = autoSku(def.marketplace);
+      else if (f.required) errors[f.key] = `${f.label} is required`;
+      continue;
+    }
     if (f.type === 'number' || f.type === 'money') {
       const n = Number(str.replace(/,/g, ''));
       if (!Number.isFinite(n)) { errors[f.key] = `${f.label} must be a number`; continue; }
