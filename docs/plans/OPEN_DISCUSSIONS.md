@@ -16,7 +16,18 @@ Parked topics with the options already worked out. Nothing here is live unless m
 
 Note: a Claude Pro subscription cannot power a server feature for clients — app use needs an API key with separate billing.
 Checked and rejected: the GitHub "public-apis" list (github.com/public-apis/public-apis) is a directory of free APIs, not a product-data source — no Amazon.in / Flipkart product details, HSN or manufacturer data; barcode APIs there cover mostly US/EU products. Amazon Product Advertising API and the Flipkart Affiliate API give product titles/images for free, but their terms are for affiliate promotion and need ongoing affiliate sales — not a safe basis for filling seller listings. SP-API Catalog (option D) remains the free, seller-approved route.
+F. Free stack from the public-apis list (checked 7 Nov 2026, not yet tested live): ContextFetch (web search, no key) + TidyTools / ReplyNodes (page → text, no key, rate limited) + a free-tier LLM (Gemini / Groq / Mistral) to turn text into fields. ₹0 within limits, but three small third-party dependencies, marketplace pages often block such fetchers, and lower quality than E. Amazon "scraper" APIs on the list (Pangolinfo, Amazonscraperapi, ScrapingBot …) rely on scraping — rejected.
+
 Recommendation when revisited: A now, D once SP-API is approved, E only if instant auto-fill proves worth paying for.
+
+### Free helper APIs from the same list (low risk, candidates to build)
+| API (public-apis list) | Use | Key |
+|---|---|---|
+| India GST HSN & SAC | HSN search + GST rate in the listing forms ("Find relevant HSN codes") | No |
+| Indian Pincode / PostalPinCode | PIN → city, district, state in billing and seller-account addresses | No |
+| gstinapi | GSTIN → legal name, status, address at billing / sign-up | Free tier, key needed |
+| Razorpay IFSC | IFSC → bank and branch (future bank details) | No |
+Each must be tested live before use, with the form working manually if the API is down.
 
 ## 2. Remaining listing forms
 Amazon Mapping, Flipkart New listing and Amazon New listing are drafts (marked "Draft form"). Owner to send the field lists, as done for Flipkart Mapping. Schema: `platform/packages/catalog-forms/src/index.ts`.
