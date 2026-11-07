@@ -64,16 +64,20 @@ export function welcomeLines(kind: string, planCode: string, planName: string, m
     GROWTH: 'Once that is in, I will put together an ads plan for you to approve.',
     PREMIUM: 'And when is a good time this week for a quick kick-off call?',
   };
+  void last;
+  // The manager first gets to know the business, then sorts out seller accounts (owner, 7 Nov 2026).
   return [
     `Hi ${you}! I'm ${me} from SOLLUNA. I'll be your account manager 🙂`,
-    `Your ${planName} plan is all set. To get started, could you add your Amazon / Flipkart seller details in Catalog?`,
-    last[planCode] ?? 'Let me know what you would like to start with.',
+    `Your ${planName} plan is all set. To get started, tell me a bit about your business: what do you sell?`,
+    'And do you already have Amazon / Flipkart seller accounts, or should we set them up for you?',
   ];
 }
 
 @Injectable()
 export class ChatService implements OnModuleInit {
   readonly events = new Subject<ChatEvent>();
+  /** Called after every client message (the manager agent queues its reply here). */
+  readonly clientMessageListeners: ((orgId: string) => Promise<unknown>)[] = [];
 
   constructor(
     private readonly db: PrismaService,
@@ -86,6 +90,8 @@ export class ChatService implements OnModuleInit {
     // The manager is assigned when a plan starts (not at sign-up) and welcomes the client for that plan.
     billing.activationListeners.push((orgId, info) => this.welcomeOnActivation(orgId, info));
   }
+
+  async conversationState(orgId: string) { return this.conversation(orgId); }
 
   private async conversation(orgId: string) {
     return (await this.db.conversation.findUnique({ where: { organizationId: orgId } }))
@@ -106,7 +112,7 @@ export class ChatService implements OnModuleInit {
       },
       orderBy: { createdAt: 'desc' },
       take: limit,
-      select: MESSAGE_SELECT,
+      select: user.type === 'STAFF' ? { ...MESSAGE_SELECT, byAgent: true } : MESSAGE_SELECT,
     });
     const managers = await this.db.managerAssignment.findMany({ where: { organizationId: orgId, endedAt: null }, include: { manager: { select: { id: true, name: true, staffRole: true } } } });
     const pending = await this.db.managerWelcome.findUnique({ where: { organizationId: orgId } });
@@ -142,6 +148,20 @@ export class ChatService implements OnModuleInit {
 
     this.events.next({ type: 'message', organizationId: orgId, internal: d.internal, message: message as ChatMessage });
     await this.notify(user, orgId, message as ChatMessage);
+    if (user.type === 'CUSTOMER') for (const l of this.clientMessageListeners) await l(orgId).catch((e) => Logger.error(e, 'ChatListener'));
+    return message;
+  }
+
+  /** A message from the client's manager written by the system (the manager agent): same delivery as a staff reply. */
+  async postAsManager(orgId: string, managerId: string, body: string, opts: { byAgent?: boolean; notify?: boolean; internal?: boolean } = {}) {
+    const conv = await this.conversation(orgId);
+    const message = await this.db.$transaction(async (tx) => {
+      const m = await tx.message.create({ data: { conversationId: conv.id, senderId: managerId, senderType: 'STAFF', body: body.slice(0, 5000), isInternalNote: Boolean(opts.internal), byAgent: Boolean(opts.byAgent) } });
+      if (!opts.internal) await tx.conversation.update({ where: { id: conv.id }, data: { lastMessageAt: m.createdAt } });
+      return tx.message.findUniqueOrThrow({ where: { id: m.id }, select: MESSAGE_SELECT });
+    });
+    this.events.next({ type: 'message', organizationId: orgId, internal: Boolean(opts.internal), message: message as ChatMessage });
+    if (opts.notify && !opts.internal) await this.dispatch.emit({ type: 'chat.message', organizationId: orgId, title: `New message from your SOLLUNA manager ${message.sender.name}`, body: body.length > 160 ? `${body.slice(0, 157)}…` : body, data: { messageId: message.id } });
     return message;
   }
 
@@ -297,7 +317,7 @@ export class ChatService implements OnModuleInit {
     if (body) {
       const conv = await this.conversation(orgId);
       const message = await this.db.$transaction(async (tx) => {
-        const m = await tx.message.create({ data: { conversationId: conv.id, senderId: manager.id, senderType: 'STAFF', body } });
+        const m = await tx.message.create({ data: { conversationId: conv.id, senderId: manager.id, senderType: 'STAFF', body, byAgent: true } }); // automatic hello, not a person typing
         await tx.conversation.update({ where: { id: conv.id }, data: { lastMessageAt: m.createdAt } });
         return tx.message.findUniqueOrThrow({ where: { id: m.id }, select: MESSAGE_SELECT });
       });

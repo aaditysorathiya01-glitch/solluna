@@ -16,7 +16,7 @@ const ROLES = ['SUPER_ADMIN', 'OPERATIONS_MANAGER', 'LISTING_EXECUTIVE', 'ADS_MA
 
 export function AdminConsole({ role }: { role: string }) {
   const superAdmin = role === 'SUPER_ADMIN';
-  const tabs = [['overview', 'Overview'], ['clients', 'Clients'], ['team', 'Team'], ['plans', 'Plans'], ['payments', 'Payments'], ['inquiries', 'Enquiries'], ['announce', 'Announcements'], ...(superAdmin ? [['audit', 'Audit log'] as const] : [])] as const;
+  const tabs = [['overview', 'Overview'], ['clients', 'Clients'], ['team', 'Team'], ['plans', 'Plans'], ['payments', 'Payments'], ['manager-cost', 'Manager cost'], ['inquiries', 'Enquiries'], ['announce', 'Announcements'], ...(superAdmin ? [['audit', 'Audit log'] as const] : [])] as const;
   const [tab, setTab] = useState<string>('overview');
   const [flash, setFlash] = useState<FlashMsg>(null);
   return (
@@ -29,6 +29,7 @@ export function AdminConsole({ role }: { role: string }) {
       {tab === 'team' && <TeamPanel superAdmin={superAdmin} onFlash={setFlash} />}
       {tab === 'plans' && <PlansPanel superAdmin={superAdmin} onFlash={setFlash} />}
       {tab === 'payments' && <PaymentsPanel />}
+      {tab === 'manager-cost' && <ManagerCostPanel />}
       {tab === 'inquiries' && <InquiriesPanel onFlash={setFlash} />}
       {tab === 'announce' && <AnnouncePanel onFlash={setFlash} />}
       {tab === 'audit' && superAdmin && <AuditPanel />}
@@ -334,6 +335,46 @@ function AuditPanel() {
           </div>
         ))}
       </div>
+    </div>
+  );
+}
+
+interface AgentUsage { month: string; model: string; enabled: boolean; usdInr: number; totalUsd: number; totalInr: number; note: string; clients: { organizationId: string; name: string; replies: number; messages: number; toolCalls: number; inputTokens: number; outputTokens: number; cacheReadTokens: number; costUsd: number; costInr: number }[] }
+
+/** Manager chat spend per client (estimated from tokens) — no limits yet; this is for watching the cost. */
+function ManagerCostPanel() {
+  const [month, setMonth] = useState(new Date().toISOString().slice(0, 7));
+  const u = useApi<AgentUsage>(`/admin/agent-usage?month=${month}`);
+  return (
+    <div className="space-y-4">
+      <div className="flex flex-wrap items-end gap-3">
+        <div><label className="label" htmlFor="cost-month">Month</label><input id="cost-month" type="month" className="input w-auto" value={month} onChange={(e) => setMonth(e.target.value)} /></div>
+        {u.data && <p className="text-sm text-ink-3">Model {u.data.model} · automatic replies {u.data.enabled ? 'on' : 'off (no API key)'} · ₹ at {u.data.usdInr}/$</p>}
+      </div>
+      {u.data && (
+        <div className="grid gap-4 sm:grid-cols-3">
+          <Kpi label="Total this month" value={`₹${u.data.totalInr.toLocaleString('en-IN')}`} sub={`$${u.data.totalUsd}`} />
+          <Kpi label="Clients chatting" value={u.data.clients.length} />
+          <Kpi label="Average per client" value={u.data.clients.length ? `₹${(u.data.totalInr / u.data.clients.length).toFixed(2)}` : '—'} />
+        </div>
+      )}
+      <div className="card overflow-x-auto">
+        <table className="w-full min-w-[720px] text-sm" aria-label="Manager cost per client">
+          <thead><tr className="border-b border-ink/10 text-left text-xs uppercase tracking-wider text-ink-3"><th className="p-3">Client</th><th>Replies</th><th>Chat messages</th><th>Actions</th><th>Tokens in / out</th><th className="pr-3 text-right">Cost</th></tr></thead>
+          <tbody>
+            {u.data?.clients.map((c) => (
+              <tr key={c.organizationId} className="border-t border-ink/5">
+                <td className="p-3 font-medium">{c.name}</td><td>{c.replies}</td><td>{c.messages}</td><td>{c.toolCalls}</td>
+                <td className="text-xs">{c.inputTokens.toLocaleString('en-IN')} / {c.outputTokens.toLocaleString('en-IN')}</td>
+                <td className="pr-3 text-right">₹{c.costInr.toLocaleString('en-IN')} <span className="text-xs text-ink-3">(${c.costUsd})</span></td>
+              </tr>
+            ))}
+            {u.data && !u.data.clients.length && <tr><td className="p-3 text-ink-3" colSpan={6}>No automatic replies this month.</td></tr>}
+          </tbody>
+        </table>
+      </div>
+      {u.data && <p className="text-xs text-ink-3">{u.data.note}</p>}
+      {u.error && <Empty>{u.error}</Empty>}
     </div>
   );
 }

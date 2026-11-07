@@ -3,7 +3,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { api, ApiError } from '@/lib/api';
 
 export interface ChatMessage {
-  id: string; body: string; createdAt: string; readAt: string | null; isInternalNote: boolean; senderType: 'CUSTOMER' | 'STAFF';
+  id: string; body: string; createdAt: string; readAt: string | null; isInternalNote: boolean; byAgent?: boolean; senderType: 'CUSTOMER' | 'STAFF';
   sender: { id: string; name: string };
   attachments: { id: string; title: string; fileName: string; mimeType: string; sizeBytes: number }[];
 }
@@ -36,6 +36,7 @@ export function ChatPanel({ mode, orgId, onActivity }: { mode: 'client' | 'staff
   const [internal, setInternal] = useState(false);
   const [busy, setBusy] = useState(false);
   const [query, setQuery] = useState('');
+  const [agent, setAgent] = useState<{ enabled: boolean; paused: boolean } | null>(null);
   const endRef = useRef<HTMLDivElement>(null);
   const fileRef = useRef<HTMLInputElement>(null);
 
@@ -47,6 +48,12 @@ export function ChatPanel({ mode, orgId, onActivity }: { mode: 'client' | 'staff
   }, [base]);
 
   useEffect(() => { setHist(null); setQuery(''); load(); }, [load]);
+  useEffect(() => { if (mode === 'staff' && orgId) api<{ enabled: boolean; paused: boolean }>(`/ops/chats/${orgId}/agent`).then(setAgent).catch(() => setAgent(null)); }, [mode, orgId]);
+  async function toggleAgent() {
+    if (!agent || !orgId) return;
+    try { const r = await api<{ agentPaused: boolean }>(`/ops/chats/${orgId}/agent`, { method: 'PATCH', body: { paused: !agent.paused } }); setAgent({ ...agent, paused: r.agentPaused }); }
+    catch (e) { setError((e as Error).message); }
+  }
 
   useEffect(() => {
     const es = new EventSource(streamUrl);
@@ -93,6 +100,12 @@ export function ChatPanel({ mode, orgId, onActivity }: { mode: 'client' | 'staff
           <p className="font-semibold">Manager Chat Support</p>
           <p className="text-xs text-ink-3">{hist?.managers.length ? `Your manager: ${hist.managers.map((m) => m.name).join(', ')}` : 'A SOLLUNA manager will reply here'}</p>
         </div>
+        {mode === 'staff' && agent?.enabled && (
+          <button type="button" className={`chip ${agent.paused ? 'bg-amber-50 text-amber-800' : 'bg-emerald-50 text-emerald-800'}`} onClick={toggleAgent} data-testid="agent-toggle"
+            title={agent.paused ? 'You are handling this chat. Click to turn automatic replies back on.' : 'Automatic replies are on. Click to take over this chat yourself.'}>
+            {agent.paused ? 'Auto replies off — you are handling' : 'Auto replies on · take over'}
+          </button>
+        )}
         <form onSubmit={(e) => { e.preventDefault(); load(query || undefined); }} className="flex gap-1">
           <input aria-label="Search messages" className="input w-40 py-1.5 text-xs" placeholder="Search" value={query} onChange={(e) => setQuery(e.target.value)} />
           {query && <button type="button" className="btn-ghost px-3 py-1 text-xs" onClick={() => { setQuery(''); load(); }}>Clear</button>}
@@ -108,6 +121,7 @@ export function ChatPanel({ mode, orgId, onActivity }: { mode: 'client' | 'staff
               <div className={`max-w-[80%] rounded-2xl px-4 py-2.5 text-sm shadow-sm ${m.isInternalNote ? 'border border-dashed border-sun bg-sun/10' : mine ? 'bg-ink text-ivory' : 'bg-white'}`} data-testid="chat-message">
                 {m.isInternalNote && <p className="mb-1 text-[10px] font-bold uppercase tracking-wider text-sun-3">Internal note · not visible to client</p>}
                 {!mine && <p className="mb-0.5 text-xs font-semibold opacity-70">{m.sender.name}</p>}
+                {mode === 'staff' && m.byAgent && <p className="mb-0.5 text-[10px] font-semibold uppercase tracking-wider opacity-60">Auto reply</p>}
                 {m.body && <p className="whitespace-pre-wrap break-words">{m.body}</p>}
                 {m.attachments.map((a) => (
                   <a key={a.id} href={`/api/documents/${a.id}/download`} className={`mt-1.5 flex items-center gap-2 rounded-lg px-2 py-1.5 text-xs underline ${mine && !m.isInternalNote ? 'bg-white/10' : 'bg-ink/5'}`}>

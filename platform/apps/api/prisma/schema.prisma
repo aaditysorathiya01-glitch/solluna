@@ -621,6 +621,7 @@ model Conversation {
   organization   Organization @relation(fields: [organizationId], references: [id])
   messages       Message[]
   lastMessageAt  DateTime?
+  agentPaused    Boolean      @default(false) // ops took over: the manager agent stays quiet
   createdAt      DateTime     @default(now())
 }
 
@@ -642,6 +643,7 @@ model Message {
   attachmentKeys String[]
   attachments    Document[]
   isInternalNote Boolean      @default(false) // staff-only, never sent to customer
+  byAgent        Boolean      @default(false) // written by the client's manager agent (staff-only flag, never shown to the client)
   readAt         DateTime? // set when the other side (client ↔ SOLLUNA) reads it
   createdAt      DateTime     @default(now())
 
@@ -1087,4 +1089,38 @@ model ProductLookup {
   @@index([organizationId, createdAt])
   @@index([status])
   @@index([marketplace, ref])
+}
+
+/// Client manager agent: what it remembers about one client. Only ever loaded for that client.
+model AgentMemory {
+  id             String   @id @default(cuid())
+  organizationId String
+  key            String
+  value          String
+  updatedAt      DateTime @updatedAt
+  createdAt      DateTime @default(now())
+
+  @@unique([organizationId, key])
+}
+
+/// One manager-agent reply: queue entry + token usage and estimated cost (for watching spend per client).
+model AgentRun {
+  id               String    @id @default(cuid())
+  organizationId   String
+  status           String    @default("QUEUED") // QUEUED | RUNNING | DONE | SKIPPED | FAILED
+  model            String    @default("")
+  inputTokens      Int       @default(0)
+  outputTokens     Int       @default(0)
+  cacheReadTokens  Int       @default(0)
+  cacheWriteTokens Int       @default(0)
+  costMicroUsd     Int       @default(0)
+  toolCalls        Int       @default(0)
+  replyMessages    Int       @default(0)
+  note             String?
+  dueAt            DateTime  @default(now())
+  finishedAt       DateTime?
+  createdAt        DateTime  @default(now())
+
+  @@index([status, dueAt])
+  @@index([organizationId, createdAt])
 }

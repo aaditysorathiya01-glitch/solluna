@@ -20,6 +20,7 @@ Verified on 2026-11-05. Recheck before relying on it, because connections change
 | Email / WhatsApp notifications | Zapier → Gmail (after fixing the account) | Volume exceeds about 1k/month → Resend/SES |
 | Payments | — (no connector) | **Razorpay required**: no existing alternative |
 | Amazon / Flipkart data | — (no connector) | **SP-API / Flipkart Seller API required**. Manual exports until approved. |
+| Client manager in Manager Chat (onboarding, facts, requests, escalation) | **Claude API, Claude Haiku 5.5** (`ANTHROPIC_API_KEY`, `MANAGER_AGENT_MODEL`), added 2026-11-07; per-client memory + tenant-bound tools; cost per client in Admin → Manager cost | No limits yet (owner watching spend) — add per-client caps if cost requires |
 | Product details from a link / ASIN / FSN (listing forms) | **Claude API web search + web fetch** (`ANTHROPIC_API_KEY`), added 2026-11-07 — no existing connector finds product data | SP-API Catalog Items approved → use it first for Amazon; keep Claude for Flipkart and other sites |
 | Real-time chat | — | Socket.IO in the platform |
 

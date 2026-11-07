@@ -67,7 +67,7 @@ before(async () => {
     env: {
       ...process.env, DATABASE_URL, PORT: String(port), JWT_SECRET: 'e2e-jwt-secret-e2e-jwt-secret-1234', COOKIE_SECURE: 'false',
       RAZORPAY_KEY_ID: KEY_ID, RAZORPAY_KEY_SECRET: KEY_SECRET, RAZORPAY_WEBHOOK_SECRET: WEBHOOK_SECRET, RAZORPAY_API_BASE: `http://127.0.0.1:${rzpPort}`,
-      CONNECTOR_WEBHOOK_URL: `http://127.0.0.1:${sinkPort}/hook`, CONNECTOR_WEBHOOK_SECRET: CONNECTOR_SECRET, RATE_LIMIT_PER_MIN: '10000', AUTH_RATE_LIMIT_PER_MIN: '40', MAX_UPLOAD_MB: '1', MANAGER_ASSIGN_DELAY_MIN: '0', MANAGER_MESSAGE_GAP_SEC: '0', ANTHROPIC_API_KEY: 'test-key', ANTHROPIC_BASE_URL: `http://127.0.0.1:${claude.port}`, LOOKUP_DAILY_LIMIT: '3',
+      CONNECTOR_WEBHOOK_URL: `http://127.0.0.1:${sinkPort}/hook`, CONNECTOR_WEBHOOK_SECRET: CONNECTOR_SECRET, RATE_LIMIT_PER_MIN: '10000', AUTH_RATE_LIMIT_PER_MIN: '40', MAX_UPLOAD_MB: '1', MANAGER_ASSIGN_DELAY_MIN: '0', MANAGER_MESSAGE_GAP_SEC: '0', ANTHROPIC_API_KEY: 'test-key', ANTHROPIC_BASE_URL: `http://127.0.0.1:${claude.port}`, LOOKUP_DAILY_LIMIT: '3', AGENT_REPLY_DELAY_SEC: '0', AGENT_HUMAN_QUIET_MIN: '30',
       SUPPLIER_LEGAL_NAME: 'Aaditya Jitendrabhai Sorathia', SUPPLIER_TRADE_NAME: 'Solluna', SUPPLIER_GSTIN: SUPPLIER_GSTIN, SUPPLIER_ADDRESS: 'Survey No 135, Plot No 9, Shreeji Nagar, Meghpar Kumbhardi Sim, Anjar, Kachchh, Gujarat 370110', INVOICE_SAC: '998399',
     },
     stdio: ['ignore', 'pipe', 'pipe'],
@@ -613,7 +613,8 @@ test('chat: auto-assigned manager, live delivery both ways, internal notes stay 
   assert.equal(hello.length, 3, 'the manager says hello in a few short messages');
   assert.match(hello[0], /^Hi Esha! I'm \S+ from SOLLUNA/);
   assert.match(hello[1], /Growth plan is all set/);
-  assert.match(hello[2], /ads plan/);
+  assert.match(hello[1], /tell me a bit about your business/);
+  assert.match(hello[2], /seller accounts/);
   assert.ok(hello.every((b) => b.length <= 140), 'chat-length messages, no benefit dumps');
   assert.ok(await db.notification.findFirst({ where: { userId: eManager.id, type: 'manager.new_client' } }), 'manager told about the new client');
   assert.ok(await db.notification.findFirst({ where: { organizationId: eHist.organizationId, type: 'manager.pending', body: { contains: 'within 1 hour' } } }), 'client promised a manager within 1 hour');
@@ -1289,7 +1290,7 @@ test('listing & mapping forms: validation, mapping + new-listing workflow record
   for (let i = 1; i <= 3; i++) ok(await call('POST', '/catalog-forms', { token: c, body: { marketplace: 'AMAZON', kind: 'NEW_LISTING', data: { ...listing, sellerSku: `RT-${i}` } } }));
   const lr = await db.listingRequest.findMany({ where: { product: { sku: { in: ['RT-1', 'RT-2', 'RT-3'] } } } });
   assert.equal(lr.length, 3, 'new listing form creates product + listing for the lifecycle');
-  const rt1 = (await db.serviceRequest.findMany({ where: { featureKey: 'NEW_LISTING_AMAZON', organizationId: (await db.product.findFirst({ where: { sku: 'RT-1' } })).organizationId } }))[0];
+  const rt1 = await db.serviceRequest.findFirst({ where: { featureKey: 'NEW_LISTING_AMAZON', title: { contains: '(SKU RT-1)' } } });
   assert.match(rt1.title, /Amazon new listing: Pidilite FFK802002100000_CP \(SKU RT-1\)/);
   assert.equal(rt1.details.fields.condition, 'New'); assert.equal(rt1.details.fields.material, 'Ceramic\nPvc'); assert.equal(rt1.details.fields.hasVariations, 'This product has variations');
   assert.equal((await db.product.findFirst({ where: { sku: 'RT-1' } })).name, 'Pidilite FFK802002100000_CP');
@@ -1345,21 +1346,22 @@ test('product lookup: link → background web lookup → only valid form fields;
   assert.equal(r.status, 'DONE');
   assert.deepEqual(r.fields, { mrp: 249, lengthCm: 9, breadthCm: 6, heightCm: 27, weightKg: 1.1, hsn: '34022090', taxCode: 'GST_18', countryOfOrigin: 'India', manufacturerDetails: PRODUCT.manufacturer, packerDetails: PRODUCT.packer, shelfLifeMonths: 24 }, 'only the mapping form\'s fields');
   assert.equal(r.fields.sellerSku, undefined, 'seller data is never invented');
-  const req = claude.calls[claude.calls.length - 1];
+  const lookupCalls = () => claude.calls.filter((x) => x.body.tools?.some((t) => t.name === 'submit_product_details'));
+  const req = lookupCalls()[lookupCalls().length - 1];
   assert.equal(req.body.model, 'claude-opus-5-5'); assert.equal(req.body.fallbacks, 'default');
   assert.deepEqual(req.body.tools.map((t) => t.type ?? t.name), ['web_search_20260209', 'web_fetch_20260209', 'submit_product_details']);
   assert.match(JSON.stringify(req.body.messages[0].content), /TCLFX7ZGHYQ2KJWE/);
 
   // New listing form: same product, its own fields (title, features, images…); reused for 7 days without a new API call.
-  const before = claude.calls.length;
+  const before = lookupCalls().length;
   const nl = await wait(ok(await call('POST', '/catalog-forms/lookup', { token: c, body: { marketplace: 'FLIPKART', kind: 'NEW_LISTING', link: 'TCLFX7ZGHYQ2KJWE' } })).id);
-  assert.equal(nl.cached, true); assert.equal(claude.calls.length, before, 'cached result, no new lookup');
+  assert.equal(nl.cached, true); assert.equal(lookupCalls().length, before, 'cached result, no new lookup');
   assert.equal(nl.fields.brand, 'Roff'); assert.equal(nl.fields.eanUpc, '8901234567897'); assert.ok(nl.fields.vertical); assert.equal(nl.fields.images, undefined, 'images are uploaded by the client, never taken from the web');
   assert.match(nl.fields.keyFeatures, /Removes tough stains\nSafe on tiles/);
 
   const p = await wait(ok(await call('POST', '/catalog-forms/lookup', { token: c, body: { marketplace: 'AMAZON', kind: 'MAPPING', link: 'https://www.amazon.in/x/dp/B0PAUSE001' } })).id);
   assert.equal(p.status, 'DONE', 'pause_turn is resumed');
-  const resumed = claude.calls[claude.calls.length - 1].body.messages;
+  const resumed = lookupCalls()[lookupCalls().length - 1].body.messages;
   assert.equal(resumed.length, 2); assert.equal(resumed[1].role, 'assistant'); assert.equal(resumed[1].content[0].type, 'server_tool_use');
   const nf = await wait(ok(await call('POST', '/catalog-forms/lookup', { token: c, body: { marketplace: 'AMAZON', kind: 'MAPPING', link: 'https://www.amazon.in/notfound/dp/B0NOTFOUND' } })).id);
   assert.equal(nf.status, 'FAILED'); assert.match(nf.error, /could not find this product/);
@@ -1396,6 +1398,68 @@ test('monthly report cycle: on the 5th one reporting request per client for last
   assert.equal(sched[0].status, 'MONTH_RUNNING');
   assert.ok(sched.length >= 2 && sched.slice(1).every((x) => ['PREPARING', 'WAITING_MARKETPLACE', 'READY'].includes(x.status)), JSON.stringify(sched));
   assert.match(sched[1].readyBy, /^7 /); assert.match(sched[1].marketplaceReportsOn, /^5 /);
+});
+
+test('manager agent: replies as the manager, saves facts, plan-checked requests, stays in scope, isolated per client, pauses, records cost', async () => {
+  const c = await registerCustomer('Tara'); await pay(c, 'RESELLER');
+  const org = ok(await call('GET', '/auth/me', { token: c })).organization;
+  const other = await registerCustomer('Zoya'); await pay(other, 'RESELLER');
+  const otherOrg = ok(await call('GET', '/auth/me', { token: other })).organization;
+  await db.agentMemory.create({ data: { organizationId: otherOrg.id, key: 'secret_note', value: 'ZOYA-PRIVATE-123' } });
+  const waitFor = async (fn, what) => { for (let i = 0; i < 60; i++) { const v = await fn(); if (v) return v; await new Promise((x) => setTimeout(x, 250)); } throw new Error(`timed out: ${what}`); };
+  const chat = async () => ok(await call('GET', '/chat', { token: c })).messages;
+  const say = async (body) => ok(await call('POST', '/chat/messages', { token: c, body: { body } }));
+  const replies = async () => (await chat()).filter((m) => m.senderType === 'STAFF');
+
+  const before = (await replies()).length; // welcome messages
+  await say('[agent-test] hi');
+  const r1 = await waitFor(async () => { const r = await replies(); return r.length >= before + 2 ? r : null; }, 'first reply');
+  assert.deepEqual(r1.slice(-2).map((m) => m.body), ['Hi! Tell me a bit about your business 🙂', 'What do you sell?'], 'short bubbles from the assigned manager');
+  assert.equal(r1[r1.length - 1].byAgent, undefined, 'the client never sees who wrote it');
+  const mgr = (await db.managerAssignment.findFirst({ where: { organizationId: org.id, endedAt: null } })).managerId;
+  assert.equal(r1[r1.length - 1].sender.id, mgr);
+
+  // Isolation: the request for this client carries only this client's data.
+  const agentCalls = () => claude.calls.filter((x) => String(x.body.system ?? '').includes('account manager at SOLLUNA'));
+  const sent = JSON.stringify(agentCalls()[agentCalls().length - 1].body);
+  assert.ok(sent.includes(org.legalName)); assert.ok(!sent.includes('ZOYA-PRIVATE-123') && !sent.includes(otherOrg.legalName), 'no other client data');
+  assert.equal(agentCalls()[agentCalls().length - 1].body.model, 'claude-haiku-5-5');
+
+  await say('[agent-test] my GST is 24ABCDE1234F1Z5 and no flipkart account');
+  await waitFor(async () => (await db.agentMemory.findFirst({ where: { organizationId: org.id, key: 'gstin' } })), 'memory');
+  const fk = await waitFor(async () => db.marketplaceAccount.findFirst({ where: { organizationId: org.id, marketplace: 'FLIPKART' } }), 'seller account');
+  assert.equal(fk.hasAccount, false); assert.equal(fk.status, 'PENDING', 'never CONNECTED by the agent');
+  await waitFor(async () => (await replies()).some((m) => m.body.startsWith('Done 👍')), 'reply after tools');
+
+  await say('[agent-test] please run ads for me');
+  const ads = await waitFor(async () => db.serviceRequest.findFirst({ where: { organizationId: org.id, featureKey: 'ADS_MANAGEMENT' } }), 'ads request');
+  assert.equal(ads.entitlement, 'OUT_OF_PLAN', 'plan check still applies'); assert.equal(ads.createdById, 'system');
+
+  await say('[agent-test] my seller password is abc123');
+  await waitFor(async () => (await replies()).some((m) => m.body.includes('never stored')), 'password refused');
+  assert.equal(await db.agentMemory.count({ where: { organizationId: org.id, key: 'seller_password' } }), 0, 'passwords never saved');
+
+  // Team takes over: paused → no reply; a human reply also keeps the agent quiet.
+  const ops = await staff('OPERATIONS_MANAGER', S.admin);
+  assert.equal((await call('PATCH', `/ops/chats/${otherOrg.id}/agent`, { token: c, body: { paused: true } })).status, 403);
+  ok(await call('PATCH', `/ops/chats/${org.id}/agent`, { token: S.admin, body: { paused: true } }));
+  const n = (await replies()).length;
+  await say('[agent-test] weather today?');
+  await new Promise((x) => setTimeout(x, 3000));
+  assert.equal((await replies()).length, n, 'paused: no automatic reply');
+  ok(await call('PATCH', `/ops/chats/${org.id}/agent`, { token: S.admin, body: { paused: false } }));
+  const state = ok(await call('GET', `/ops/chats/${org.id}/agent`, { token: S.admin }));
+  assert.equal(state.paused, false); assert.ok(state.memory.some((m) => m.key === 'gstin'));
+  await say('[agent-test] weather today?');
+  await waitFor(async () => (await replies()).some((m) => m.body.startsWith('I can only help with your SOLLUNA services')), 'off-topic declined');
+
+  // Cost per client is recorded and visible to admins only.
+  const usage = ok(await call('GET', `/admin/agent-usage`, { token: S.admin }));
+  const mine = usage.clients.find((x) => x.organizationId === org.id);
+  assert.ok(mine && mine.replies >= 4 && mine.costUsd > 0 && mine.costInr > 0, JSON.stringify(mine));
+  assert.equal(usage.model, 'claude-haiku-5-5');
+  assert.equal((await call('GET', '/admin/agent-usage', { token: c })).status, 403);
+  void ops;
 });
 
 test('security: login brute force is rate limited per IP', async () => {

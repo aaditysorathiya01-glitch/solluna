@@ -62,7 +62,7 @@ before(async () => {
   apiBase = `http://127.0.0.1:${apiPort}/api`; webBase = `http://127.0.0.1:${webPort}`;
 
   const a = start('node', ['dist/apps/api/src/main.js'], apiDir, {
-    DATABASE_URL, PORT: String(apiPort), JWT_SECRET: 'web-e2e-secret-web-e2e-secret-123', COOKIE_SECURE: 'false', MANAGER_ASSIGN_DELAY_MIN: '0', MANAGER_MESSAGE_GAP_SEC: '0', ANTHROPIC_API_KEY: 'test-key', ANTHROPIC_BASE_URL: `http://127.0.0.1:${claude.port}`,
+    DATABASE_URL, PORT: String(apiPort), JWT_SECRET: 'web-e2e-secret-web-e2e-secret-123', COOKIE_SECURE: 'false', MANAGER_ASSIGN_DELAY_MIN: '0', MANAGER_MESSAGE_GAP_SEC: '0', ANTHROPIC_API_KEY: 'test-key', ANTHROPIC_BASE_URL: `http://127.0.0.1:${claude.port}`, AGENT_REPLY_DELAY_SEC: '0',
     RAZORPAY_KEY_ID: KEY_ID, RAZORPAY_KEY_SECRET: KEY_SECRET, RAZORPAY_WEBHOOK_SECRET: 'wh', RAZORPAY_API_BASE: `http://127.0.0.1:${rzpPort}`, RATE_LIMIT_PER_MIN: '10000', AUTH_RATE_LIMIT_PER_MIN: '100', EXPOSE_AUTH_LINKS: 'true', APP_URL: 'http://web.invalid',
     SUPPLIER_LEGAL_NAME: 'Aaditya Jitendrabhai Sorathia', SUPPLIER_TRADE_NAME: 'Solluna', SUPPLIER_GSTIN: '24OPVPS8924H1ZQ', SUPPLIER_ADDRESS: 'Survey No 135, Plot No 9, Shreeji Nagar, Meghpar Kumbhardi Sim, Anjar, Kachchh, Gujarat 370110', SUPPLIER_EMAIL: 'solluna.play@gmail.com',
   });
@@ -180,6 +180,9 @@ test('super admin must enrol 2FA in the browser before the console opens; sign-i
   await p2.getByRole('button', { name: 'Admin', exact: true }).click();
   await p2.getByText('MRR (excl. GST)').waitFor();
   await p2.screenshot({ path: join(SHOTS, '0-admin-overview.png'), fullPage: true });
+  await p2.getByRole('tab', { name: 'Manager cost' }).click();
+  await p2.getByText('Total this month').waitFor();
+  await p2.getByText('Model claude-haiku-5-5', { exact: false }).waitFor();
   assert.deepEqual(errors, []);
 });
 
@@ -345,6 +348,12 @@ test('Manager Chat Support: live two-way chat, attachments, internal notes, read
   await st.click('button:has-text("Send")');
 
   await c.getByTestId('chat-message').filter({ hasText: 'campaign goes live after your budget approval' }).waitFor();
+  // The team can take a chat over from the automatic replies and hand it back.
+  await st.getByTestId('agent-toggle').getByText('Auto replies on', { exact: false }).waitFor();
+  await st.getByTestId('agent-toggle').click();
+  await st.getByTestId('agent-toggle').getByText('Auto replies off', { exact: false }).waitFor();
+  await st.getByTestId('agent-toggle').click();
+  await st.getByTestId('agent-toggle').getByText('Auto replies on', { exact: false }).waitFor();
   await new Promise((r) => setTimeout(r, 500));
   assert.equal(await c.getByText('Margin is thin', { exact: false }).count(), 0, 'internal note never reaches the client UI');
   await c.reload();

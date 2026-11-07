@@ -63,6 +63,7 @@ Open: whether the client-facing manager is labelled as AI in chat (owner to deci
 ## 5. Admin panel + "CEO" agent — LAST (owner, 7 Nov 2026)
 Admin panel review is pending. Plan: an internal "CEO" agent for the owner that reports across all clients — errors, blocked tasks, missed SLAs, renewals, plan usage, what each client manager did. Internal only (staff), read-mostly, every client's data is reached through the same audited, tenant-scoped tools. To be designed after the client-manager agent is live.
 
-## 6. Client manager agent — design agreed in chat (7 Nov 2026)
+## 6. Client manager agent — phase 1 BUILT (7 Nov 2026), switched on by ANTHROPIC_API_KEY
+Model: Claude Haiku 5.5 (owner). No message limits for now; spend per client is in Admin → Manager cost. Still to do: per-client mail IDs (needs DNS catch-all), playbook learning with admin approval, product lookup through Seller Hub.
 One manager agent per client: SOLLUNA skills as its playbook, per-client memory, tenant-scoped tools (client never chosen by the model), human takeover, chat scope limited to SOLLUNA services, never says "AI" but never claims to be human if asked directly. Model: owner wants a basic, low-cost model (no heavy reasoning needed). Self-hosting on Google Colab rejected (sessions disconnect, no 24×7, Colab terms, client KYC data). Product lookup by FSN: Claude web search is NOT proven for raw FSNs (to be tested with a key); the reliable source is Seller Hub's own catalog search through the ops login.
 
