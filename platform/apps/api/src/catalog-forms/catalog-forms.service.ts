@@ -18,6 +18,13 @@ class FormInvalid extends BadRequestException {
 }
 
 /** Listings & Mapping forms → orchestrator requests (catalog mapping / new listing quota), plus reusable templates. */
+/** New-listing product name: the title if given, else brand + model (Flipkart model name / Amazon model number / product type). */
+const productName = (d: Record<string, string | number>) => {
+  if (d.productTitle) return String(d.productTitle);
+  const model = d.modelName ?? d.modelNumber ?? d.productType;
+  return d.brand && model ? `${d.brand} ${model}` : undefined;
+};
+
 @Injectable()
 export class CatalogFormsService {
   constructor(private readonly db: PrismaService, private readonly catalog: CatalogService, private readonly audit: AuditService) {}
@@ -42,7 +49,7 @@ export class CatalogFormsService {
     const { data, errors } = validateForm(def, d.data);
     await this.checkImages(user, def, data, errors);
     if (Object.keys(errors).length) throw new FormInvalid(errors);
-    const label = String(data.productTitle ?? data.modelName ?? data.productName ?? data.productRef ?? data.productLink ?? data.sellerSku).slice(0, 80);
+    const label = String(productName(data) ?? data.productName ?? data.productRef ?? data.productLink ?? data.sellerSku).slice(0, 80);
     const title = `${MP[d.marketplace]} ${d.kind === 'MAPPING' ? 'mapping' : 'new listing'}: ${label} (SKU ${data.sellerSku})`;
     // Reuse the catalog workflow so the manager's tools (mapping confidence, listing lifecycle, quota) work unchanged.
     let requestId: string;
@@ -53,9 +60,9 @@ export class CatalogFormsService {
       const orgId = user.organizationId!;
       const gst = /^GST_(\d+)$/.exec(String(data.taxCode ?? ''))?.[1];
       const product = {
-        name: String(data.productTitle ?? `${data.brand} ${data.modelName}`), brand: String(data.brand), category: String(data.category ?? data.vertical), sku: String(data.sellerSku), hsn: String(data.hsn),
+        name: String(productName(data)), brand: String(data.brand), category: String(data.category ?? data.vertical ?? data.productType), sku: String(data.sellerSku), hsn: String(data.hsn),
         gstRate: gst ? Number(gst) : undefined, mrp: Number(data.mrp), sellingPrice: Number(data.sellingPrice),
-        specs: [data.keyFeatures, data.description, data.usageInstructions].filter(Boolean).join('\n\n').slice(0, 5000), variations: data.variants ? String(data.variants) : undefined,
+        specs: [data.keyFeatures, data.itemHighlight, data.specialFeatures, data.description, data.usageInstructions].filter(Boolean).join('\n\n').slice(0, 5000), variations: data.variants ? String(data.variants) : undefined,
       };
       const existing = await this.db.product.findFirst({ where: { organizationId: orgId, sku: product.sku } });
       const productId = existing ? (await this.catalog.updateProduct(user, existing.id, product)).id : (await this.catalog.createProduct(user, product)).id;

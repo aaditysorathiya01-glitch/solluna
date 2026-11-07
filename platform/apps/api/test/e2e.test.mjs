@@ -1278,10 +1278,17 @@ test('listing & mapping forms: validation, mapping + new-listing workflow record
   assert.match(autoReq.details.fields.sellerSku, /^SOL-FK-[2-9A-Z]{8}$/, 'blank SKU → SOLLUNA SKU');
   assert.ok(await db.catalogMapping.findFirst({ where: { serviceRequestId: req.id, sellerSku: 'TC-1L' } }), 'mapping row for the manager');
 
-  const listing = { ...base, productTitle: 'Roff Tile Cleaner 1L', brand: 'Roff', category: 'Cleaning > Tile cleaner', keyFeatures: 'Removes stains', description: 'Professional tile cleaner', imageLinks: 'https://drive.google.com/x', condition: 'New', fulfilmentChannel: 'Easy Ship (Amazon delivers)' };
+  const azImg = (await upload(c, 'main.png', PNG, { kind: 'LISTING_ASSETS' })).body.id;
+  const listing = { productType: 'Bonding Adhesives', brand: 'Pidilite', modelNumber: 'FFK802002100000_CP', images: azImg, specialFeatures: 'Strong', material: 'Ceramic, Pvc', itemForm: 'Stick', unitCount: 120, unitCountType: 'count', hsn: '35061000', fulfilmentChannel: 'Merchant Fulfilled (Self Ship / Easy Ship)', stock: 5, sellingPrice: 95, mrp: 150, offeringReleaseDate: '2026-10-24', countryOfOrigin: 'India', hasVariations: 'This product has variations', lowerTempRatingUnit: 'Degrees Celsius' };
+  const azNl = await call('POST', '/catalog-forms', { token: c, body: { marketplace: 'AMAZON', kind: 'NEW_LISTING', data: { ...listing, images: '', hsn: '3506', productType: '', fulfilmentChannel: 'Easy Ship (Amazon delivers)' } } });
+  assert.equal(azNl.status, 400); assert.ok(['images', 'hsn', 'productType', 'fulfilmentChannel'].every((k) => azNl.body.fieldErrors[k]), JSON.stringify(azNl.body.fieldErrors));
   for (let i = 1; i <= 3; i++) ok(await call('POST', '/catalog-forms', { token: c, body: { marketplace: 'AMAZON', kind: 'NEW_LISTING', data: { ...listing, sellerSku: `RT-${i}` } } }));
   const lr = await db.listingRequest.findMany({ where: { product: { sku: { in: ['RT-1', 'RT-2', 'RT-3'] } } } });
   assert.equal(lr.length, 3, 'new listing form creates product + listing for the lifecycle');
+  const rt1 = (await db.serviceRequest.findMany({ where: { featureKey: 'NEW_LISTING_AMAZON', organizationId: (await db.product.findFirst({ where: { sku: 'RT-1' } })).organizationId } }))[0];
+  assert.match(rt1.title, /Amazon new listing: Pidilite FFK802002100000_CP \(SKU RT-1\)/);
+  assert.equal(rt1.details.fields.condition, 'New'); assert.equal(rt1.details.fields.material, 'Ceramic\nPvc'); assert.equal(rt1.details.fields.hasVariations, 'This product has variations');
+  assert.equal((await db.product.findFirst({ where: { sku: 'RT-1' } })).name, 'Pidilite FFK802002100000_CP');
   const fourth = await call('POST', '/catalog-forms', { token: c, body: { marketplace: 'AMAZON', kind: 'NEW_LISTING', data: { ...listing, sellerSku: 'RT-4' } } });
   assert.equal(fourth.status, 201); assert.equal(fourth.body.request.entitlement, 'LIMIT_REACHED', 'Reseller: 3 new Amazon listings a month');
   assert.equal((await call('POST', '/catalog-forms', { token: c, body: { marketplace: 'AMAZON', kind: 'NEW_LISTING', data: { ...listing, sellerSku: 'RT-1' } } })).status, 409, 'same SKU twice');
@@ -1297,7 +1304,7 @@ test('listing & mapping forms: validation, mapping + new-listing workflow record
   assert.ok((await call('POST', '/catalog-forms', { token: c, body: { marketplace: 'FLIPKART', kind: 'NEW_LISTING', data: { ...fk, images: Array(6).fill(0).map((_, i) => `img${i}aaaaaaaaaaaaaaaaaaaaa`).join(',') } } })).body.fieldErrors.images, 'at most 5 images');
   const fkr = ok(await call('POST', '/catalog-forms', { token: c, body: { marketplace: 'FLIPKART', kind: 'NEW_LISTING', data: { ...fk, images: `${img1},${img2}` } } }));
   const fkReq = await db.serviceRequest.findUnique({ where: { id: fkr.request.id } });
-  assert.equal(fkReq.featureKey, 'NEW_LISTING_FLIPKART'); assert.match(fkReq.title, /Flipkart new listing: Floor Cleaner Lavender \(SKU FC-500\)/);
+  assert.equal(fkReq.featureKey, 'NEW_LISTING_FLIPKART'); assert.match(fkReq.title, /Flipkart new listing: Roff Floor Cleaner Lavender \(SKU FC-500\)/);
   assert.equal(fkReq.details.fields.images, `${img1},${img2}`); assert.equal(fkReq.details.fields.keyFeatures, 'Kills 99.9% germs\nStreak-free', 'list values split and de-duplicated');
   assert.equal(fkReq.details.fields.fulfilmentBy, 'Seller');
 

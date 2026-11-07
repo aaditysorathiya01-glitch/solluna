@@ -40,9 +40,12 @@ Recommendation when revisited: A now, D once SP-API is approved, E only if insta
 | Razorpay IFSC | IFSC → bank and branch (future bank details) | No |
 Each must be tested live before use, with the form working manually if the API is down.
 
-## 2. Remaining listing forms
-Done: Flipkart Mapping (6–7 Nov), Flipkart New listing (7 Nov, 5-image upload) and Amazon Mapping (7 Nov — condition always New; audience and pricing rule default when blank; HSN 6–8 digits). Amazon New listing is still a draft; owner to send its field list.
-Flipkart New listing open point: the product attributes (Model Name, Brand Fragrance, Quantity in L, Suitable For, Form Factor, Container Type, pH …) follow the owner's example vertical (cleaners). Other verticals have different attributes on Flipkart — decide whether to add per-vertical attribute sets. Dropdown values for those attributes are typing suggestions (any value accepted) until Flipkart's exact lists are shared. Schema: `platform/packages/catalog-forms/src/index.ts`.
+## 2. Listing forms — all four final (7 Nov 2026)
+Flipkart Mapping, Flipkart New listing (5 images), Amazon Mapping (condition New; audience = enable one or both) and Amazon New listing (9 images; condition New; no pricing rule) follow the owner's Seller Hub / Seller Central field lists. Schema: `platform/packages/catalog-forms/src/index.ts`.
+Open points:
+- New-listing attributes follow the owner's example category (Flipkart: cleaners; Amazon: Bonding Adhesives). Other verticals / product types have different attributes — decide whether to add per-category attribute sets.
+- Dropdowns whose exact marketplace values were not shared are typing suggestions (any value accepted) until the lists are shared.
+- Amazon New listing has no "Item Name" field (not in the owner's list): the product is named "Brand + Model Number" and the manager writes the final title.
 
 ## 2a. Auto-fill the Flipkart New listing page with AI
 Owner (7 Nov 2026): the New listing form is fine for now; work out later how AI can fill it (vertical, attributes, key features, description, search keywords, HSN/tax from product images + a reference link). Same options and costs as section 1 (Claude / Gemini with search, SP-API not applicable to Flipkart). Until then the client fills it manually or from a template.

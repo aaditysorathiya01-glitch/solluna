@@ -592,14 +592,21 @@ test('client: onboarding checklist, marketplace details (no passwords), product 
   await c.screenshot({ path: join(SHOTS, '10-flipkart-new-listing.png'), fullPage: true });
   await c.click('button:has-text("Submit new listing request")');
   await c.getByText('Request sent to your manager', { exact: false }).waitFor();
-  await c.getByText(/Flipkart new listing: Floor Cleaner Lavender \(SKU SOL-FK-/).waitFor();
+  await c.getByText(/Flipkart new listing: Riya Floor Cleaner Lavender \(SKU SOL-FK-/).waitFor();
 
   // New listing on Amazon creates the product + listing the manager tracks to live.
   await c.getByRole('tab', { name: 'Amazon' }).click();
   await c.getByRole('tab', { name: 'New listing' }).click();
-  const fill = { productTitle: 'Jute Table Runner', brand: 'Riya', category: 'Home Decor', keyFeatures: 'Hand-woven jute', description: 'Natural jute table runner, 13 x 72 in', imageLinks: 'https://drive.google.com/runner', sellerSku: 'JTR-01', mrp: '899', sellingPrice: '649', stock: '25', hsn: '6304', manufacturerDetails: 'Riya Lifestyle, Mumbai', packerDetails: 'Riya Lifestyle, Mumbai' };
+  assert.equal(await c.getByText('Draft form').count(), 0, 'Amazon new listing is final');
+  for (const label of ['Product Type', 'Recommended Browse Node', 'Item Highlight', 'Brand Name', 'External Product ID', 'Is Customisable?', 'Model Number', 'Special Features', 'Material', 'Item Package Quantity', 'Water Resistance Level', 'Color', 'Number of Pieces', 'Mixing Ratio', 'Tensile Strength Unit', 'Lower Temperature Rating Unit', 'Item Form', 'Unit Count Type', 'Specific Uses for Product', 'External Product Information (HSN)', 'Full Cure Time Unit', 'Specific Gravity Unit', 'Number of Packs', 'Viscosity Level', 'Working Time Unit', 'Lap Shear Strength Unit', 'SKU', 'Fulfillment Channel', 'Quantity', 'Your Price', 'Maximum Retail Price', 'Offering Release Date', 'Item Volume Unit', 'Country/Region of Origin']) assert.ok(await c.locator('label.label', { hasText: label }).count(), `field ${label}`);
+  assert.equal(await c.locator('label.label', { hasText: 'Pricing Rule' }).count(), 0, 'no pricing rule');
+  await c.setInputFiles('#f-images', [{ name: 'runner.png', mimeType: 'image/png', buffer: png }]);
+  await c.waitForFunction(() => document.querySelectorAll('[data-testid="images-images"] img').length === 1);
+  const fill = { productType: 'Table Runners', brand: 'Jute', modelNumber: 'Table Runner', sellerSku: 'JTR-01', mrp: '899', sellingPrice: '649', stock: '25', hsn: '630492' };
   for (const [k, v] of Object.entries(fill)) await c.fill(`#f-${k}`, v);
-  await c.selectOption('#f-condition', 'New'); await c.selectOption('#f-fulfilmentChannel', 'Easy Ship (Amazon delivers)'); await c.selectOption('#f-taxCode', 'GST_12'); await c.selectOption('#f-countryOfOrigin', 'India');
+  await c.fill('#f-material', 'Jute'); await c.press('#f-material', 'Enter');
+  await c.selectOption('#f-fulfilmentChannel', 'Merchant Fulfilled (Self Ship / Easy Ship)'); await c.selectOption('#f-countryOfOrigin', 'India');
+  await c.screenshot({ path: join(SHOTS, '10-amazon-new-listing.png'), fullPage: true });
   await c.click('button:has-text("Submit new listing request")');
   await c.getByText('Request sent to your manager', { exact: false }).waitFor();
   await c.getByText('Amazon new listing: Jute Table Runner (SKU JTR-01)').waitFor();

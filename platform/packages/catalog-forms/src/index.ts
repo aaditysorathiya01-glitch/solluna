@@ -145,44 +145,79 @@ const flipkartNewListing: Section[] = [
   { title: 'Additional features', fields: [many('otherFeatures', 'Other Features')] },
 ];
 
-const amazonCommercial: Section[] = [
-  { title: 'Offer', fields: [
-    { key: 'sellerSku', label: 'Seller SKU', type: 'text', required: true, maxLength: 64 },
-    { key: 'condition', label: 'Condition', type: 'select', required: true, options: ['New', 'Renewed', 'Used - Like New', 'Used - Very Good', 'Used - Good'] },
-  ] },
-  { title: 'Price details', fields: [
-    { key: 'mrp', label: 'Maximum Retail Price (MRP)', type: 'money', required: true, unit: 'INR', min: 1 },
-    { key: 'sellingPrice', label: 'Your price', type: 'money', required: true, unit: 'INR', min: 1 },
-    { key: 'minOrderQty', label: 'Minimum Order Quantity', type: 'select', options: MINOQ, help: 'Only if your category supports it' },
-  ] },
-  { title: 'Inventory details', fields: [
-    { key: 'fulfilmentChannel', label: 'Fulfilment channel', type: 'select', required: true, options: ['Easy Ship (Amazon delivers)', 'Self Ship', 'Fulfilled by Amazon (FBA)', 'Seller Flex'] },
-    { key: 'stock', label: 'Quantity', type: 'number', required: true, min: 0, max: 1_000_000 },
-    { key: 'handlingTimeDays', label: 'Handling time', type: 'number', unit: 'days', min: 0, max: 30 },
-  ] },
-  packageDetails,
-  { title: 'Tax details', fields: [
-    { key: 'hsn', label: 'HSN', type: 'text', required: true, placeholder: '4–8 digit HSN code' },
-    { key: 'taxCode', label: 'GST rate', type: 'select', required: true, options: GST },
-  ] },
-  manufacturing,
-];
+const UNITS = {
+  temp: ['Degrees Celsius', 'Degrees Fahrenheit'],
+  time: ['Seconds', 'Minutes', 'Hours', 'Days'],
+  strength: ['MPa', 'N/mm²', 'PSI', 'kg/cm²'],
+  volume: ['Millilitres', 'Litres', 'Cubic Centimetres', 'Fluid Ounces'],
+};
+const AMAZON_FULFILMENT = ['Fulfilled by Amazon (FBA)', 'Merchant Fulfilled (Self Ship / Easy Ship)'];
+const amazonFulfilment: Field = { key: 'fulfilmentChannel', label: 'Fulfillment Channel', type: 'select', required: true, options: AMAZON_FULFILMENT, help: 'FBA: Amazon stores, ships and handles customer service. Merchant Fulfilled: you ship yourself, or you pack and Amazon picks up (Easy Ship)' };
+const amazonPrice: Field = { key: 'sellingPrice', label: 'Your Price', type: 'money', required: true, unit: 'INR', min: 1, help: 'Base price the buyer pays — not your bank settlement. Amazon fees, shipping and tax are deducted from it; ask your manager for your exact settlement' };
+const amazonMrp: Field = { key: 'mrp', label: 'Maximum Retail Price', type: 'money', required: true, unit: 'INR', min: 1, help: 'The MRP printed on the pack (Legal Metrology Act). The most you can charge a customer' };
+const amazonSku: Field = { key: 'sellerSku', label: 'SKU', type: 'text', maxLength: 40, autoSku: true, placeholder: 'Example: ABC123', help: 'Optional — leave blank and SOLLUNA creates one for you' };
+const amazonHsn: Field = { key: 'hsn', label: 'External Product Information (HSN)', type: 'text', required: true, placeholder: 'Example: 610510, 61051010', help: '6 to 8-digit HSN for the India marketplace' };
+const num = (key: string, label: string, extra: Partial<Field> = {}): Field => ({ key, label, type: 'number', min: 0, max: 1e10, ...extra });
+const unitOf = (key: string, label: string, options: string[]): Field => ({ key, label, type: 'select', options });
 
-const productInfo = (mp: Marketplace): Section => ({
-  title: 'Product information',
-  fields: [
-    { key: 'referenceLink', label: 'Same product on another site (link)', type: 'url', maxLength: 500, placeholder: mp === 'AMAZON' ? 'Flipkart / brand website link' : 'Amazon / brand website link', help: 'Optional — we fill the product details from it' },
-    { key: 'productTitle', label: 'Product title', type: 'text', required: true, maxLength: 200 },
-    { key: 'brand', label: 'Brand', type: 'text', required: true, maxLength: 80 },
-    { key: 'category', label: mp === 'FLIPKART' ? 'Vertical / category' : 'Product type / category', type: 'text', required: true, maxLength: 120 },
-    { key: 'productIdType', label: 'Product ID type', type: 'select', options: ['EAN', 'UPC', 'GTIN', 'ISBN', 'No barcode (brand registered)'] },
-    { key: 'productId', label: 'Product ID (barcode number)', type: 'text', maxLength: 20 },
-    { key: 'keyFeatures', label: mp === 'FLIPKART' ? 'Key features' : 'Bullet points', type: 'textarea', required: true, maxLength: 2000, placeholder: 'One per line' },
-    { key: 'description', label: 'Description', type: 'textarea', required: true, maxLength: 4000 },
-    { key: 'variants', label: 'Variants (size / colour / pack)', type: 'textarea', maxLength: 1000, placeholder: 'e.g. 500 ml, 1 L; pack of 1, pack of 2' },
-    { key: 'imageLinks', label: 'Image links', type: 'textarea', required: true, maxLength: 2000, placeholder: 'Google Drive or Dropbox links, one per line', help: 'White-background main image, at least 1000 px' },
-  ],
-});
+/** Amazon new listing — owner's field list (7 Nov 2026), Seller Central order. Attributes follow the owner's example product type (bonding adhesives). */
+const amazonNewListing: Section[] = [
+  { title: 'Product details', fields: [
+    { key: 'productType', label: 'Product Type', type: 'text', required: true, maxLength: 120, placeholder: 'e.g. Bonding Adhesives', suggestions: ['Bonding Adhesives', 'Sealants', 'Tapes', 'Cleaning Agents', 'Home Fragrance', 'Kitchen Storage'], help: 'Select the product type that best suits the item' },
+    { key: 'browseNode', label: 'Recommended Browse Node', type: 'text', maxLength: 20, placeholder: 'e.g. 7124107031', help: 'Section of Amazon where the product appears. Leave blank and your manager picks it' },
+    { key: 'hasVariations', label: 'Variations', type: 'checks', options: ['This product has variations'], help: 'Same product in different size, colour or style — your manager will ask for the variation details' },
+    { key: 'itemHighlight', label: 'Item Highlight', type: 'text', maxLength: 100, placeholder: 'Example: Breathable material', help: 'A feature phrase, not a full sentence. Don’t repeat the item name' },
+    { key: 'brand', label: 'Brand Name', type: 'text', required: true, maxLength: 80, placeholder: 'Example: Sony' },
+    { key: 'productIdType', label: 'External Product ID type', type: 'select', options: ['EAN', 'UPC', 'GTIN', 'ISBN', 'GTIN exemption'] },
+    { key: 'productId', label: 'External Product ID', type: 'text', maxLength: 20, help: 'Barcode number of the product' },
+  ] },
+  { title: 'Images', fields: [
+    { key: 'images', label: 'Product images', type: 'images', required: true, maxItems: 9, help: 'Up to 9 images (JPG, PNG or WEBP). First image = main image: pure white background, product fills 85% of the frame, at least 1000 px' },
+  ] },
+  { title: 'Description', fields: [
+    { key: 'isCustomisable', label: 'Is Customisable?', type: 'select', options: ['Yes', 'No'] },
+    { key: 'modelNumber', label: 'Model Number', type: 'text', maxLength: 80, placeholder: 'Example: RXZER23' },
+    many('specialFeatures', 'Special Features', { placeholder: 'Example: Textured, Beaded-Cuff' }),
+    many('material', 'Material', { placeholder: 'Example: Plastic' }),
+    num('itemPackageQuantity', 'Item Package Quantity', { min: 1, placeholder: '1', help: '5 boxes of paperclips sold as one item = 5' }),
+    { key: 'waterResistanceLevel', label: 'Water Resistance Level', type: 'text', maxLength: 60, suggestions: ['Not Water Resistant', 'Water Resistant', 'Waterproof'] },
+    { key: 'color', label: 'Color', type: 'text', maxLength: 60, placeholder: 'Example: Transparent' },
+    num('numberOfPieces', 'Number of Pieces', { min: 1, placeholder: 'Example: 40' }),
+    { key: 'mixingRatio', label: 'Mixing Ratio', type: 'text', maxLength: 20, placeholder: 'Example: 2:1', help: 'For multi-part products, e.g. two-part epoxy' },
+    num('tensileStrength', 'Tensile Strength', { placeholder: 'Example: 300' }),
+    unitOf('tensileStrengthUnit', 'Tensile Strength Unit', UNITS.strength),
+    num('lowerTempRating', 'Lower Temperature Rating', { min: -1000, placeholder: 'Example: 70.0' }),
+    unitOf('lowerTempRatingUnit', 'Lower Temperature Rating Unit', UNITS.temp),
+    many('itemForm', 'Item Form', { placeholder: 'Example: Stick' }),
+    num('unitCount', 'Unit Count', { placeholder: 'Example: 72.0', help: '12 bottles of 6 fl oz = 72; a single 2 litre bottle = 2; pack of 12 pens = 12' }),
+    { key: 'unitCountType', label: 'Unit Count Type', type: 'text', maxLength: 30, suggestions: ['count', 'millilitre', 'litre', 'gram', 'kilogram', 'centimetre'], help: 'Unit on the pack; for individual units enter “count”' },
+    many('specificUses', 'Specific Uses for Product', { placeholder: 'Example: wood' }),
+    amazonHsn,
+    num('fullCureTime', 'Full Cure Time', { placeholder: 'Example: 48' }),
+    unitOf('fullCureTimeUnit', 'Full Cure Time Unit', UNITS.time),
+    num('specificGravity', 'Specific Gravity', { placeholder: 'Example: 1.5' }),
+    { key: 'specificGravityUnit', label: 'Specific Gravity Unit', type: 'text', maxLength: 30, suggestions: ['g/cm³', 'kg/m³'] },
+    num('numberOfPacks', 'Number of Packs', { min: 1, placeholder: 'Example: 2', help: 'Inner packs in one item; single pack = 1' }),
+    { key: 'viscosityLevel', label: 'Viscosity Level', type: 'text', maxLength: 40, suggestions: ['Low', 'Medium', 'Medium to High', 'High'] },
+    num('workingTime', 'Working Time', { placeholder: 'Example: 15.0' }),
+    unitOf('workingTimeUnit', 'Working Time Unit', UNITS.time),
+    num('lapShearStrength', 'Lap Shear Strength', { placeholder: 'Example: 20' }),
+    unitOf('lapShearStrengthUnit', 'Lap Shear Strength Unit', UNITS.strength),
+  ] },
+  { title: 'Offer', fields: [
+    amazonSku,
+    amazonFulfilment,
+    { key: 'stock', label: 'Quantity', type: 'number', required: true, min: 0, max: 1_000_000, help: 'Stock you can sell now (whole number)' },
+    amazonPrice,
+    amazonMrp,
+    { key: 'offeringReleaseDate', label: 'Offering Release Date', type: 'date', help: 'Date your price starts' },
+    num('itemVolume', 'Item Volume', { placeholder: 'Example: 5.0' }),
+    unitOf('itemVolumeUnit', 'Item Volume Unit', UNITS.volume),
+  ] },
+  { title: 'Safety & Compliance', fields: [
+    { key: 'countryOfOrigin', label: 'Country/Region of Origin', type: 'select', required: true, options: COUNTRIES },
+  ] },
+];
 
 export const FORMS: FormDef[] = [
   {
@@ -210,18 +245,18 @@ export const FORMS: FormDef[] = [
       ] },
       { title: 'Add price and inventory', fields: [
         { key: 'audience', label: 'Audience', type: 'checks', options: ['Sell on Amazon', 'Amazon Business (B2B)'], blankAs: 'Sell on Amazon', help: 'Enable one or both. Nothing ticked = “Sell on Amazon” (default)' },
-        { key: 'sellerSku', label: 'SKU', type: 'text', maxLength: 40, autoSku: true, placeholder: 'Example: ABC123', help: 'Optional — leave blank and SOLLUNA creates one for you' },
-        { key: 'hsn', label: 'External Product Information (HSN)', type: 'text', required: true, placeholder: 'Example: 610510, 61051010', help: '6 to 8-digit HSN for the India marketplace' },
-        { key: 'fulfilmentChannel', label: 'Fulfillment Channel', type: 'select', required: true, options: ['Fulfilled by Amazon (FBA)', 'Merchant Fulfilled (Self Ship / Easy Ship)'], help: 'FBA: Amazon stores, ships and handles customer service. Merchant Fulfilled: you ship yourself, or you pack and Amazon picks up (Easy Ship)' },
-        { key: 'sellingPrice', label: 'Your Price', type: 'money', required: true, unit: 'INR', min: 1, help: 'Base price the buyer pays — not your bank settlement. Amazon fees, shipping and tax are deducted from it; ask your manager for your exact settlement' },
-        { key: 'mrp', label: 'Maximum Retail Price', type: 'money', required: true, unit: 'INR', min: 1, help: 'The MRP printed on the pack (Legal Metrology Act). The most you can charge a customer' },
+        amazonSku,
+        amazonHsn,
+        amazonFulfilment,
+        amazonPrice,
+        amazonMrp,
       ] },
     ],
   },
   {
-    marketplace: 'AMAZON', kind: 'NEW_LISTING', draft: true, title: 'Amazon — new listing',
-    intro: 'The product is not on Amazon yet. We create the detail page and your offer.',
-    sections: [productInfo('AMAZON'), ...amazonCommercial],
+    marketplace: 'AMAZON', kind: 'NEW_LISTING', draft: false, fixed: { condition: 'New', externalProductInfoEntity: 'HSN' }, title: 'Amazon — new listing',
+    intro: 'The product is not on Amazon yet. We create the detail page and your offer. Condition: New.',
+    sections: amazonNewListing,
   },
 ];
 
@@ -297,8 +332,8 @@ export function validateForm(def: FormDef, input: Record<string, unknown>, { par
   }
   if (typeof data.mrp === 'number' && typeof data.sellingPrice === 'number' && data.sellingPrice > data.mrp) errors.sellingPrice = 'Selling price cannot be more than MRP';
   if (typeof data.hsn === 'string') {
-    const amazonMapping = def.marketplace === 'AMAZON' && def.kind === 'MAPPING';
-    if (!(amazonMapping ? /^\d{6,8}$/ : /^\d{4,8}$/).test(data.hsn)) errors.hsn = `HSN must be ${amazonMapping ? 6 : 4} to 8 digits`;
+    const amazon = def.marketplace === 'AMAZON';
+    if (!(amazon ? /^\d{6,8}$/ : /^\d{4,8}$/).test(data.hsn)) errors.hsn = `HSN must be ${amazon ? 6 : 4} to 8 digits`;
   }
   if (typeof data.productLink === 'string') {
     const ref = productRef(def.marketplace, data.productLink);
