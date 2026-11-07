@@ -223,6 +223,9 @@ test('register → billing details → GST total → Razorpay checkout → verif
   assert.equal((await page.getByTestId('total-GROWTH').innerText()).replace(/\s+/g, ' '), 'Payable ₹5,898.82');
   assert.ok(await page.getByText('IGST 18%').isVisible(), 'GST shown separately');
 
+  assert.ok(await page.locator('button:has-text("Pay & activate Growth")').isDisabled(), 'terms must be accepted first');
+  assert.ok(await page.getByText('including section 6', { exact: false }).isVisible());
+  await page.check('#accept-terms');
   await page.click('button:has-text("Pay & activate Growth")');
   await page.getByText('Payment verified. Your Growth plan is active.').waitFor();
   const opts = await page.evaluate(() => ({ amount: window.__rzpOptions.amount, key: window.__rzpOptions.key, currency: window.__rzpOptions.currency }));
@@ -519,6 +522,8 @@ test('client: onboarding checklist, marketplace details (no passwords), product 
   // Seller account details live in the account menu.
   await accountMenu(c, 'Seller accounts');
   await c.getByText('We never need your password or OTP.').waitFor();
+  const opsUser = (await c.getByTestId('ops-user').innerText()).replace(/\s+/g, ' ');
+  for (const v of ['Role', 'Admin', 'Name', 'SOLLUNA Operations', 'Email Id', 'ops@solluna.co.in', 'Phone number']) assert.ok(opsUser.includes(v), `ops user shows ${v}: ${opsUser}`);
   await c.fill('#AMAZON-store', 'Riya Lifestyle'); await c.fill('#AMAZON-sid', 'A2RIYA12345');
   await c.locator('form:has(#AMAZON-store) button:has-text("Save")').click();
   await c.getByText('Amazon details saved', { exact: false }).waitFor();

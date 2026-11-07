@@ -125,7 +125,7 @@ const sign = (secret, data) => createHmac('sha256', secret).update(data).digest(
 const PROFILE = { address: '12 MG Road, Andheri East', city: 'Mumbai', pincode: '400069', stateCode: '27' };
 async function pay(token, planCode, profile = PROFILE) {
   if (profile) ok(await call('PATCH', '/billing/profile', { token, body: profile }));
-  const co = ok(await call('POST', '/billing/checkout', { token, body: { planCode } }));
+  const co = ok(await call('POST', '/billing/checkout', { token, body: { planCode, acceptTerms: true } }));
   const paymentId = `pay_${co.orderId}`;
   ok(await call('POST', '/billing/verify', { token, body: { razorpay_order_id: co.orderId, razorpay_payment_id: paymentId, razorpay_signature: sign(KEY_SECRET, `${co.orderId}|${paymentId}`) } }));
   return co;
@@ -209,13 +209,17 @@ test('orchestrator: request without a plan is blocked as out of plan, with a cli
 });
 
 test('billing: invalid signature never activates; payment in flight = plan verification', async () => {
-  const noProfile = await call('POST', '/billing/checkout', { token: S.a, body: { planCode: 'RESELLER' } });
+  const noTerms = await call('POST', '/billing/checkout', { token: S.a, body: { planCode: 'RESELLER' } });
+  assert.equal(noTerms.status, 400); assert.match(noTerms.body.message, /Terms & Conditions/);
+  const noProfile = await call('POST', '/billing/checkout', { token: S.a, body: { planCode: 'RESELLER', acceptTerms: true } });
   assert.equal(noProfile.status, 400, 'billing address required for the GST invoice');
   assert.match(noProfile.body.message, /billing address/);
   assert.equal((await call('PATCH', '/billing/profile', { token: S.a, body: { gstin: '24ABCDE1234F1Z6', address: '4 CG Road', city: 'Ahmedabad', pincode: '12345' } })).status, 400, 'bad PIN');
   const prof = ok(await call('PATCH', '/billing/profile', { token: S.a, body: { gstin: '24ABCDE1234F1Z6', stateCode: '27', address: '4 CG Road, Navrangpura', city: 'Ahmedabad', pincode: '380009' } }));
   assert.equal(prof.stateCode, '24', 'GSTIN state wins over a conflicting selected state');
-  const co = ok(await call('POST', '/billing/checkout', { token: S.a, body: { planCode: 'RESELLER' } }));
+  const co = ok(await call('POST', '/billing/checkout', { token: S.a, body: { planCode: 'RESELLER', acceptTerms: true } }));
+  const termsSub = await db.subscription.findFirst({ where: { termsVersion: '2026-11-07', status: 'PENDING_PAYMENT' } });
+  assert.ok(termsSub?.termsAcceptedAt, 'terms version + time recorded on the subscription');
   // GST-exclusive: ₹1,999 + 18% GST, intra-state (Gujarat → Gujarat) = CGST 9% + SGST 9%
   assert.equal(co.amount, 235882);
   assert.deepEqual([co.tax.taxablePaise, co.tax.cgstPaise, co.tax.sgstPaise, co.tax.igstPaise], [199900, 17991, 17991, 0]);
@@ -283,7 +287,7 @@ test('billing: verified checkout activates once, issues GST invoice, resumes wai
 test('billing: failed payment keeps the subscription inactive and notifies the client', async () => {
   S.b = await registerCustomer('Bharat');
   ok(await call('PATCH', '/billing/profile', { token: S.b, body: PROFILE }));
-  const co = ok(await call('POST', '/billing/checkout', { token: S.b, body: { planCode: 'GROWTH' } }));
+  const co = ok(await call('POST', '/billing/checkout', { token: S.b, body: { planCode: 'GROWTH', acceptTerms: true } }));
   assert.equal(co.amount, 589882); // ₹4,999 + 18% IGST (Maharashtra buyer, Gujarat supplier)
   const evt = JSON.stringify({ event: 'payment.failed', payload: { payment: { entity: { id: 'pay_fail', order_id: co.orderId, amount: 589882, status: 'failed', error_description: 'Card declined by bank' } } } });
   ok(await call('POST', '/billing/webhook/razorpay', { raw: evt, headers: { 'content-type': 'application/json', 'x-razorpay-signature': sign(WEBHOOK_SECRET, evt) } }));

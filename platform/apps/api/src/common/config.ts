@@ -5,7 +5,17 @@ function req(name: string): string {
 }
 const opt = (name: string) => process.env[name] || undefined;
 
+/** Current Terms & Conditions version; clients accept it at every plan purchase. Bump when /terms changes materially. */
+export const TERMS_VERSION = '2026-11-07';
+
 export const config = {
+  /** The SOLLUNA user clients add in Seller Central / Seller Hub ("Add a new user"). One ID for all clients. */
+  opsUser: {
+    role: process.env.OPS_USER_ROLE ?? 'Admin',
+    name: process.env.OPS_USER_NAME ?? 'SOLLUNA Operations',
+    email: process.env.OPS_USER_EMAIL ?? 'ops@solluna.co.in',
+    phone: opt('OPS_USER_PHONE'),
+  },
   port: Number(process.env.PORT ?? 4000),
   jwtSecret: req('JWT_SECRET'),
   jwtTtl: process.env.JWT_TTL ?? '12h',

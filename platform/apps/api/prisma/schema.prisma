@@ -293,6 +293,8 @@ model Subscription {
   currentPeriodEnd   DateTime?
   graceUntil         DateTime?
   cancelAtPeriodEnd  Boolean            @default(false)
+  termsVersion       String? // Terms & Conditions version the client accepted for this purchase
+  termsAcceptedAt    DateTime?
   createdAt          DateTime           @default(now())
   updatedAt          DateTime           @updatedAt
 

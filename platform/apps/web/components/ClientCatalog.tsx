@@ -27,9 +27,27 @@ export function ClientCatalog() {
 
 export function MarketplaceAccounts({ onFlash }: { onFlash: (m: FlashMsg) => void }) {
   const rows = useApi<MarketplaceRow[]>('/marketplaces');
+  const ops = useApi<{ role: string; name: string; email: string; phone?: string }>('/marketplaces/access-user');
   return (
     <div className="space-y-4">
-      <p className="rounded-xl bg-moon/5 px-4 py-3 text-sm text-ink-2"><strong>We never need your password or OTP.</strong> Add your store details here; your manager will send a user-permission invite / authorised access request, and the status turns <em>Connected</em> only after SOLLUNA confirms access in Seller Central / Seller Hub.</p>
+      <section className="card space-y-3 p-6" aria-label="Add SOLLUNA as a user">
+        <h2 className="font-display text-xl">Give SOLLUNA access — “Add a new user”</h2>
+        <p className="text-sm text-ink-2"><strong>We never need your password or OTP.</strong> Add SOLLUNA as a user in your seller account with the details below. SOLLUNA signs in with its own login; you can remove this user at any time.</p>
+        <ol className="list-decimal space-y-1 pl-5 text-sm text-ink-2">
+          <li><strong>Flipkart Seller Hub:</strong> Profile → Manage Users → Add a new user.</li>
+          <li><strong>Amazon Seller Central:</strong> Settings → User Permissions → Add new user.</li>
+          <li>Fill in exactly these details and send the invite. Then add your store details below.</li>
+        </ol>
+        {ops.data && (
+          <dl className="grid gap-2 rounded-xl bg-ivory p-4 text-sm sm:grid-cols-2" data-testid="ops-user">
+            {([['Role', ops.data.role], ['Name', ops.data.name], ['Email Id', ops.data.email], ['Phone number', ops.data.phone ?? 'Your manager will share it in chat']] as const).map(([k, v]) => (
+              <div key={k} className="flex items-center justify-between gap-2"><div><dt className="text-xs text-ink-3">{k}</dt><dd className="font-medium">{v}</dd></div>
+                {(k !== 'Phone number' || ops.data?.phone) && <button type="button" className="btn-ghost py-1 text-xs" onClick={() => void navigator.clipboard?.writeText(v)} aria-label={`Copy ${k}`}>Copy</button>}</div>
+            ))}
+          </dl>
+        )}
+        <p className="text-xs text-ink-3">SOLLUNA never changes your bank details, payment settings or users. Price, ads budget, offers and major listing changes happen only after your approval. Status turns <em>Connected</em> only after we confirm access in Seller Central / Seller Hub.</p>
+      </section>
       <div className="grid gap-4 md:grid-cols-2">
         {rows.data?.map((m) => <MarketplaceCard key={m.marketplace} m={m} onSaved={(msg) => { onFlash(msg); rows.reload(); }} />)}
       </div>

@@ -2,6 +2,7 @@ import { Body, Controller, Get, Param, Patch, Post, Put } from '@nestjs/common';
 import { CurrentUser, CustomerOnly, StaffOnly } from '../auth/decorators';
 import type { AuthUser } from '../auth/auth.types';
 import { CatalogService } from './catalog.service';
+import { config } from '../common/config';
 
 @Controller()
 @CustomerOnly()
@@ -9,6 +10,8 @@ export class CatalogController {
   constructor(private readonly catalog: CatalogService) {}
 
   @Get('onboarding') onboarding(@CurrentUser() u: AuthUser) { return this.catalog.onboarding(u); }
+  /** The SOLLUNA user the client adds in Seller Central / Seller Hub. */
+  @Get('marketplaces/access-user') accessUser() { return config.opsUser; }
   @Get('marketplaces') marketplaces(@CurrentUser() u: AuthUser) { return this.catalog.marketplaces(u); }
   @Put('marketplaces/:mp') saveMarketplace(@CurrentUser() u: AuthUser, @Param('mp') mp: string, @Body() body: unknown) { return this.catalog.saveMarketplace(u, mp, body); }
   @Get('products') products(@CurrentUser() u: AuthUser) { return this.catalog.products(u); }

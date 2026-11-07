@@ -68,7 +68,7 @@ await check('Subscriptions', 'Demo plans active with no payments or invoices', a
   return 'Growth / Reseller / Premium, 0 payments';
 });
 await check('Subscriptions', 'Checkout refused while Razorpay is not configured', async () => {
-  const r = await req('POST', '/billing/checkout', T.amit, { planCode: 'GROWTH' });
+  const r = await req('POST', '/billing/checkout', T.amit, { planCode: 'GROWTH', acceptTerms: true });
   assert(r.status === 503, `checkout returned ${r.status}`);
   const b = (await req('GET', '/billing', T.amit)).json;
   assert(b.payments.length === 0 && !b.subscriptions.some((s) => s.status === 'PENDING_PAYMENT'), 'refused checkout left payment/subscription rows');

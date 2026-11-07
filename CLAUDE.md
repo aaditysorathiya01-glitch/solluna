@@ -33,7 +33,10 @@ Run `cd platform && npm run verify:skills` after changing any of them; it fails 
 3. **Approvals** (`Approval` model) are action-specific and required before: ad spend or budget changes, purchases, marketplace fees, price or offer changes, material listing changes, consequential order actions, third-party data sharing, and out-of-plan work.
 4. **Status is evidence-based:** never mark ACTIVE, COMPLETED or OPTED_OUT without marketplace confirmation.
 5. **Payments:** activate only after Razorpay server signature check + webhook. Prices are **GST-exclusive** (18% added); every verified payment issues a GST tax invoice (`apps/api/src/billing/gst.ts`).
-6. **Credentials:** OAuth tokens only, encrypted. Never passwords or OTPs in chat. No production reliance on scraping.
+6. **Credentials & seller-portal access** (rule changed by the owner, 7 Nov 2026):
+   - Never ask clients for their marketplace passwords or OTPs. Clients only "Add a new user": SOLLUNA's own ops user (`OPS_USER_*`, default ops@solluna.co.in), whose OTPs come to SOLLUNA.
+   - Interim, until official APIs are approved: SOLLUNA may run browser automation in Seller Central / Seller Hub with that ops login, only for clients who accepted Terms §6 (recorded per purchase as `Subscription.termsVersion`). Safeguards are mandatory: no bank, payment, settlement or user-settings pages; approvals before consequential actions; daily action limits; every action logged. Plan: `docs/plans/SELLER_PORTAL_AUTOMATION.md`.
+   - Official integrations (SP-API / Ads API / Flipkart Seller API) use OAuth tokens, encrypted, and replace the portal automation as soon as approved.
 7. **P&L:** never show verified profit with missing costs. Mark it ESTIMATED or UNAVAILABLE.
 8. **Labels:** never alter official marketplace labels. Thank-you notes are separate inserts.
 9. **Naming:** customer-facing support is "Manager Chat Support".

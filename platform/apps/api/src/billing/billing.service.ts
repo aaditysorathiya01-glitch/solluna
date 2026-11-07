@@ -4,7 +4,7 @@ import { z } from 'zod';
 import { PrismaService } from '../common/prisma.service';
 import { AuditService } from '../common/audit.service';
 import { parse } from '../common/zod';
-import { config } from '../common/config';
+import { config, TERMS_VERSION } from '../common/config';
 import { DispatcherService } from '../connectors/dispatcher.service';
 import { RazorpayClient } from './razorpay.client';
 import type { AuthUser } from '../auth/auth.types';
@@ -30,6 +30,9 @@ const ProfileSchema = z.object({
  */
 export interface ActivationInfo { planCode: string; planName: string; kind: 'new' | 'change' | 'renewal'; previousPlanCode: string | null; preview?: boolean }
 
+const PurchaseSchema = z.object({ planCode: z.enum(['RESELLER', 'GROWTH', 'PREMIUM']), acceptTerms: z.boolean().optional() });
+const accepted = () => ({ termsVersion: TERMS_VERSION, termsAcceptedAt: new Date() });
+
 @Injectable()
 export class BillingService {
   private readonly log = new Logger('Billing');
@@ -47,7 +50,8 @@ export class BillingService {
   ) {}
 
   async checkout(user: AuthUser, input: unknown) {
-    const { planCode } = parse(z.object({ planCode: z.enum(['RESELLER', 'GROWTH', 'PREMIUM']) }), input);
+    const { planCode, acceptTerms } = parse(PurchaseSchema, input);
+    if (acceptTerms !== true) throw new BadRequestException('Please accept the Terms & Conditions to continue');
     const orgId = user.organizationId!;
     const plan = await this.db.plan.findUnique({ where: { code: planCode } });
     if (!plan || !plan.isActive) throw new NotFoundException('Plan not available');
@@ -61,6 +65,8 @@ export class BillingService {
       ? current
       : (await this.db.subscription.findFirst({ where: { organizationId: orgId, planId: plan.id, status: 'PENDING_PAYMENT' } }))
         ?? (await this.db.subscription.create({ data: { organizationId: orgId, planId: plan.id, status: 'PENDING_PAYMENT' } }));
+    await this.db.subscription.update({ where: { id: subscription.id }, data: accepted() });
+    await this.audit.log({ actor: user, action: 'terms.accepted', entity: 'Subscription', entityId: subscription.id, after: { termsVersion: TERMS_VERSION, plan: plan.code } });
 
     // Prices are GST-exclusive: plan price = taxable value, GST added per place of supply.
     const supplierState = this.supplierState();
@@ -297,7 +303,8 @@ export class BillingService {
 
   async previewActivate(user: AuthUser, input: unknown) {
     if (!this.previewActivationAllowed) throw new NotFoundException();
-    const { planCode } = parse(z.object({ planCode: z.enum(['RESELLER', 'GROWTH', 'PREMIUM']) }), input);
+    const { planCode, acceptTerms } = parse(PurchaseSchema, input);
+    if (acceptTerms !== true) throw new BadRequestException('Please accept the Terms & Conditions to continue');
     const orgId = user.organizationId!;
     const plan = await this.db.plan.findUnique({ where: { code: planCode } });
     if (!plan || !plan.isActive) throw new NotFoundException('Plan not available');
@@ -307,8 +314,8 @@ export class BillingService {
     const end = addMonths(start, 1);
     const sub = await this.db.$transaction(async (tx) => {
       await tx.subscription.updateMany({ where: { organizationId: orgId, status: { in: ['ACTIVE', 'GRACE_PERIOD', 'PAST_DUE', 'PENDING_PAYMENT'] } }, data: { status: 'CANCELLED' } });
-      const created = await tx.subscription.create({ data: { organizationId: orgId, planId: plan.id, status: 'ACTIVE', currentPeriodStart: start, currentPeriodEnd: end } });
-      await this.audit.log({ actor: user, action: 'preview.demo_subscription', entity: 'Subscription', entityId: created.id, after: { plan: plan.code, note: 'Preview test activation — no payment, no invoice' } }, tx);
+      const created = await tx.subscription.create({ data: { organizationId: orgId, planId: plan.id, status: 'ACTIVE', currentPeriodStart: start, currentPeriodEnd: end, ...accepted() } });
+      await this.audit.log({ actor: user, action: 'preview.demo_subscription', entity: 'Subscription', entityId: created.id, after: { plan: plan.code, termsVersion: TERMS_VERSION, note: 'Preview test activation — no payment, no invoice' } }, tx);
       return created;
     });
     await this.dispatch.emit({ type: 'subscription.activated', organizationId: orgId, title: `${plan.name} plan active`, body: `Test activation in the preview environment — no payment was taken. Active until ${end.toDateString()}.` });

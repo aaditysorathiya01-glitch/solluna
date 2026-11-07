@@ -57,4 +57,5 @@ Owner (7 Nov 2026): the New listing form is fine for now; work out later how AI 
 Current placeholder: item line, SKU sorting and picklist page. Owner has a different idea for specialised — to be shared. Manual crop is frozen (owner-approved 6 Nov 2026).
 
 ## 4. Marketplace access
-Decided: managed user access now + API applications in parallel. Pending: Seller Central "User Permissions" screenshot for the onboarding guide; Amazon SP-API (public developer), Amazon Ads API and Flipkart API applications (drafts to prepare).
+Decided 7 Nov 2026 (owner): option B — clients "Add a new user" (one SOLLUNA ops ID for all); interim seller-portal automation with that login until APIs are approved; clients accept Terms §6 at purchase. Plan and pending inputs: `docs/plans/SELLER_PORTAL_AUTOMATION.md`. API applications (Amazon SP-API, Ads API, Flipkart Seller API) still to be prepared and submitted.
+Open: whether the client-facing manager is labelled as AI in chat (owner to decide).

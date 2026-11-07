@@ -335,7 +335,7 @@ const PLAN_PITCH: Record<string, string> = {
 async function startCheckout(code: string, onDone: (m: { kind: 'ok' | 'err'; text: string }, activated?: boolean) => void, setBusy: (b: string | null) => void) {
   setBusy(code);
   try {
-    const order = await api<{ orderId: string; amount: number; currency: string; keyId: string; plan: { name: string } }>('/billing/checkout', { method: 'POST', body: { planCode: code } });
+    const order = await api<{ orderId: string; amount: number; currency: string; keyId: string; plan: { name: string } }>('/billing/checkout', { method: 'POST', body: { planCode: code, acceptTerms: true } });
     await loadRazorpay();
     const rzp = new window.Razorpay!({
       key: order.keyId, order_id: order.orderId, amount: order.amount, currency: order.currency,
@@ -360,13 +360,14 @@ function PlanPicker({ firstName, billing, plans, preselect, lapsed, verifying, o
 }) {
   const [selected, setSelected] = useState<string | null>(plans.some((p) => p.code === preselect) ? preselect : null);
   const [busy, setBusy] = useState<string | null>(null);
+  const [agreed, setAgreed] = useState(false);
   const plan = plans.find((p) => p.code === selected) ?? null;
   useEffect(() => { if (selected) document.getElementById('activate')?.scrollIntoView({ behavior: 'smooth', block: 'start' }); }, [selected]);
 
   async function previewActivate(code: string) {
     setBusy(code);
     try {
-      const r = await api<{ plan: { name: string } }>('/billing/preview-activate', { method: 'POST', body: { planCode: code } });
+      const r = await api<{ plan: { name: string } }>('/billing/preview-activate', { method: 'POST', body: { planCode: code, acceptTerms: true } });
       onDone({ kind: 'ok', text: `${r.plan.name} plan activated for testing (no payment). Your dedicated manager will be assigned within 1 hour.` }, true);
     } catch (e) { onDone({ kind: 'err', text: (e as Error).message }); }
     setBusy(null);
@@ -435,13 +436,17 @@ function PlanPicker({ firstName, billing, plans, preselect, lapsed, verifying, o
             {!billing.paymentsConfigured && (
               <p className="mt-4 rounded-xl bg-amber-50 px-4 py-3 text-sm text-amber-900">Online payments are not configured yet. To start now, write to <a className="underline" href={`mailto:${CONTACT.email}`}>{CONTACT.email}</a> and we will activate your plan.</p>
             )}
-            <button className="btn-primary mt-4 w-full" disabled={!billing.paymentsConfigured || !billing.profileComplete || busy !== null} onClick={() => startCheckout(plan.code, onDone, setBusy)}>
+            <label className="mt-4 flex items-start gap-2 text-sm text-ink-2">
+              <input id="accept-terms" type="checkbox" className="mt-1" checked={agreed} onChange={(e) => setAgreed(e.target.checked)} />
+              <span>I agree to the <a className="underline" href="/terms" target="_blank" rel="noreferrer">Terms &amp; Conditions</a>, including section 6: I will add SOLLUNA as a user on my seller accounts and allow SOLLUNA&rsquo;s automated tools to work there for my plan.</span>
+            </label>
+            <button className="btn-primary mt-4 w-full" disabled={!agreed || !billing.paymentsConfigured || !billing.profileComplete || busy !== null} onClick={() => startCheckout(plan.code, onDone, setBusy)}>
               {busy === plan.code ? 'Opening checkout…' : `Pay & activate ${plan.name}`}
             </button>
             {billing.previewActivation && (
               <div className="mt-4 rounded-xl border border-dashed border-amber-400 p-4">
                 <p className="text-xs text-amber-900">Test environment only: activate this plan without payment to try the plan dashboard. No payment or invoice is created.</p>
-                <button className="btn-ghost mt-3 w-full" disabled={busy !== null} onClick={() => previewActivate(plan.code)}>{busy === plan.code ? 'Activating…' : `Activate ${plan.name} for testing (no payment)`}</button>
+                <button className="btn-ghost mt-3 w-full" disabled={!agreed || busy !== null} onClick={() => previewActivate(plan.code)}>{busy === plan.code ? 'Activating…' : `Activate ${plan.name} for testing (no payment)`}</button>
               </div>
             )}
           </div>
