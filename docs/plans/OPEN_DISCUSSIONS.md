@@ -41,8 +41,11 @@ Recommendation when revisited: A now, D once SP-API is approved, E only if insta
 Each must be tested live before use, with the form working manually if the API is down.
 
 ## 2. Remaining listing forms
-Done: Flipkart Mapping (6–7 Nov) and Flipkart New listing (7 Nov, 5-image upload). Amazon Mapping and Amazon New listing are still drafts (marked "Draft form"); owner to send their field lists.
+Done: Flipkart Mapping (6–7 Nov), Flipkart New listing (7 Nov, 5-image upload) and Amazon Mapping (7 Nov — condition always New; audience and pricing rule default when blank; HSN 6–8 digits). Amazon New listing is still a draft; owner to send its field list.
 Flipkart New listing open point: the product attributes (Model Name, Brand Fragrance, Quantity in L, Suitable For, Form Factor, Container Type, pH …) follow the owner's example vertical (cleaners). Other verticals have different attributes on Flipkart — decide whether to add per-vertical attribute sets. Dropdown values for those attributes are typing suggestions (any value accepted) until Flipkart's exact lists are shared. Schema: `platform/packages/catalog-forms/src/index.ts`.
+
+## 2a. Auto-fill the Flipkart New listing page with AI
+Owner (7 Nov 2026): the New listing form is fine for now; work out later how AI can fill it (vertical, attributes, key features, description, search keywords, HSN/tax from product images + a reference link). Same options and costs as section 1 (Claude / Gemini with search, SP-API not applicable to Flipkart). Until then the client fills it manually or from a template.
 
 ## 3. Label cropper — "Auto + specialised" (Premium)
 Current placeholder: item line, SKU sorting and picklist page. Owner has a different idea for specialised — to be shared. Manual crop is frozen (owner-approved 6 Nov 2026).

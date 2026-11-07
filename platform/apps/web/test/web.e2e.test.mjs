@@ -560,6 +560,11 @@ test('client: onboarding checklist, marketplace details (no passwords), product 
   await c.selectOption('#tpl-pick', { label: 'Jute runner — pack of 2' });
   assert.equal(await c.inputValue('#f-mrp'), '899'); assert.equal(await c.inputValue('#f-minOrderQty'), '2'); assert.equal(await c.inputValue('#f-manufacturerDetails'), 'Riya Lifestyle, Mumbai');
 
+  assert.equal(await c.getByText('Sellers who accepted Flipkart recommended price', { exact: false }).count(), 0, 'recommended-price note removed');
+  // Amazon mapping: only the owner's fields.
+  await c.getByRole('tab', { name: 'Amazon' }).click(); await c.getByRole('tab', { name: 'Mapping' }).click();
+  assert.deepEqual(await c.locator('fieldset label.label').allTextContents().then((l) => l.map((x) => x.replace(/\*$/, '').trim())), ['Amazon product link or ASIN', 'Audience', 'SKU', 'External Product Information (HSN)', 'Fulfillment Channel', 'Your Price', 'Maximum Retail Price', 'Pricing Rule']);
+  await c.getByRole('tab', { name: 'Flipkart' }).click();
   // Flipkart new listing: owner's field list, 5-image upload, multi-value fields.
   await c.getByRole('tab', { name: 'New listing' }).click();
   for (const label of ['Select The Vertical For Your Product', 'Brand', 'Product images', 'Seller SKU ID', 'Model Name', 'Brand Fragrance', 'Suitable For', 'Form Factor', 'Container Type', 'EAN/UPC', 'Fragrance For Refiner', 'Key Features', 'Usage Instructions', 'Video URL', 'Composition', 'Search Keywords', 'Certification', 'Used For', 'pH Value', 'Maximum Shelf Life', 'Manufacturing Process', 'Organic', 'Width', 'Depth', 'Other Dimensions', 'Items Included', 'Other Features']) assert.ok(await c.locator('label.label', { hasText: label }).count(), `field ${label}`);

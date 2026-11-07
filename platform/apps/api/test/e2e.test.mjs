@@ -1301,11 +1301,19 @@ test('listing & mapping forms: validation, mapping + new-listing workflow record
   assert.equal(fkReq.details.fields.images, `${img1},${img2}`); assert.equal(fkReq.details.fields.keyFeatures, 'Kills 99.9% germs\nStreak-free', 'list values split and de-duplicated');
   assert.equal(fkReq.details.fields.fulfilmentBy, 'Seller');
 
+  // Amazon mapping: owner's list only; condition always New, audience / pricing rule default, HSN 6–8 digits.
+  const azBad = await call('POST', '/catalog-forms', { token: c, body: { marketplace: 'AMAZON', kind: 'MAPPING', data: { productLink: 'https://www.amazon.in/dp/B07ABC1234', hsn: '6105', sellingPrice: 315, mrp: 399 } } });
+  assert.equal(azBad.status, 400); assert.ok(azBad.body.fieldErrors.hsn && azBad.body.fieldErrors.fulfilmentChannel && !azBad.body.fieldErrors.sellerSku, JSON.stringify(azBad.body.fieldErrors));
+  const az = ok(await call('POST', '/catalog-forms', { token: c, body: { marketplace: 'AMAZON', kind: 'MAPPING', data: { productLink: 'https://www.amazon.in/dp/B07ABC1234', hsn: '610510', fulfilmentChannel: 'Merchant Fulfilled (Self Ship / Easy Ship)', sellingPrice: 315, mrp: 399, condition: 'Used - Good', productName: 'x' } } }));
+  const azF = (await db.serviceRequest.findUnique({ where: { id: az.request.id } })).details.fields;
+  assert.equal(azF.condition, 'New', 'always New'); assert.equal(azF.audience, 'Sell on Amazon'); assert.equal(azF.pricingRule, 'No rule — keep my price'); assert.equal(azF.externalProductInfoEntity, 'HSN');
+  assert.equal(azF.productRef, 'B07ABC1234'); assert.equal(azF.productName, undefined); assert.match(azF.sellerSku, /^SOL-AZ-/);
+
   // Templates: partial values allowed, same name updates, scoped to the client.
   const t = ok(await call('POST', '/catalog-forms/templates', { token: c, body: { marketplace: 'FLIPKART', kind: 'MAPPING', name: 'Tile cleaner 1L', data: { minOrderQty: '2', stock: 10 } } }));
   const list = ok(await call('GET', '/catalog-forms', { token: c }));
   assert.equal(list.templates.length, 1); assert.deepEqual(list.templates[0].data, { minOrderQty: '2', stock: 10 });
-  assert.equal(list.submissions.length, 7);
+  assert.equal(list.submissions.length, 8);
   assert.equal((await call('POST', '/catalog-forms/templates', { token: c, body: { marketplace: 'FLIPKART', kind: 'MAPPING', name: 'Empty', data: {} } })).status, 400);
   const other = await registerCustomer('Gita'); await pay(other, 'GROWTH');
   assert.equal((await call('DELETE', `/catalog-forms/templates/${t.id}`, { token: other })).status, 404, 'tenant isolation');

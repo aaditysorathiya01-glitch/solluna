@@ -65,7 +65,6 @@ const flipkartCommercial: Section[] = [
   { title: 'Status Details', fields: [{ key: 'listingStatus', label: 'Listing Status', type: 'select', required: true, options: ['Active', 'Inactive'] }] },
   {
     title: 'Price details',
-    note: 'Recommended price: your manager checks Flipkart’s recommended price and your earnings (fees, shipping) before the listing goes live. Sellers who accepted Flipkart recommended price have realised 20% increase in units.',
     fields: [
       { key: 'mrp', label: 'MRP', type: 'money', required: true, unit: 'INR', min: 1 },
       { key: 'sellingPrice', label: 'Your selling price', type: 'money', required: true, unit: 'INR', min: 1, help: 'This is the price the customer pays — not your bank settlement. Delivery charges, tax and Flipkart commission are deducted from it. Your exact bank settlement shows after the listing is live; ask your manager to check it for you.' },
@@ -201,14 +200,22 @@ export const FORMS: FormDef[] = [
     sections: flipkartNewListing,
   },
   {
-    marketplace: 'AMAZON', kind: 'MAPPING', draft: true, title: 'Amazon — map to an existing ASIN',
-    intro: 'The product is already on Amazon (it has an ASIN). We add your offer to it.',
+    // Owner's field list (7 Nov 2026), Seller Central "Add price and inventory" (Recommended). Always sold as New.
+    marketplace: 'AMAZON', kind: 'MAPPING', draft: false, fixed: { condition: 'New', externalProductInfoEntity: 'HSN' }, title: 'Amazon — map to an existing ASIN',
+    intro: 'The product is already on Amazon (it has an ASIN). We add your offer to it. Condition: New.',
     sections: [
       { title: 'Request details', fields: [
-        { key: 'productLink', label: 'Amazon product link or ASIN', type: 'text', required: true, maxLength: 500, placeholder: 'https://www.amazon.in/dp/… or ASIN' },
-        { key: 'productName', label: 'Product name', type: 'text', maxLength: 200 },
+        { key: 'productLink', label: 'Amazon product link or ASIN', type: 'text', required: true, maxLength: 500, placeholder: 'https://www.amazon.in/dp/… or ASIN', help: 'No need to add the product name — we take it from the Amazon listing' },
       ] },
-      ...amazonCommercial,
+      { title: 'Add price and inventory', fields: [
+        { key: 'audience', label: 'Audience', type: 'select', options: ['Sell on Amazon', 'Amazon Business (B2B)'], blankAs: 'Sell on Amazon', help: 'Who this offer is for. Leave blank for “Sell on Amazon” (default)' },
+        { key: 'sellerSku', label: 'SKU', type: 'text', maxLength: 40, autoSku: true, placeholder: 'Example: ABC123', help: 'Optional — leave blank and SOLLUNA creates one for you' },
+        { key: 'hsn', label: 'External Product Information (HSN)', type: 'text', required: true, placeholder: 'Example: 610510, 61051010', help: '6 to 8-digit HSN for the India marketplace' },
+        { key: 'fulfilmentChannel', label: 'Fulfillment Channel', type: 'select', required: true, options: ['Fulfilled by Amazon (FBA)', 'Merchant Fulfilled (Self Ship / Easy Ship)'], help: 'FBA: Amazon stores, ships and handles customer service. Merchant Fulfilled: you ship yourself, or you pack and Amazon picks up (Easy Ship)' },
+        { key: 'sellingPrice', label: 'Your Price', type: 'money', required: true, unit: 'INR', min: 1, help: 'Base price the buyer pays — not your bank settlement. Amazon fees, shipping and tax are deducted from it; ask your manager for your exact settlement' },
+        { key: 'mrp', label: 'Maximum Retail Price', type: 'money', required: true, unit: 'INR', min: 1, help: 'The MRP printed on the pack (Legal Metrology Act). The most you can charge a customer' },
+        { key: 'pricingRule', label: 'Pricing Rule', type: 'select', options: ['No rule — keep my price', 'Automate my pricing'], blankAs: 'No rule — keep my price', help: 'Automated pricing adjusts your price within limits. Your manager sets it up only after you approve the minimum and maximum price' },
+      ] },
     ],
   },
   {
@@ -285,7 +292,10 @@ export function validateForm(def: FormDef, input: Record<string, unknown>, { par
     }
   }
   if (typeof data.mrp === 'number' && typeof data.sellingPrice === 'number' && data.sellingPrice > data.mrp) errors.sellingPrice = 'Selling price cannot be more than MRP';
-  if (typeof data.hsn === 'string' && !/^\d{4,8}$/.test(data.hsn)) errors.hsn = 'HSN must be 4 to 8 digits';
+  if (typeof data.hsn === 'string') {
+    const amazonMapping = def.marketplace === 'AMAZON' && def.kind === 'MAPPING';
+    if (!(amazonMapping ? /^\d{6,8}$/ : /^\d{4,8}$/).test(data.hsn)) errors.hsn = `HSN must be ${amazonMapping ? 6 : 4} to 8 digits`;
+  }
   if (typeof data.productLink === 'string') {
     const ref = productRef(def.marketplace, data.productLink);
     if (ref) data.productRef = ref.id;
