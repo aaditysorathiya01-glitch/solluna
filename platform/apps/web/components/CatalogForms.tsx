@@ -198,24 +198,106 @@ function FieldInput({ f, value, error, onChange, note, fromWeb, action }: { f: F
   const label = <label className="label" htmlFor={id}>{f.label}{f.required && <span className="text-red-700">*</span>}{fromWeb && <span className="ml-2 chip bg-sky-50 normal-case tracking-normal text-sky-800" data-testid={`web-${f.key}`}>from web — check</span>}</label>;
   const cls = `input ${error ? 'border-red-400' : fromWeb ? 'border-sky-300 bg-sky-50/40' : ''}`;
   let control;
-  if (f.type === 'select') {
+  if (f.type === 'list') {
+    control = <ListInput id={id} cls={cls} f={f} value={value} onChange={onChange} />;
+  } else if (f.type === 'images') {
+    control = <ImageInput id={id} f={f} value={value} onChange={onChange} />;
+  } else if (f.type === 'select') {
     control = <select id={id} className={cls} value={value} onChange={(e) => onChange(e.target.value)}><option value="">Select One</option>{f.options!.map((o) => <option key={o} value={o}>{o}</option>)}</select>;
   } else if (f.type === 'textarea') {
-    control = <textarea id={id} className={`${cls} min-h-20`} value={value} maxLength={f.maxLength} placeholder={f.placeholder} onChange={(e) => onChange(e.target.value)} />;
+    control = <><textarea id={id} className={`${cls} min-h-20`} value={value} maxLength={f.maxLength} placeholder={f.placeholder} onChange={(e) => onChange(e.target.value)} />{f.maxLength && f.maxLength >= 1000 && <p className="mt-1 text-right text-xs text-ink-3" data-testid={`count-${f.key}`}>{value.length}/{f.maxLength}</p>}</>;
   } else {
     const type = f.type === 'number' || f.type === 'money' ? 'number' : f.type === 'date' ? 'date' : 'text';
     control = (
       <div className="flex items-center gap-2">
-        <input id={id} className={cls} type={type} inputMode={type === 'number' ? 'decimal' : undefined} step={f.type === 'money' ? '0.01' : undefined} min={f.min} max={f.max} maxLength={f.maxLength} placeholder={f.placeholder} value={value} onChange={(e) => onChange(e.target.value)} />
+        <input id={id} className={cls} type={type} list={f.suggestions ? `${id}-hints` : undefined} inputMode={type === 'number' ? 'decimal' : undefined} step={f.type === 'money' ? '0.01' : undefined} min={f.min} max={f.max} maxLength={f.maxLength} placeholder={f.placeholder} value={value} onChange={(e) => onChange(e.target.value)} />
         {f.unit && <span className="shrink-0 text-xs text-ink-3">{f.unit}</span>}
+        {f.suggestions && <datalist id={`${id}-hints`}>{f.suggestions.map((s) => <option key={s} value={s} />)}</datalist>}
       </div>
     );
   }
   return (
-    <div className={f.type === 'textarea' ? 'sm:col-span-2' : ''}>
+    <div className={f.type === 'textarea' || f.type === 'list' || f.type === 'images' ? 'sm:col-span-2' : ''}>
       {label}
       {action ? <div className="flex gap-2"><div className="flex-1">{control}</div><button type="button" className="btn-ghost shrink-0 py-2 text-xs" disabled={action.disabled} onClick={action.run}>{action.label}</button></div> : control}
       {error ? <p className="mt-1 text-xs text-red-700">{error}</p> : note ? <p className={`mt-1 text-xs ${note.ok ? 'text-emerald-700' : 'text-amber-800'}`} data-testid="product-ref">{note.text}</p> : f.help && <p className="mt-1 text-xs text-ink-3">{f.help}</p>}
+    </div>
+  );
+}
+
+/** Several values: Enter or comma adds one; stored one per line. */
+function ListInput({ id, cls, f, value, onChange }: { id: string; cls: string; f: Field; value: string; onChange: (v: string) => void }) {
+  const [draft, setDraft] = useState('');
+  const items = value ? value.split('\n').filter(Boolean) : [];
+  const add = (raw: string) => {
+    const extra = raw.split(',').map((x) => x.trim()).filter((x) => x && !items.includes(x));
+    if (extra.length) onChange([...items, ...extra].slice(0, f.maxItems ?? 30).join('\n'));
+    setDraft('');
+  };
+  return (
+    <div>
+      {items.length > 0 && (
+        <ul className="mb-2 flex flex-wrap gap-1.5" data-testid={`items-${f.key}`}>
+          {items.map((x) => <li key={x} className="chip normal-case tracking-normal">{x}<button type="button" className="ml-1 text-ink-3 hover:text-red-700" aria-label={`Remove ${x}`} onClick={() => onChange(items.filter((y) => y !== x).join('\n'))}>×</button></li>)}
+        </ul>
+      )}
+      <input id={id} className={cls} value={draft} placeholder={f.placeholder ?? 'Type and press Enter'}
+        onChange={(e) => (e.target.value.includes(',') ? add(e.target.value) : setDraft(e.target.value))}
+        onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); add(draft); } }}
+        onBlur={() => draft.trim() && add(draft)} />
+    </div>
+  );
+}
+
+/** Up to maxItems product images, uploaded as the client's listing documents; the field keeps their ids. */
+function ImageInput({ id, f, value, onChange }: { id: string; f: Field; value: string; onChange: (v: string) => void }) {
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState('');
+  const ids = value ? value.split(',').filter(Boolean) : [];
+  const max = f.maxItems ?? 5;
+  const upload = async (files: FileList | null) => {
+    if (!files?.length) return;
+    setErr('');
+    const room = max - ids.length;
+    const list = Array.from(files).slice(0, room);
+    if (files.length > room) setErr(`Only ${max} images allowed — extra files were skipped.`);
+    setBusy(true);
+    const added: string[] = [];
+    for (const file of list) {
+      const fd = new FormData();
+      fd.append('file', file); fd.append('kind', 'LISTING_ASSETS'); fd.append('title', `Listing image — ${file.name}`.slice(0, 200));
+      try {
+        const res = await fetch('/api/documents', { method: 'POST', body: fd, credentials: 'same-origin' });
+        const body = await res.json().catch(() => ({}));
+        if (!res.ok) { setErr(`${file.name}: ${Array.isArray(body.message) ? body.message.join(', ') : body.message ?? 'upload failed'}`); continue; }
+        if (!String(body.mimeType ?? '').startsWith('image/')) { setErr(`${file.name}: only JPG, PNG or WEBP images`); continue; }
+        added.push(body.id);
+      } catch { setErr(`${file.name}: upload failed, try again`); }
+    }
+    setBusy(false);
+    if (added.length) onChange([...ids, ...added].join(','));
+  };
+  return (
+    <div>
+      <ul className="flex flex-wrap gap-2" data-testid={`images-${f.key}`}>
+        {ids.map((d, i) => (
+          <li key={d} className="relative h-20 w-20 overflow-hidden rounded border border-line bg-white">
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img src={`/api/documents/${d}/download`} alt={`Image ${i + 1}`} className="h-full w-full object-contain" />
+            {i === 0 && <span className="absolute left-0 top-0 bg-ink px-1 text-[10px] text-white">Main</span>}
+            <button type="button" className="absolute right-0 top-0 bg-white/90 px-1 text-xs text-red-700" aria-label={`Remove image ${i + 1}`} onClick={() => onChange(ids.filter((x) => x !== d).join(','))}>×</button>
+          </li>
+        ))}
+        {ids.length < max && (
+          <li>
+            <label htmlFor={id} className={`flex h-20 w-20 cursor-pointer flex-col items-center justify-center rounded border border-dashed border-line text-center text-xs text-ink-3 hover:border-ink-3 ${busy ? 'opacity-50' : ''}`}>
+              {busy ? 'Uploading…' : <>+ Add<br />{ids.length}/{max}</>}
+            </label>
+            <input id={id} type="file" accept="image/jpeg,image/png,image/webp" multiple className="sr-only" disabled={busy} onChange={(e) => { void upload(e.target.files); e.target.value = ''; }} />
+          </li>
+        )}
+      </ul>
+      {err && <p className="mt-1 text-xs text-red-700" role="alert">{err}</p>}
     </div>
   );
 }

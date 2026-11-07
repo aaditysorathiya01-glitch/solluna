@@ -201,13 +201,13 @@ export function toFormValues(d: Details): Record<string, unknown> {
   const country = c ? (COUNTRIES.find((x) => x.toLowerCase() === c.toLowerCase()) ?? COUNTRY_ALIASES[c.toLowerCase()] ?? 'Other') : undefined;
   const barcode = d.barcode?.replace(/\D/g, '') ?? '';
   const v: Record<string, unknown> = {
-    productName: d.product_name, productTitle: d.product_name, brand: d.brand, category: d.category,
+    productName: d.product_name, productTitle: d.product_name, brand: d.brand, category: d.category, vertical: d.category,
     mrp: d.mrp_inr, hsn: d.hsn_suggestion?.replace(/\D/g, ''), taxCode: d.gst_rate_suggestion == null ? undefined : `GST_${d.gst_rate_suggestion}`,
     lengthCm: d.length_cm, breadthCm: d.breadth_cm, heightCm: d.height_cm, weightKg: d.weight_kg,
     countryOfOrigin: country, manufacturerDetails: d.manufacturer, packerDetails: d.packer, importerDetails: d.importer, shelfLifeMonths: d.shelf_life_months,
     keyFeatures: d.key_features.length ? d.key_features.slice(0, 6).join('\n') : undefined, description: d.description, variants: d.variants,
     imageLinks: d.image_urls.length ? d.image_urls.slice(0, 6).join('\n') : undefined,
-    productIdType: barcode.length === 13 ? 'EAN' : barcode.length === 12 ? 'UPC' : barcode ? 'GTIN' : undefined, productId: barcode || undefined,
+    productIdType: barcode.length === 13 ? 'EAN' : barcode.length === 12 ? 'UPC' : barcode ? 'GTIN' : undefined, productId: barcode || undefined, eanUpc: barcode || undefined,
   };
   return Object.fromEntries(Object.entries(v).filter(([, x]) => x !== null && x !== undefined && x !== ''));
 }

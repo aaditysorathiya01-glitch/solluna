@@ -40,8 +40,9 @@ export class CatalogFormsService {
     const d = parse(SubmitSchema, input);
     const def = formFor(d.marketplace as Marketplace, d.kind as FormKind);
     const { data, errors } = validateForm(def, d.data);
+    await this.checkImages(user, def, data, errors);
     if (Object.keys(errors).length) throw new FormInvalid(errors);
-    const label = String(data.productTitle ?? data.productName ?? data.productRef ?? data.productLink ?? data.sellerSku).slice(0, 80);
+    const label = String(data.productTitle ?? data.modelName ?? data.productName ?? data.productRef ?? data.productLink ?? data.sellerSku).slice(0, 80);
     const title = `${MP[d.marketplace]} ${d.kind === 'MAPPING' ? 'mapping' : 'new listing'}: ${label} (SKU ${data.sellerSku})`;
     // Reuse the catalog workflow so the manager's tools (mapping confidence, listing lifecycle, quota) work unchanged.
     let requestId: string;
@@ -52,9 +53,9 @@ export class CatalogFormsService {
       const orgId = user.organizationId!;
       const gst = /^GST_(\d+)$/.exec(String(data.taxCode ?? ''))?.[1];
       const product = {
-        name: String(data.productTitle), brand: String(data.brand), category: String(data.category), sku: String(data.sellerSku), hsn: String(data.hsn),
+        name: String(data.productTitle ?? `${data.brand} ${data.modelName}`), brand: String(data.brand), category: String(data.category ?? data.vertical), sku: String(data.sellerSku), hsn: String(data.hsn),
         gstRate: gst ? Number(gst) : undefined, mrp: Number(data.mrp), sellingPrice: Number(data.sellingPrice),
-        specs: [data.keyFeatures, data.description].filter(Boolean).join('\n\n').slice(0, 5000), variations: data.variants ? String(data.variants) : undefined,
+        specs: [data.keyFeatures, data.description, data.usageInstructions].filter(Boolean).join('\n\n').slice(0, 5000), variations: data.variants ? String(data.variants) : undefined,
       };
       const existing = await this.db.product.findFirst({ where: { organizationId: orgId, sku: product.sku } });
       const productId = existing ? (await this.catalog.updateProduct(user, existing.id, product)).id : (await this.catalog.createProduct(user, product)).id;
@@ -69,6 +70,16 @@ export class CatalogFormsService {
     await this.audit.log({ actor: user, action: 'catalog.form_submitted', entity: 'CatalogForm', entityId: form.id, after: { marketplace: d.marketplace, kind: d.kind, requestId: request.id } });
     const template = d.saveTemplateAs ? await this.saveTemplate(user, { marketplace: d.marketplace, kind: d.kind, name: d.saveTemplateAs, data: d.data }) : null;
     return { id: form.id, request, template };
+  }
+
+  /** Image fields hold document ids: each must be this client's own uploaded image. */
+  private async checkImages(user: AuthUser, def: ReturnType<typeof formFor>, data: Record<string, string | number>, errors: Record<string, string>) {
+    for (const f of def.sections.flatMap((s) => s.fields).filter((x) => x.type === 'images')) {
+      const ids = typeof data[f.key] === 'string' ? String(data[f.key]).split(',').filter(Boolean) : [];
+      if (!ids.length) { if (f.required) errors[f.key] = `${f.label}: upload at least 1 image`; continue; }
+      const found = await this.db.document.count({ where: { id: { in: ids }, organizationId: user.organizationId!, deletedAt: null, kind: 'LISTING_ASSETS', mimeType: { startsWith: 'image/' } } });
+      if (found !== ids.length) errors[f.key] = `${f.label}: some images are missing — upload them again`;
+    }
   }
 
   /** Templates keep whatever was filled (partial is fine); saving under an existing name updates it. */

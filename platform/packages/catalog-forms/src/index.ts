@@ -5,7 +5,8 @@
  */
 export type Marketplace = 'FLIPKART' | 'AMAZON';
 export type FormKind = 'MAPPING' | 'NEW_LISTING';
-export type FieldType = 'text' | 'textarea' | 'number' | 'money' | 'select' | 'date' | 'url';
+/** list = several values (Enter or comma after each), stored one per line. images = uploaded image document ids, comma-separated. */
+export type FieldType = 'text' | 'textarea' | 'number' | 'money' | 'select' | 'date' | 'url' | 'list' | 'images';
 export interface Field {
   key: string; label: string; type: FieldType; required?: boolean; options?: string[]; unit?: string;
   help?: string; placeholder?: string; min?: number; max?: number; maxLength?: number;
@@ -13,6 +14,10 @@ export interface Field {
   blankAs?: string | number;
   /** Left empty → SOLLUNA generates a unique SKU code. */
   autoSku?: boolean;
+  /** Typing hints for a text field; any value is still accepted. */
+  suggestions?: string[];
+  /** list: most values; images: most files. */
+  maxItems?: number;
 }
 export interface Section { title: string; note?: string; fields: Field[] }
 export interface FormDef { marketplace: Marketplace; kind: FormKind; title: string; intro: string; draft: boolean; sections: Section[];
@@ -72,7 +77,7 @@ const flipkartCommercial: Section[] = [
     fields: [
       { key: 'procurementType', label: 'Procurement type', type: 'select', required: true, options: ['Instock', 'Express', 'Domestic procurement', 'International procurement', 'Made to order'] },
       { key: 'procurementSlaDays', label: 'Procurement SLA', type: 'number', required: true, unit: 'days', min: 0, max: 60 },
-      { key: 'stock', label: 'Stock', type: 'number', required: true, min: 0, max: 1_000_000 },
+      { key: 'stock', label: 'Stock', type: 'number', required: true, min: 0, max: 1_000_000, help: 'Minimum 5 quantity required for listing visibility' },
     ],
   },
   {
@@ -93,6 +98,51 @@ const flipkartCommercial: Section[] = [
     ],
   },
   flipkartManufacturing,
+];
+
+const many = (key: string, label: string, extra: Partial<Field> = {}): Field => ({ key, label, type: 'list', maxItems: 30, maxLength: 3000, help: 'Multiple values allowed. Press “Enter” or “,” after each value', ...extra });
+
+/** Flipkart new listing — owner's field list (7 Nov 2026), in Seller Hub order. Product attributes follow the owner's example vertical. */
+const flipkartNewListing: Section[] = [
+  { title: 'Product', fields: [
+    { key: 'vertical', label: 'Select The Vertical For Your Product', type: 'text', required: true, maxLength: 120, placeholder: 'e.g. Floor Cleaner', suggestions: ['Floor Cleaner', 'Toilet Cleaner', 'Bathroom Cleaner', 'Kitchen Cleaner', 'Glass Cleaner', 'Multi-Surface Cleaner', 'Room Freshener', 'Dishwash Liquid', 'Detergent'] },
+    { key: 'brand', label: 'Brand', type: 'text', required: true, maxLength: 80 },
+    { key: 'images', label: 'Product images', type: 'images', required: true, maxItems: 5, help: 'Up to 5 images (JPG, PNG or WEBP). First image = main image: white background, at least 1000 px' },
+  ] },
+  ...flipkartCommercial,
+  { title: 'Product details', fields: [
+    { key: 'modelName', label: 'Model Name', type: 'text', required: true, maxLength: 120 },
+    { key: 'brandFragrance', label: 'Brand Fragrance', type: 'text', required: true, maxLength: 80, suggestions: ['Lavender', 'Lemon', 'Rose', 'Jasmine', 'Pine', 'Floral', 'Citrus', 'Unscented'] },
+    { key: 'quantityL', label: 'Quantity', type: 'number', required: true, unit: 'L', min: 0.001, max: 1000 },
+    { key: 'suitableFor', label: 'Suitable For', type: 'text', required: true, maxLength: 120, suggestions: ['Floor', 'Tiles', 'Bathroom', 'Toilet', 'Kitchen', 'Glass', 'Multi-surface'] },
+    { key: 'formFactor', label: 'Form Factor', type: 'text', required: true, maxLength: 60, suggestions: ['Liquid', 'Gel', 'Powder', 'Spray', 'Tablet', 'Wipes'] },
+    { key: 'packOf', label: 'Pack of', type: 'number', required: true, min: 1, max: 1000 },
+    { key: 'containerType', label: 'Container Type', type: 'text', required: true, maxLength: 60, suggestions: ['Bottle', 'Spray Bottle', 'Can', 'Pouch', 'Jar', 'Sachet', 'Box'] },
+  ] },
+  { title: 'General', fields: [
+    many('eanUpc', 'EAN/UPC', { maxLength: 600 }),
+    { key: 'fragranceForRefiner', label: 'Fragrance For Refiner', type: 'text', maxLength: 80, suggestions: ['Lavender', 'Lemon', 'Rose', 'Jasmine', 'Pine', 'Floral', 'Citrus'] },
+    many('keyFeatures', 'Key Features'),
+    many('usageInstructions', 'Usage Instructions'),
+    { key: 'videoUrl', label: 'Video URL', type: 'url', maxLength: 500 },
+    { key: 'description', label: 'Description', type: 'textarea', maxLength: 5000 },
+    many('composition', 'Composition'),
+    many('searchKeywords', 'Search Keywords'),
+    many('certification', 'Certification'),
+    { key: 'usedFor', label: 'Used For', type: 'text', maxLength: 120, suggestions: ['Cleaning', 'Disinfecting', 'Stain Removal', 'Descaling', 'Fragrance'] },
+    { key: 'phValue', label: 'pH Value', type: 'number', min: 0, max: 14 },
+    { key: 'maxShelfLifeMonths', label: 'Maximum Shelf Life', type: 'number', unit: 'Months', min: 0, max: 600 },
+    { key: 'manufacturingProcess', label: 'Manufacturing Process', type: 'text', maxLength: 80, suggestions: ['Chemical', 'Natural', 'Herbal', 'Handmade'] },
+    { key: 'organic', label: 'Organic', type: 'select', options: ['Yes', 'No'] },
+  ] },
+  { title: 'Dimensions', note: 'Product size (not the package).', fields: [
+    { key: 'productHeightCm', label: 'Height', type: 'number', unit: 'cm', min: 0, max: 1000 },
+    { key: 'productWidthCm', label: 'Width', type: 'number', unit: 'cm', min: 0, max: 1000 },
+    { key: 'productDepthCm', label: 'Depth', type: 'number', unit: 'cm', min: 0, max: 1000 },
+    many('otherDimensions', 'Other Dimensions'),
+  ] },
+  { title: 'In the box', fields: [many('itemsIncluded', 'Items Included')] },
+  { title: 'Additional features', fields: [many('otherFeatures', 'Other Features')] },
 ];
 
 const amazonCommercial: Section[] = [
@@ -146,9 +196,9 @@ export const FORMS: FormDef[] = [
     ],
   },
   {
-    marketplace: 'FLIPKART', kind: 'NEW_LISTING', draft: true, fixed: FLIPKART_FIXED, title: 'Flipkart — new listing',
+    marketplace: 'FLIPKART', kind: 'NEW_LISTING', draft: false, fixed: FLIPKART_FIXED, title: 'Flipkart — new listing',
     intro: 'The product is not on Flipkart yet. We create the catalog page and your listing.',
-    sections: [productInfo('FLIPKART'), ...flipkartCommercial],
+    sections: flipkartNewListing,
   },
   {
     marketplace: 'AMAZON', kind: 'MAPPING', draft: true, title: 'Amazon — map to an existing ASIN',
@@ -214,6 +264,18 @@ export function validateForm(def: FormDef, input: Record<string, unknown>, { par
     } else if (f.type === 'select') {
       if (f.options && !f.options.includes(str)) { errors[f.key] = `Choose a valid ${f.label}`; continue; }
       data[f.key] = str;
+    } else if (f.type === 'list') {
+      const items = [...new Set(str.split(/[\n,]/).map((x) => x.trim()).filter(Boolean))];
+      if (f.maxItems && items.length > f.maxItems) { errors[f.key] = `${f.label}: at most ${f.maxItems} values`; continue; }
+      const joined = items.join('\n');
+      if (f.maxLength && joined.length > f.maxLength) { errors[f.key] = `${f.label} is too long (max ${f.maxLength})`; continue; }
+      if (!items.length) { if (f.required) errors[f.key] = `${f.label} is required`; continue; }
+      data[f.key] = joined;
+    } else if (f.type === 'images') {
+      const ids = [...new Set(str.split(',').map((x) => x.trim()).filter(Boolean))];
+      if (ids.some((x) => !/^[a-z0-9]{20,40}$/i.test(x))) { errors[f.key] = `${f.label}: upload the images again`; continue; }
+      if (f.maxItems && ids.length > f.maxItems) { errors[f.key] = `${f.label}: at most ${f.maxItems} images`; continue; }
+      data[f.key] = ids.join(',');
     } else if (f.type === 'date') {
       if (!/^\d{4}-\d{2}-\d{2}$/.test(str) || Number.isNaN(Date.parse(str))) { errors[f.key] = `${f.label} must be a date`; continue; }
       data[f.key] = str;

@@ -560,6 +560,33 @@ test('client: onboarding checklist, marketplace details (no passwords), product 
   await c.selectOption('#tpl-pick', { label: 'Jute runner — pack of 2' });
   assert.equal(await c.inputValue('#f-mrp'), '899'); assert.equal(await c.inputValue('#f-minOrderQty'), '2'); assert.equal(await c.inputValue('#f-manufacturerDetails'), 'Riya Lifestyle, Mumbai');
 
+  // Flipkart new listing: owner's field list, 5-image upload, multi-value fields.
+  await c.getByRole('tab', { name: 'New listing' }).click();
+  for (const label of ['Select The Vertical For Your Product', 'Brand', 'Product images', 'Seller SKU ID', 'Model Name', 'Brand Fragrance', 'Suitable For', 'Form Factor', 'Container Type', 'EAN/UPC', 'Fragrance For Refiner', 'Key Features', 'Usage Instructions', 'Video URL', 'Composition', 'Search Keywords', 'Certification', 'Used For', 'pH Value', 'Maximum Shelf Life', 'Manufacturing Process', 'Organic', 'Width', 'Depth', 'Other Dimensions', 'Items Included', 'Other Features']) assert.ok(await c.locator('label.label', { hasText: label }).count(), `field ${label}`);
+  assert.equal(await c.getByText('Draft form').count(), 0, 'Flipkart new listing is final');
+  const png = Buffer.from('89504e470d0a1a0a0000000d49484452000000010000000108060000001f15c4890000000d4944415478da63f8cfc0f01f0005000201a5f5f1a40000000049454e44ae426082', 'hex');
+  const pics = Array.from({ length: 6 }, (_, i) => ({ name: `p${i}.png`, mimeType: 'image/png', buffer: png }));
+  await c.setInputFiles('#f-images', pics);
+  await c.getByText('Only 5 images allowed', { exact: false }).waitFor();
+  await c.waitForFunction(() => document.querySelectorAll('[data-testid="images-images"] img').length === 5);
+  assert.equal(await c.locator('#f-images').count(), 0, 'no more uploads after 5');
+  await c.getByRole('button', { name: 'Remove image 5' }).click();
+  await c.fill('#f-vertical', 'Floor Cleaner'); await c.fill('#f-brand', 'Riya');
+  await c.fill('#f-modelName', 'Floor Cleaner Lavender'); await c.fill('#f-brandFragrance', 'Lavender'); await c.fill('#f-quantityL', '0.5');
+  await c.fill('#f-suitableFor', 'Floor'); await c.fill('#f-formFactor', 'Liquid'); await c.fill('#f-packOf', '1'); await c.fill('#f-containerType', 'Bottle');
+  await c.fill('#f-keyFeatures', 'Kills germs'); await c.press('#f-keyFeatures', 'Enter'); await c.fill('#f-keyFeatures', 'Streak-free,');
+  assert.deepEqual((await c.getByTestId('items-keyFeatures').locator('li').allInnerTexts()).map((x) => x.replace(/\s*×$/, '')), ['Kills germs', 'Streak-free']);
+  await c.fill('#f-description', 'Lavender floor cleaner'); assert.equal(await c.getByTestId('count-description').innerText(), '22/5000');
+  await c.selectOption('#f-listingStatus', 'Active'); await c.fill('#f-mrp', '199'); await c.fill('#f-sellingPrice', '179');
+  await c.selectOption('#f-procurementType', 'Instock'); await c.fill('#f-procurementSlaDays', '2'); await c.fill('#f-stock', '20');
+  await c.fill('#f-lengthCm', '10'); await c.fill('#f-breadthCm', '8'); await c.fill('#f-heightCm', '25'); await c.fill('#f-weightKg', '0.6');
+  await c.fill('#f-hsn', '34022090'); await c.selectOption('#f-taxCode', 'GST_18');
+  await c.selectOption('#f-countryOfOrigin', 'India'); await c.fill('#f-manufacturerDetails', 'Riya Lifestyle, Mumbai'); await c.fill('#f-packerDetails', 'Riya Lifestyle, Mumbai');
+  await c.screenshot({ path: join(SHOTS, '10-flipkart-new-listing.png'), fullPage: true });
+  await c.click('button:has-text("Submit new listing request")');
+  await c.getByText('Request sent to your manager', { exact: false }).waitFor();
+  await c.getByText(/Flipkart new listing: Floor Cleaner Lavender \(SKU SOL-FK-/).waitFor();
+
   // New listing on Amazon creates the product + listing the manager tracks to live.
   await c.getByRole('tab', { name: 'Amazon' }).click();
   await c.getByRole('tab', { name: 'New listing' }).click();
