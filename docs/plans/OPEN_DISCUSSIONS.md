@@ -15,6 +15,7 @@ Parked topics with the options already worked out. Nothing here is live unless m
 | E. Claude API (switch on the built feature; `LOOKUP_MODEL=claude-haiku-5-5`, 3 searches) | ~₹300–800 / month | Best auto-fill; set a monthly spend limit in the Anthropic Console |
 
 Note: a Claude Pro subscription cannot power a server feature for clients — app use needs an API key with separate billing.
+Checked and rejected: the GitHub "public-apis" list (github.com/public-apis/public-apis) is a directory of free APIs, not a product-data source — no Amazon.in / Flipkart product details, HSN or manufacturer data; barcode APIs there cover mostly US/EU products. Amazon Product Advertising API and the Flipkart Affiliate API give product titles/images for free, but their terms are for affiliate promotion and need ongoing affiliate sales — not a safe basis for filling seller listings. SP-API Catalog (option D) remains the free, seller-approved route.
 Recommendation when revisited: A now, D once SP-API is approved, E only if instant auto-fill proves worth paying for.
 
 ## 2. Remaining listing forms
