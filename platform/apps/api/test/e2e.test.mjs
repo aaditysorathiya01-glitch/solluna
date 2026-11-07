@@ -1259,14 +1259,14 @@ test('label cropper: plan modes enforced by the API; auto crop and specialised p
 test('listing & mapping forms: validation, mapping + new-listing workflow records, quota, templates', async () => {
   const c = await registerCustomer('Farah'); await pay(c, 'RESELLER');
   const base = { sellerSku: 'TC-1L', listingStatus: 'Active', mrp: 199, sellingPrice: 189, fulfilmentBy: 'Seller', procurementSlaDays: 2, stock: 50, hsn: '38249900', taxCode: 'GST_18', countryOfOrigin: 'India', manufacturerDetails: 'Pidilite Industries, Mumbai', packerDetails: 'Pidilite Industries, Mumbai' };
-  const bad = await call('POST', '/catalog-forms', { token: c, body: { marketplace: 'FLIPKART', kind: 'MAPPING', data: { ...base, sellerSku: '', mrp: 100, sellingPrice: 150, hsn: '12' } } });
+  const bad = await call('POST', '/catalog-forms', { token: c, body: { marketplace: 'FLIPKART', kind: 'MAPPING', data: { ...base, productLink: 'abc', sellerSku: '', mrp: 100, sellingPrice: 150, hsn: '12', minOrderQty: '5' } } });
   assert.equal(bad.status, 400);
-  assert.ok(bad.body.fieldErrors.productLink && bad.body.fieldErrors.sellerSku && bad.body.fieldErrors.sellingPrice && bad.body.fieldErrors.hsn, JSON.stringify(bad.body.fieldErrors));
+  assert.ok(bad.body.fieldErrors.productLink && bad.body.fieldErrors.sellerSku && bad.body.fieldErrors.sellingPrice && bad.body.fieldErrors.hsn && bad.body.fieldErrors.minOrderQty, JSON.stringify(bad.body.fieldErrors));
 
-  const m = ok(await call('POST', '/catalog-forms', { token: c, body: { marketplace: 'FLIPKART', kind: 'MAPPING', data: { ...base, productLink: 'https://www.flipkart.com/p/itm123?pid=TCLFX12345', productName: 'Tile Cleaner 1L' }, saveTemplateAs: 'Tile cleaner 1L' } }));
+  const m = ok(await call('POST', '/catalog-forms', { token: c, body: { marketplace: 'FLIPKART', kind: 'MAPPING', data: { ...base, productLink: 'https://www.flipkart.com/p/itm123?pid=TCLFX7ZGHYQ2KJWE&lid=X', productName: 'Tile Cleaner 1L' }, saveTemplateAs: 'Tile cleaner 1L' } }));
   assert.equal(m.template.name, 'Tile cleaner 1L');
   const req = await db.serviceRequest.findUnique({ where: { id: m.request.id } });
-  assert.equal(req.featureKey, 'CATALOG_MAPPING'); assert.equal(req.details.fields.sellingPrice, 189); assert.match(req.title, /Flipkart mapping: Tile Cleaner 1L \(SKU TC-1L\)/);
+  assert.equal(req.featureKey, 'CATALOG_MAPPING'); assert.equal(req.details.fields.sellingPrice, 189); assert.equal(req.details.fields.productRef, 'TCLFX7ZGHYQ2KJWE', 'FSN taken from the link'); assert.match(req.title, /Flipkart mapping: Tile Cleaner 1L \(SKU TC-1L\)/);
   assert.ok(await db.catalogMapping.findFirst({ where: { serviceRequestId: req.id, sellerSku: 'TC-1L' } }), 'mapping row for the manager');
 
   const listing = { ...base, productTitle: 'Roff Tile Cleaner 1L', brand: 'Roff', category: 'Cleaning > Tile cleaner', keyFeatures: 'Removes stains', description: 'Professional tile cleaner', imageLinks: 'https://drive.google.com/x', condition: 'New', fulfilmentChannel: 'Easy Ship (Amazon delivers)' };

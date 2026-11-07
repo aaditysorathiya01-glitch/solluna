@@ -1,6 +1,6 @@
 'use client';
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { formFor, type Field, type FormKind, type Marketplace } from '../../../packages/catalog-forms/src';
+import { formFor, productRef, type Field, type FormKind, type Marketplace } from '../../../packages/catalog-forms/src';
 import { api, ApiError } from '@/lib/api';
 import { Status, SubTabs } from './ui';
 
@@ -19,7 +19,6 @@ export function CatalogForms() {
   const [templates, setTemplates] = useState<Template[]>([]);
   const [submissions, setSubmissions] = useState<Submission[]>([]);
   const [templateId, setTemplateId] = useState('');
-  const [saveAs, setSaveAs] = useState(false);
   const [templateName, setTemplateName] = useState('');
   const [busy, setBusy] = useState<'submit' | 'template' | null>(null);
   const [msg, setMsg] = useState<{ ok?: string; err?: string }>({});
@@ -33,7 +32,7 @@ export function CatalogForms() {
   const mine = useMemo(() => templates.filter((t) => t.marketplace === market && t.kind === kind), [templates, market, kind]);
 
   function reset(nextMarket = market, nextKind = kind) {
-    setMarket(nextMarket); setKind(nextKind); setValues({}); setErrors({}); setTemplateId(''); setSaveAs(false); setTemplateName(''); setMsg({});
+    setMarket(nextMarket); setKind(nextKind); setValues({}); setErrors({}); setTemplateId(''); setTemplateName(''); setMsg({});
   }
   function useTemplate(id: string) {
     setTemplateId(id); setErrors({}); setMsg({});
@@ -45,24 +44,17 @@ export function CatalogForms() {
     if (errors[k]) setErrors((e) => { const n = { ...e }; delete n[k]; if (!Object.keys(n).length) setMsg((m) => ({ ...m, err: undefined })); return n; });
   };
 
-  async function submit() {
-    setBusy('submit'); setMsg({}); setErrors({});
+  /** Submit; with saveTemplate, the same details are also saved under the template name for the next similar product. */
+  async function submit(saveTemplate: boolean) {
+    const name = templateName.trim();
+    if (saveTemplate && !name) { setMsg({ err: 'Give the template a name first.' }); document.getElementById('tpl-name')?.focus(); return; }
+    setBusy(saveTemplate ? 'template' : 'submit'); setMsg({}); setErrors({});
     try {
-      const r = await api<{ request: { status: string } }>('/catalog-forms', { method: 'POST', body: { marketplace: market, kind, data: values, ...(saveAs && templateName.trim() ? { saveTemplateAs: templateName.trim() } : {}) } });
-      setMsg({ ok: `Request sent to your manager${saveAs && templateName.trim() ? ` and saved as template "${templateName.trim()}"` : ''}. ${r.request.status === 'QUEUED' ? 'Work starts shortly.' : 'See the status below.'}` });
-      setValues({}); setTemplateId(''); setSaveAs(false); setTemplateName('');
+      const r = await api<{ request: { status: string } }>('/catalog-forms', { method: 'POST', body: { marketplace: market, kind, data: values, ...(saveTemplate ? { saveTemplateAs: name } : {}) } });
+      setMsg({ ok: `Request sent to your manager${saveTemplate ? ` and saved as template "${name}"` : ''}. ${r.request.status === 'QUEUED' ? 'Work starts shortly.' : 'See the status below.'}` });
+      setValues({}); setTemplateId(''); setTemplateName('');
       await load();
       window.scrollTo({ top: 0, behavior: 'smooth' });
-    } catch (e) { fail(e); }
-    setBusy(null);
-  }
-  async function saveTemplateOnly() {
-    if (!templateName.trim()) { setMsg({ err: 'Give the template a name first.' }); return; }
-    setBusy('template'); setMsg({});
-    try {
-      const t = await api<Template>('/catalog-forms/templates', { method: 'POST', body: { marketplace: market, kind, name: templateName.trim(), data: values } });
-      setMsg({ ok: `Template "${t.name}" saved. Pick it next time to start with these details.` });
-      await load(); setTemplateId(t.id);
     } catch (e) { fail(e); }
     setBusy(null);
   }
@@ -110,20 +102,17 @@ export function CatalogForms() {
             <legend className="text-sm font-semibold">{s.title}</legend>
             {s.note && <p className="rounded-lg bg-sun/10 px-3 py-2 text-xs text-ink-2">{s.note}</p>}
             <div className="grid gap-3 sm:grid-cols-2">
-              {s.fields.map((f) => <FieldInput key={f.key} f={f} value={values[f.key] ?? ''} error={errors[f.key]} onChange={(v) => set(f.key, v)} />)}
+              {s.fields.map((f) => <FieldInput key={f.key} f={f} value={values[f.key] ?? ''} error={errors[f.key]} onChange={(v) => set(f.key, v)} note={f.key === 'productLink' ? refNote(market, values.productLink ?? '') : undefined} />)}
             </div>
           </fieldset>
         ))}
 
         <div className="space-y-3 border-t border-ink/10 pt-5">
-          <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={saveAs} onChange={(e) => setSaveAs(e.target.checked)} /> Save these details as a template for similar products</label>
-          {(saveAs || templateId) && (
-            <div className="max-w-sm"><label className="label" htmlFor="tpl-name">Template name</label><input id="tpl-name" className="input" value={templateName} maxLength={60} onChange={(e) => setTemplateName(e.target.value)} placeholder="e.g. Tile cleaner 1L – combo of 2" /></div>
-          )}
+          <div className="max-w-sm"><label className="label" htmlFor="tpl-name">Template name (to reuse these details)</label><input id="tpl-name" className="input" value={templateName} maxLength={60} onChange={(e) => setTemplateName(e.target.value)} placeholder="e.g. Tile cleaner 1L – combo of 2" /></div>
           {msg.err && <p role="alert" className="rounded-xl bg-red-50 px-3 py-2 text-sm text-red-800">{msg.err}</p>}
           <div className="flex flex-wrap gap-2">
-            <button className="btn-primary" disabled={busy !== null} onClick={submit}>{busy === 'submit' ? 'Sending…' : `Submit ${KIND_LABEL[kind].toLowerCase()} request`}</button>
-            <button className="btn-ghost" disabled={busy !== null} onClick={saveTemplateOnly}>{busy === 'template' ? 'Saving…' : 'Save as template only'}</button>
+            <button className="btn-primary" disabled={busy !== null} onClick={() => submit(false)}>{busy === 'submit' ? 'Sending…' : `Submit ${KIND_LABEL[kind].toLowerCase()} request`}</button>
+            <button className="btn-ghost" disabled={busy !== null} onClick={() => submit(true)}>{busy === 'template' ? 'Saving…' : `Save template & submit ${KIND_LABEL[kind].toLowerCase()} request`}</button>
           </div>
         </div>
       </section>
@@ -144,7 +133,15 @@ export function CatalogForms() {
   );
 }
 
-function FieldInput({ f, value, error, onChange }: { f: Field; value: string; error?: string; onChange: (v: string) => void }) {
+/** Shows the ASIN / FSN found in the pasted link, so the client knows the right product is identified. */
+function refNote(mp: Marketplace, link: string) {
+  if (!link.trim()) return undefined;
+  const ref = productRef(mp, link);
+  if (ref) return { ok: true, text: `${ref.type}: ${ref.id} ✓` };
+  return { ok: false, text: /^https?:\/\//i.test(link.trim()) ? `${mp === 'AMAZON' ? 'ASIN' : 'FSN'} not visible in this link — your manager will open it to confirm the product.` : `Paste the product page link or the ${mp === 'AMAZON' ? '10-character ASIN' : '16-character FSN'}.` };
+}
+
+function FieldInput({ f, value, error, onChange, note }: { f: Field; value: string; error?: string; onChange: (v: string) => void; note?: { ok: boolean; text: string } }) {
   const id = `f-${f.key}`;
   const label = <label className="label" htmlFor={id}>{f.label}{f.required && <span className="text-red-700">*</span>}</label>;
   const cls = `input ${error ? 'border-red-400' : ''}`;
@@ -165,7 +162,7 @@ function FieldInput({ f, value, error, onChange }: { f: Field; value: string; er
   return (
     <div className={f.type === 'textarea' ? 'sm:col-span-2' : ''}>
       {label}{control}
-      {error ? <p className="mt-1 text-xs text-red-700">{error}</p> : f.help && <p className="mt-1 text-xs text-ink-3">{f.help}</p>}
+      {error ? <p className="mt-1 text-xs text-red-700">{error}</p> : note ? <p className={`mt-1 text-xs ${note.ok ? 'text-emerald-700' : 'text-amber-800'}`} data-testid="product-ref">{note.text}</p> : f.help && <p className="mt-1 text-xs text-ink-3">{f.help}</p>}
     </div>
   );
 }

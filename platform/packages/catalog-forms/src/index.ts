@@ -14,7 +14,8 @@ export interface Section { title: string; note?: string; fields: Field[] }
 export interface FormDef { marketplace: Marketplace; kind: FormKind; title: string; intro: string; draft: boolean; sections: Section[] }
 
 const COUNTRIES = ['India', 'China', 'Bangladesh', 'Vietnam', 'Sri Lanka', 'Nepal', 'Thailand', 'Indonesia', 'Malaysia', 'Taiwan', 'South Korea', 'Japan', 'Turkey', 'United Arab Emirates', 'Germany', 'Italy', 'United Kingdom', 'United States', 'Other'];
-const MINOQ = ['1', '2', '3', '4', '5', '6', '8', '10', '12', '20', '24', '50'];
+/** MinOQ is offered only in some categories, and starts with 1 or 2. */
+const MINOQ = ['1', '2'];
 const GST = ['GST_0', 'GST_3', 'GST_5', 'GST_12', 'GST_18', 'GST_28', 'GST_APPAREL'];
 
 const manufacturing: Section = {
@@ -47,7 +48,7 @@ const flipkartCommercial: Section[] = [
     fields: [
       { key: 'mrp', label: 'MRP', type: 'money', required: true, unit: 'INR', min: 1 },
       { key: 'sellingPrice', label: 'Your selling price', type: 'money', required: true, unit: 'INR', min: 1, help: 'You can change this price if needed' },
-      { key: 'minOrderQty', label: 'Minimum Order Quantity (MinOQ)', type: 'select', options: MINOQ },
+      { key: 'minOrderQty', label: 'Minimum Order Quantity (MinOQ)', type: 'select', options: MINOQ, help: 'Only if Flipkart offers MinOQ in your category' },
     ],
   },
   {
@@ -88,7 +89,7 @@ const amazonCommercial: Section[] = [
   { title: 'Price details', fields: [
     { key: 'mrp', label: 'Maximum Retail Price (MRP)', type: 'money', required: true, unit: 'INR', min: 1 },
     { key: 'sellingPrice', label: 'Your price', type: 'money', required: true, unit: 'INR', min: 1 },
-    { key: 'minOrderQty', label: 'Minimum Order Quantity', type: 'select', options: MINOQ },
+    { key: 'minOrderQty', label: 'Minimum Order Quantity', type: 'select', options: MINOQ, help: 'Only if your category supports it' },
   ] },
   { title: 'Inventory details', fields: [
     { key: 'fulfilmentChannel', label: 'Fulfilment channel', type: 'select', required: true, options: ['Easy Ship (Amazon delivers)', 'Self Ship', 'Fulfilled by Amazon (FBA)', 'Seller Flex'] },
@@ -154,6 +155,20 @@ export const FORMS: FormDef[] = [
 ];
 
 export const formFor = (mp: Marketplace, kind: FormKind) => FORMS.find((f) => f.marketplace === mp && f.kind === kind)!;
+
+/**
+ * The marketplace product ID inside a pasted link (or the ID itself): Amazon ASIN, Flipkart FSN.
+ * Product details are NOT fetched from the page (no scraping) — that comes from the marketplace APIs once approved.
+ */
+export function productRef(mp: Marketplace, value: string): { type: 'ASIN' | 'FSN'; id: string } | null {
+  const v = value.trim();
+  if (mp === 'AMAZON') {
+    const m = /(?:\/dp\/|\/gp\/product\/|\/gp\/aw\/d\/|[?&]asin=)([A-Z0-9]{10})(?=[/?&#]|$)/i.exec(v) ?? /^([A-Z0-9]{10})$/i.exec(v);
+    return m ? { type: 'ASIN', id: m[1].toUpperCase() } : null;
+  }
+  const m = /[?&]pid=([A-Z0-9]{16})(?=[&#]|$)/i.exec(v) ?? /^([A-Z0-9]{16})$/i.exec(v);
+  return m ? { type: 'FSN', id: m[1].toUpperCase() } : null;
+}
 const fields = (f: FormDef) => f.sections.flatMap((s) => s.fields);
 
 /** Normalises and validates submitted values. Returns clean data (known keys only) and per-field errors. */
@@ -183,5 +198,10 @@ export function validateForm(def: FormDef, input: Record<string, unknown>, { par
   }
   if (typeof data.mrp === 'number' && typeof data.sellingPrice === 'number' && data.sellingPrice > data.mrp) errors.sellingPrice = 'Selling price cannot be more than MRP';
   if (typeof data.hsn === 'string' && !/^\d{4,8}$/.test(data.hsn)) errors.hsn = 'HSN must be 4 to 8 digits';
+  if (typeof data.productLink === 'string') {
+    const ref = productRef(def.marketplace, data.productLink);
+    if (ref) data.productRef = ref.id;
+    else if (!/^https?:\/\//i.test(data.productLink)) errors.productLink = `Paste the product page link or a valid ${def.marketplace === 'AMAZON' ? 'ASIN (10 characters)' : 'FSN (16 characters)'}`;
+  }
   return { data, errors };
 }

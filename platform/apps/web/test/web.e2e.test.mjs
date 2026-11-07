@@ -532,17 +532,18 @@ test('client: onboarding checklist, marketplace details (no passwords), product 
   await c.click('button:has-text("Submit mapping request")');
   await c.getByText('Please fix the highlighted fields').waitFor();
   await c.getByText('Seller SKU ID is required').waitFor();
-  await c.fill('#f-productLink', 'https://www.flipkart.com/jute-runner/p/itm123?pid=JTRFX12345');
+  await c.fill('#f-productLink', 'https://www.flipkart.com/jute-runner/p/itm123?pid=JTRFXQ7ZGHK2LMNP&lid=LST1');
+  await c.getByTestId('product-ref').getByText('FSN: JTRFXQ7ZGHK2LMNP').waitFor();
   await c.fill('#f-sellerSku', 'JTR-FK-1'); await c.selectOption('#f-listingStatus', 'Active');
   await c.fill('#f-mrp', '899'); await c.fill('#f-sellingPrice', '649'); await c.selectOption('#f-minOrderQty', '2');
   await c.selectOption('#f-fulfilmentBy', 'Seller'); await c.selectOption('#f-procurementType', 'Instock'); await c.fill('#f-procurementSlaDays', '2'); await c.fill('#f-stock', '40');
   await c.selectOption('#f-shippingProvider', 'Flipkart'); await c.fill('#f-weightKg', '0.4');
   await c.fill('#f-hsn', '6304'); await c.selectOption('#f-taxCode', 'GST_12');
   await c.selectOption('#f-countryOfOrigin', 'India'); await c.fill('#f-manufacturerDetails', 'Riya Lifestyle, Mumbai'); await c.fill('#f-packerDetails', 'Riya Lifestyle, Mumbai');
-  await c.check('text=Save these details as a template for similar products');
+  assert.deepEqual(await c.locator('#f-minOrderQty option').allInnerTexts(), ['Select One', '1', '2'], 'MinOQ starts at 1 or 2');
   await c.fill('#tpl-name', 'Jute runner — pack of 2');
   await c.screenshot({ path: join(SHOTS, '10-listing-form.png'), fullPage: true });
-  await c.click('button:has-text("Submit mapping request")');
+  await c.click('button:has-text("Save template & submit mapping request")');
   await c.getByText('Request sent to your manager and saved as template "Jute runner — pack of 2"', { exact: false }).waitFor();
   await c.getByRole('region', { name: 'Your listing requests' }).getByText('(SKU JTR-FK-1)', { exact: false }).waitFor();
   // The template brings the details back for the next similar product.
