@@ -59,3 +59,10 @@ Current placeholder: item line, SKU sorting and picklist page. Owner has a diffe
 ## 4. Marketplace access
 Decided 7 Nov 2026 (owner): option B — clients "Add a new user" (one SOLLUNA ops ID for all); interim seller-portal automation with that login until APIs are approved; clients accept Terms §6 at purchase. Plan and pending inputs: `docs/plans/SELLER_PORTAL_AUTOMATION.md`. API applications (Amazon SP-API, Ads API, Flipkart Seller API) still to be prepared and submitted.
 Open: whether the client-facing manager is labelled as AI in chat (owner to decide).
+
+## 5. Admin panel + "CEO" agent — LAST (owner, 7 Nov 2026)
+Admin panel review is pending. Plan: an internal "CEO" agent for the owner that reports across all clients — errors, blocked tasks, missed SLAs, renewals, plan usage, what each client manager did. Internal only (staff), read-mostly, every client's data is reached through the same audited, tenant-scoped tools. To be designed after the client-manager agent is live.
+
+## 6. Client manager agent — design agreed in chat (7 Nov 2026)
+One manager agent per client: SOLLUNA skills as its playbook, per-client memory, tenant-scoped tools (client never chosen by the model), human takeover, chat scope limited to SOLLUNA services, never says "AI" but never claims to be human if asked directly. Model: owner wants a basic, low-cost model (no heavy reasoning needed). Self-hosting on Google Colab rejected (sessions disconnect, no 24×7, Colab terms, client KYC data). Product lookup by FSN: Claude web search is NOT proven for raw FSNs (to be tested with a key); the reliable source is Seller Hub's own catalog search through the ops login.
+
