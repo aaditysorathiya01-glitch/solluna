@@ -529,7 +529,7 @@ test('client: onboarding checklist, marketplace details (no passwords), product 
   await c.getByRole('tab', { name: 'Flipkart' }).click();
   await c.getByRole('tab', { name: 'Mapping' }).click();
   await c.getByRole('heading', { name: 'Flipkart — map to an existing product' }).waitFor();
-  for (const label of ['Seller SKU ID', 'Listing Status', 'MRP', 'Your selling price', 'Minimum Order Quantity (MinOQ)', 'Fullfilment by', 'Procurement type', 'Procurement SLA', 'Stock', 'Shipping provider', 'Local handling fee', 'Zonal handling fee', 'National handling fee', 'Length', 'Breadth', 'Height', 'Weight', 'HSN', 'Luxury Cess', 'Tax Code', 'Country Of Origin', 'Manufacturer Details', 'Packer Details', 'Importer Details', 'Manufacturing date', 'Shelf Life']) {
+  for (const label of ['Seller SKU ID', 'Listing Status', 'MRP', 'Your selling price', 'Minimum Order Quantity (MinOQ)', 'Procurement type', 'Procurement SLA', 'Stock', 'Local handling fee', 'Zonal handling fee', 'National handling fee', 'Length', 'Breadth', 'Height', 'Weight', 'HSN', 'Luxury Cess', 'Tax Code', 'Country Of Origin', 'Manufacturer Details', 'Packer Details', 'Importer Details', 'Manufacturing date', 'Shelf Life']) {
     assert.equal(await c.locator('label', { hasText: label }).count() >= 1, true, `field ${label}`);
   }
   await c.click('button:has-text("Submit mapping request")');
@@ -546,8 +546,8 @@ test('client: onboarding checklist, marketplace details (no passwords), product 
   await c.screenshot({ path: join(SHOTS, '10-lookup.png'), fullPage: true });
   await c.fill('#f-sellerSku', 'JTR-FK-1'); await c.selectOption('#f-listingStatus', 'Active');
   await c.fill('#f-mrp', '899'); await c.fill('#f-sellingPrice', '649'); await c.selectOption('#f-minOrderQty', '2');
-  await c.selectOption('#f-fulfilmentBy', 'Seller'); await c.selectOption('#f-procurementType', 'Instock'); await c.fill('#f-procurementSlaDays', '2'); await c.fill('#f-stock', '40');
-  await c.selectOption('#f-shippingProvider', 'Flipkart'); await c.fill('#f-lengthCm', '35'); await c.fill('#f-breadthCm', '25'); await c.fill('#f-heightCm', '3'); await c.fill('#f-weightKg', '0.4');
+  await c.selectOption('#f-procurementType', 'Instock'); await c.fill('#f-procurementSlaDays', '2'); await c.fill('#f-stock', '40');
+  assert.equal(await c.locator('#f-fulfilmentBy, #f-shippingProvider').count(), 0, 'fulfilment and shipping provider are fixed'); await c.fill('#f-lengthCm', '35'); await c.fill('#f-breadthCm', '25'); await c.fill('#f-heightCm', '3'); await c.fill('#f-weightKg', '0.4');
   await c.fill('#f-hsn', '6304'); await c.selectOption('#f-taxCode', 'GST_12');
   await c.selectOption('#f-countryOfOrigin', 'India'); await c.fill('#f-manufacturerDetails', 'Riya Lifestyle, Mumbai'); await c.fill('#f-packerDetails', 'Riya Lifestyle, Mumbai');
   assert.deepEqual(await c.locator('#f-minOrderQty option').allInnerTexts(), ['Select One', '1', '2'], 'MinOQ starts at 1 or 2');

@@ -1260,7 +1260,7 @@ test('label cropper: plan modes enforced by the API; auto crop and specialised p
 
 test('listing & mapping forms: validation, mapping + new-listing workflow records, quota, templates', async () => {
   const c = await registerCustomer('Farah'); await pay(c, 'RESELLER');
-  const base = { sellerSku: 'TC-1L', listingStatus: 'Active', mrp: 199, sellingPrice: 189, fulfilmentBy: 'Seller', procurementType: 'Instock', procurementSlaDays: 2, lengthCm: 10, breadthCm: 8, heightCm: 25, weightKg: 1.1, stock: 50, hsn: '38249900', taxCode: 'GST_18', countryOfOrigin: 'India', manufacturerDetails: 'Pidilite Industries, Mumbai', packerDetails: 'Pidilite Industries, Mumbai' };
+  const base = { sellerSku: 'TC-1L', listingStatus: 'Active', mrp: 199, sellingPrice: 189, procurementType: 'Instock', procurementSlaDays: 2, lengthCm: 10, breadthCm: 8, heightCm: 25, weightKg: 1.1, stock: 50, hsn: '38249900', taxCode: 'GST_18', countryOfOrigin: 'India', manufacturerDetails: 'Pidilite Industries, Mumbai', packerDetails: 'Pidilite Industries, Mumbai' };
   const bad = await call('POST', '/catalog-forms', { token: c, body: { marketplace: 'FLIPKART', kind: 'MAPPING', data: { ...base, productLink: 'abc', sellerSku: '', procurementType: '', weightKg: '', mrp: 100, sellingPrice: 150, hsn: '12', minOrderQty: '5' } } });
   assert.equal(bad.status, 400);
   assert.ok(bad.body.fieldErrors.productLink && !bad.body.fieldErrors.sellerSku && bad.body.fieldErrors.procurementType && bad.body.fieldErrors.weightKg && bad.body.fieldErrors.sellingPrice && bad.body.fieldErrors.hsn && bad.body.fieldErrors.minOrderQty, JSON.stringify(bad.body.fieldErrors));
@@ -1269,6 +1269,7 @@ test('listing & mapping forms: validation, mapping + new-listing workflow record
   assert.equal(m.template.name, 'Tile cleaner 1L');
   const req = await db.serviceRequest.findUnique({ where: { id: m.request.id } });
   assert.equal(req.featureKey, 'CATALOG_MAPPING'); assert.equal(req.details.fields.sellingPrice, 189); assert.equal(req.details.fields.productRef, 'TCLFX7ZGHYQ2KJWE', 'FSN taken from the link'); assert.match(req.title, /Flipkart mapping: TCLFX7ZGHYQ2KJWE \(SKU TC-1L\)/);
+  assert.equal(req.details.fields.fulfilmentBy, 'Seller'); assert.equal(req.details.fields.shippingProvider, 'Flipkart', 'fixed Flipkart values');
   assert.equal(req.details.fields.productName, undefined, 'no product name field on Flipkart mapping');
   // Blank optional fields get the agreed defaults; blank SKU gets a generated one.
   assert.deepEqual([req.details.fields.localHandlingFee, req.details.fields.zonalHandlingFee, req.details.fields.nationalHandlingFee, req.details.fields.luxuryCessPct, req.details.fields.importerDetails], [0, 0, 0, 0, 'None']);

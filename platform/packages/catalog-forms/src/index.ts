@@ -15,7 +15,9 @@ export interface Field {
   autoSku?: boolean;
 }
 export interface Section { title: string; note?: string; fields: Field[] }
-export interface FormDef { marketplace: Marketplace; kind: FormKind; title: string; intro: string; draft: boolean; sections: Section[] }
+export interface FormDef { marketplace: Marketplace; kind: FormKind; title: string; intro: string; draft: boolean; sections: Section[];
+  /** Values SOLLUNA always uses for this form (not shown to the client). */
+  fixed?: Record<string, string> }
 
 const COUNTRIES = ['India', 'China', 'Bangladesh', 'Vietnam', 'Sri Lanka', 'Nepal', 'Thailand', 'Indonesia', 'Malaysia', 'Taiwan', 'South Korea', 'Japan', 'Turkey', 'United Arab Emirates', 'Germany', 'Italy', 'United Kingdom', 'United States', 'Other'];
 /** MinOQ is offered only in some categories, and starts with 1 or 2. */
@@ -50,6 +52,9 @@ const flipkartManufacturing: Section = {
 const flipkartPackage: Section = { ...packageDetails, fields: packageDetails.fields.map((f) => ({ ...f, required: true, min: 0.01 })) };
 const zeroIfBlank = { blankAs: 0, help: 'Leave blank if you don’t charge it — we enter 0' };
 
+/** Owner decision 7 Nov 2026: Flipkart offers are always seller-fulfilled and shipped by Flipkart. */
+const FLIPKART_FIXED = { fulfilmentBy: 'Seller', shippingProvider: 'Flipkart' };
+
 const flipkartCommercial: Section[] = [
   { title: 'Listing information', fields: [{ key: 'sellerSku', label: 'Seller SKU ID', type: 'text', maxLength: 64, autoSku: true, placeholder: 'Your own SKU code', help: 'Optional — leave blank and SOLLUNA creates one for you' }] },
   { title: 'Status Details', fields: [{ key: 'listingStatus', label: 'Listing Status', type: 'select', required: true, options: ['Active', 'Inactive'] }] },
@@ -65,13 +70,11 @@ const flipkartCommercial: Section[] = [
   {
     title: 'Inventory details',
     fields: [
-      { key: 'fulfilmentBy', label: 'Fullfilment by', type: 'select', required: true, options: ['Seller', 'Flipkart (FBF)'] },
       { key: 'procurementType', label: 'Procurement type', type: 'select', required: true, options: ['Instock', 'Express', 'Domestic procurement', 'International procurement', 'Made to order'] },
       { key: 'procurementSlaDays', label: 'Procurement SLA', type: 'number', required: true, unit: 'days', min: 0, max: 60 },
       { key: 'stock', label: 'Stock', type: 'number', required: true, min: 0, max: 1_000_000 },
     ],
   },
-  { title: 'Shipping provider', fields: [{ key: 'shippingProvider', label: 'Shipping provider', type: 'select', options: ['Flipkart', 'Seller'] }] },
   {
     title: 'Handling Fee Charged To Customer',
     fields: [
@@ -133,7 +136,7 @@ const productInfo = (mp: Marketplace): Section => ({
 
 export const FORMS: FormDef[] = [
   {
-    marketplace: 'FLIPKART', kind: 'MAPPING', draft: false, title: 'Flipkart — map to an existing product',
+    marketplace: 'FLIPKART', kind: 'MAPPING', draft: false, fixed: FLIPKART_FIXED, title: 'Flipkart — map to an existing product',
     intro: 'The product is already on Flipkart (it has an FSN). We add your offer to it.',
     sections: [
       { title: 'Request details', fields: [
@@ -143,7 +146,7 @@ export const FORMS: FormDef[] = [
     ],
   },
   {
-    marketplace: 'FLIPKART', kind: 'NEW_LISTING', draft: true, title: 'Flipkart — new listing',
+    marketplace: 'FLIPKART', kind: 'NEW_LISTING', draft: true, fixed: FLIPKART_FIXED, title: 'Flipkart — new listing',
     intro: 'The product is not on Flipkart yet. We create the catalog page and your listing.',
     sections: [productInfo('FLIPKART'), ...flipkartCommercial],
   },
@@ -226,5 +229,6 @@ export function validateForm(def: FormDef, input: Record<string, unknown>, { par
     if (ref) data.productRef = ref.id;
     else if (!/^https?:\/\//i.test(data.productLink)) errors.productLink = `Paste the product page link or a valid ${def.marketplace === 'AMAZON' ? 'ASIN (10 characters)' : 'FSN (16 characters)'}`;
   }
+  if (!partial && def.fixed) Object.assign(data, def.fixed);
   return { data, errors };
 }
