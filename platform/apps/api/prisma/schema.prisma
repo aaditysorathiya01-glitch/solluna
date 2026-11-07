@@ -1062,3 +1062,27 @@ model CatalogTemplate {
 
   @@unique([organizationId, marketplace, kind, name])
 }
+
+/// Online product-details lookup for the Listings & Mapping forms (Claude web search). Runs in the background
+/// processor; results only pre-fill empty form fields and are always checked by the client before submitting.
+model ProductLookup {
+  id             String    @id @default(cuid())
+  organizationId String
+  createdById    String
+  marketplace    String
+  kind           String
+  link           String
+  ref            String? // ASIN / FSN or normalised link, used to reuse a recent result
+  status         String    @default("QUEUED") // QUEUED | RUNNING | DONE | FAILED
+  result         Json?
+  sources        Json?
+  notes          String?
+  error          String?
+  cached         Boolean   @default(false)
+  createdAt      DateTime  @default(now())
+  finishedAt     DateTime?
+
+  @@index([organizationId, createdAt])
+  @@index([status])
+  @@index([marketplace, ref])
+}

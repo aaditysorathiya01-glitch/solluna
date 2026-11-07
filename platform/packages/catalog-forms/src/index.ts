@@ -107,6 +107,7 @@ const amazonCommercial: Section[] = [
 const productInfo = (mp: Marketplace): Section => ({
   title: 'Product information',
   fields: [
+    { key: 'referenceLink', label: 'Same product on another site (link)', type: 'url', maxLength: 500, placeholder: mp === 'AMAZON' ? 'Flipkart / brand website link' : 'Amazon / brand website link', help: 'Optional — we fill the product details from it' },
     { key: 'productTitle', label: 'Product title', type: 'text', required: true, maxLength: 200 },
     { key: 'brand', label: 'Brand', type: 'text', required: true, maxLength: 80 },
     { key: 'category', label: mp === 'FLIPKART' ? 'Vertical / category' : 'Product type / category', type: 'text', required: true, maxLength: 120 },

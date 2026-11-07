@@ -11,6 +11,7 @@
     "@types/express": "^5.0.6"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "^1.6.0",
     "@napi-rs/canvas": "^1.1.0",
     "@nestjs/common": "^11.2.8",
     "@nestjs/core": "^11.2.8",

@@ -20,10 +20,11 @@ Verified on 2026-11-05. Recheck before relying on it, because connections change
 | Email / WhatsApp notifications | Zapier → Gmail (after fixing the account) | Volume exceeds about 1k/month → Resend/SES |
 | Payments | — (no connector) | **Razorpay required**: no existing alternative |
 | Amazon / Flipkart data | — (no connector) | **SP-API / Flipkart Seller API required**. Manual exports until approved. |
+| Product details from a link / ASIN / FSN (listing forms) | **Claude API web search + web fetch** (`ANTHROPIC_API_KEY`), added 2026-11-07 — no existing connector finds product data | SP-API Catalog Items approved → use it first for Amazon; keep Claude for Flipkart and other sites |
 | Real-time chat | — | Socket.IO in the platform |
 
 ## Gaps (none of the connectors cover these)
-Razorpay, Amazon SP-API, Amazon Ads API, Flipkart Seller API. These are the only new integrations the MVP needs.
+Razorpay, Amazon SP-API, Amazon Ads API, Flipkart Seller API, and the Claude API (product lookup for the listing forms).
 
 ## Platform wiring (built)
 - **Events → Zapier:** the API POSTs every client event (request created/updated, approval requested, subscription activated, payment failed, renewal reminder, grace, past due) to `CONNECTOR_WEBHOOK_URL`, signed with `x-solluna-signature` (HMAC-SHA256 of the body using `CONNECTOR_WEBHOOK_SECRET`). Payload: `type, organizationId, title, body, data, organization{legalName, brandName, contactEmail}`.
@@ -34,3 +35,4 @@ Razorpay, Amazon SP-API, Amazon Ads API, Flipkart Seller API. These are the only
 1. Create a Zap with trigger **Webhooks by Zapier → Catch Hook**, then copy the URL into `CONNECTOR_WEBHOOK_URL`.
 2. Action **Gmail → Send Email** to `organization.contactEmail` with subject `title` and body `body`, from a **SOLLUNA** Gmail account (not fitin15india).
 3. Optional action: **Google Sheets → Create Spreadsheet Row** in an "Ops event log" sheet.
+- **Product lookup:** `POST /api/catalog-forms/lookup` queues a background job; Claude (`claude-opus-5-5`, `LOOKUP_MODEL` to change) searches the web and fetches the pasted link, then returns details through a strict `submit_product_details` tool. Results only pre-fill empty form fields, marked "from web — check"; the same product is reused for 7 days; `LOOKUP_DAILY_LIMIT` (default 25) per client per day. Without `ANTHROPIC_API_KEY` the button is hidden and clients fill the form manually. Our servers never scrape marketplace pages.

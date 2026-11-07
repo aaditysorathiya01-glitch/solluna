@@ -28,7 +28,8 @@ const CONNECTOR_SECRET = 'e2e_connector_secret';
 const SUPPLIER_GSTIN = '24OPVPS8924H1ZQ'; // Solluna (GST REG-06), Gujarat
 const ADMIN = { email: 'admin@solluna.test', password: 'Admin-Passw0rd-123' };
 
-let api, base, db, rzpServer, sinkServer;
+let api, base, db, rzpServer, sinkServer, claude;
+import { startClaudeMock, PRODUCT } from './claude-mock.mjs';
 const orders = [];      // orders received by the Razorpay mock
 const connectorEvents = []; // events received by the connector sink
 
@@ -57,6 +58,7 @@ before(async () => {
   });
   const rzpPort = await listen(rzpServer);
   const sinkPort = await listen(sinkServer);
+  claude = await startClaudeMock();
   const port = 4300 + Math.floor(Math.random() * 500);
   base = `http://127.0.0.1:${port}/api`;
 
@@ -65,7 +67,7 @@ before(async () => {
     env: {
       ...process.env, DATABASE_URL, PORT: String(port), JWT_SECRET: 'e2e-jwt-secret-e2e-jwt-secret-1234', COOKIE_SECURE: 'false',
       RAZORPAY_KEY_ID: KEY_ID, RAZORPAY_KEY_SECRET: KEY_SECRET, RAZORPAY_WEBHOOK_SECRET: WEBHOOK_SECRET, RAZORPAY_API_BASE: `http://127.0.0.1:${rzpPort}`,
-      CONNECTOR_WEBHOOK_URL: `http://127.0.0.1:${sinkPort}/hook`, CONNECTOR_WEBHOOK_SECRET: CONNECTOR_SECRET, RATE_LIMIT_PER_MIN: '10000', AUTH_RATE_LIMIT_PER_MIN: '40', MAX_UPLOAD_MB: '1', MANAGER_ASSIGN_DELAY_MIN: '0', MANAGER_MESSAGE_GAP_SEC: '0',
+      CONNECTOR_WEBHOOK_URL: `http://127.0.0.1:${sinkPort}/hook`, CONNECTOR_WEBHOOK_SECRET: CONNECTOR_SECRET, RATE_LIMIT_PER_MIN: '10000', AUTH_RATE_LIMIT_PER_MIN: '40', MAX_UPLOAD_MB: '1', MANAGER_ASSIGN_DELAY_MIN: '0', MANAGER_MESSAGE_GAP_SEC: '0', ANTHROPIC_API_KEY: 'test-key', ANTHROPIC_BASE_URL: `http://127.0.0.1:${claude.port}`, LOOKUP_DAILY_LIMIT: '3',
       SUPPLIER_LEGAL_NAME: 'Aaditya Jitendrabhai Sorathia', SUPPLIER_TRADE_NAME: 'Solluna', SUPPLIER_GSTIN: SUPPLIER_GSTIN, SUPPLIER_ADDRESS: 'Survey No 135, Plot No 9, Shreeji Nagar, Meghpar Kumbhardi Sim, Anjar, Kachchh, Gujarat 370110', INVOICE_SAC: '998399',
     },
     stdio: ['ignore', 'pipe', 'pipe'],
@@ -83,7 +85,7 @@ before(async () => {
 
 after(async () => {
   api?.kill();
-  rzpServer?.close();
+  rzpServer?.close(); claude?.close();
   sinkServer?.close();
   await db?.$disconnect();
 });
@@ -1287,6 +1289,41 @@ test('listing & mapping forms: validation, mapping + new-listing workflow record
   assert.equal((await call('DELETE', `/catalog-forms/templates/${t.id}`, { token: other })).status, 404, 'tenant isolation');
   ok(await call('DELETE', `/catalog-forms/templates/${t.id}`, { token: c }));
   assert.equal(ok(await call('GET', '/catalog-forms', { token: c })).templates.length, 0);
+});
+
+test('product lookup: link → background web lookup → only valid form fields; cache, pause_turn, not found, daily limit, isolation', async () => {
+  const c = await registerCustomer('Lata'); await pay(c, 'GROWTH');
+  assert.equal(ok(await call('GET', '/catalog-forms', { token: c })).lookupAvailable, true);
+  const wait = async (id, token = c) => { for (let i = 0; i < 40; i++) { const r = ok(await call('GET', `/catalog-forms/lookup/${id}`, { token })); if (r.status === 'DONE' || r.status === 'FAILED') return r; await new Promise((x) => setTimeout(x, 200)); } throw new Error('lookup did not finish'); };
+  const link = 'https://www.flipkart.com/roff/p/itm1?pid=TCLFX7ZGHYQ2KJWE';
+  const start = ok(await call('POST', '/catalog-forms/lookup', { token: c, body: { marketplace: 'FLIPKART', kind: 'MAPPING', link } }));
+  assert.equal(start.status, 'QUEUED', 'runs in the background, not in the request');
+  const r = await wait(start.id);
+  assert.equal(r.status, 'DONE');
+  assert.deepEqual(r.fields, { productName: PRODUCT.product_name, mrp: 249, lengthCm: 9, breadthCm: 6, heightCm: 27, weightKg: 1.1, hsn: '34022090', taxCode: 'GST_18', countryOfOrigin: 'India', manufacturerDetails: PRODUCT.manufacturer, packerDetails: PRODUCT.packer, shelfLifeMonths: 24 }, 'only the mapping form\'s fields');
+  assert.equal(r.fields.sellerSku, undefined, 'seller data is never invented');
+  const req = claude.calls[claude.calls.length - 1];
+  assert.equal(req.body.model, 'claude-opus-5-5'); assert.equal(req.body.fallbacks, 'default');
+  assert.deepEqual(req.body.tools.map((t) => t.type ?? t.name), ['web_search_20260209', 'web_fetch_20260209', 'submit_product_details']);
+  assert.match(JSON.stringify(req.body.messages[0].content), /TCLFX7ZGHYQ2KJWE/);
+
+  // New listing form: same product, its own fields (title, features, images…); reused for 7 days without a new API call.
+  const before = claude.calls.length;
+  const nl = await wait(ok(await call('POST', '/catalog-forms/lookup', { token: c, body: { marketplace: 'FLIPKART', kind: 'NEW_LISTING', link: 'TCLFX7ZGHYQ2KJWE' } })).id);
+  assert.equal(nl.cached, true); assert.equal(claude.calls.length, before, 'cached result, no new lookup');
+  assert.equal(nl.fields.productTitle, PRODUCT.product_name); assert.equal(nl.fields.brand, 'Roff'); assert.equal(nl.fields.productId, '8901234567897'); assert.equal(nl.fields.productIdType, 'EAN');
+  assert.match(nl.fields.keyFeatures, /Removes tough stains\nSafe on tiles/);
+
+  const p = await wait(ok(await call('POST', '/catalog-forms/lookup', { token: c, body: { marketplace: 'AMAZON', kind: 'MAPPING', link: 'https://www.amazon.in/x/dp/B0PAUSE001' } })).id);
+  assert.equal(p.status, 'DONE', 'pause_turn is resumed');
+  const resumed = claude.calls[claude.calls.length - 1].body.messages;
+  assert.equal(resumed.length, 2); assert.equal(resumed[1].role, 'assistant'); assert.equal(resumed[1].content[0].type, 'server_tool_use');
+  const nf = await wait(ok(await call('POST', '/catalog-forms/lookup', { token: c, body: { marketplace: 'AMAZON', kind: 'MAPPING', link: 'https://www.amazon.in/notfound/dp/B0NOTFOUND' } })).id);
+  assert.equal(nf.status, 'FAILED'); assert.match(nf.error, /could not find this product/);
+  assert.equal((await call('POST', '/catalog-forms/lookup', { token: c, body: { marketplace: 'AMAZON', kind: 'MAPPING', link: 'https://www.amazon.in/dp/B0LIMIT0001' } })).status, 429, 'daily limit (3 in tests)');
+  assert.equal((await call('POST', '/catalog-forms/lookup', { token: c, body: { marketplace: 'FLIPKART', kind: 'MAPPING', link: 'just words' } })).status, 400);
+  const other = await registerCustomer('Mohan'); await pay(other, 'RESELLER');
+  assert.equal((await call('GET', `/catalog-forms/lookup/${start.id}`, { token: other })).status, 404, 'tenant isolation');
 });
 
 test('security: login brute force is rate limited per IP', async () => {

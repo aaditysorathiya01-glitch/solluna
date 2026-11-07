@@ -1,5 +1,5 @@
 'use client';
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { formFor, productRef, type Field, type FormKind, type Marketplace } from '../../../packages/catalog-forms/src';
 import { api, ApiError } from '@/lib/api';
 import { Status, SubTabs } from './ui';
@@ -7,6 +7,7 @@ import { Status, SubTabs } from './ui';
 interface Template { id: string; marketplace: Marketplace; kind: FormKind; name: string; data: Record<string, string | number>; updatedAt: string }
 interface Submission { id: string; marketplace: Marketplace; kind: FormKind; title: string; createdAt: string; status: string | null; entitlement: string | null }
 type Values = Record<string, string>;
+interface Lookup { id: string; status: 'QUEUED' | 'RUNNING' | 'DONE' | 'FAILED'; fields: Record<string, string | number>; sources: string[]; notes: string | null; error: string | null; cached: boolean }
 
 const KIND_LABEL: Record<FormKind, string> = { MAPPING: 'Mapping', NEW_LISTING: 'New listing' };
 
@@ -22,17 +23,23 @@ export function CatalogForms() {
   const [templateName, setTemplateName] = useState('');
   const [busy, setBusy] = useState<'submit' | 'template' | null>(null);
   const [msg, setMsg] = useState<{ ok?: string; err?: string }>({});
+  const [lookupAvailable, setLookupAvailable] = useState(false);
+  const [lookup, setLookup] = useState<{ state: 'idle' | 'running' | 'done' | 'failed'; text?: string; sources?: string[]; link?: string }>({ state: 'idle' });
+  const [fromWeb, setFromWeb] = useState<Set<string>>(new Set());
+  const lookupRun = useRef(0);
+  const valuesRef = useRef<Values>({});
+  valuesRef.current = values;
   const def = formFor(market, kind);
 
   const load = useCallback(async () => {
-    const r = await api<{ submissions: Submission[]; templates: Template[] }>('/catalog-forms');
-    setSubmissions(r.submissions); setTemplates(r.templates);
+    const r = await api<{ submissions: Submission[]; templates: Template[]; lookupAvailable?: boolean }>('/catalog-forms');
+    setSubmissions(r.submissions); setTemplates(r.templates); setLookupAvailable(Boolean(r.lookupAvailable));
   }, []);
   useEffect(() => { load().catch(() => undefined); }, [load]);
   const mine = useMemo(() => templates.filter((t) => t.marketplace === market && t.kind === kind), [templates, market, kind]);
 
   function reset(nextMarket = market, nextKind = kind) {
-    setMarket(nextMarket); setKind(nextKind); setValues({}); setErrors({}); setTemplateId(''); setTemplateName(''); setMsg({});
+    setMarket(nextMarket); setKind(nextKind); setValues({}); setErrors({}); setTemplateId(''); setTemplateName(''); setMsg({}); setFromWeb(new Set()); setLookup({ state: 'idle' }); lookupRun.current++;
   }
   function useTemplate(id: string) {
     setTemplateId(id); setErrors({}); setMsg({});
@@ -40,6 +47,7 @@ export function CatalogForms() {
     if (t) { setValues(Object.fromEntries(Object.entries(t.data).map(([k, v]) => [k, String(v)]))); setTemplateName(t.name); }
   }
   const set = (k: string, v: string) => {
+    if (fromWeb.has(k)) setFromWeb((x) => { const n = new Set(x); n.delete(k); return n; });
     setValues((x) => ({ ...x, [k]: v }));
     if (errors[k]) setErrors((e) => { const n = { ...e }; delete n[k]; if (!Object.keys(n).length) setMsg((m) => ({ ...m, err: undefined })); return n; });
   };
@@ -52,12 +60,47 @@ export function CatalogForms() {
     try {
       const r = await api<{ request: { status: string } }>('/catalog-forms', { method: 'POST', body: { marketplace: market, kind, data: values, ...(saveTemplate ? { saveTemplateAs: name } : {}) } });
       setMsg({ ok: `Request sent to your manager${saveTemplate ? ` and saved as template "${name}"` : ''}. ${r.request.status === 'QUEUED' ? 'Work starts shortly.' : 'See the status below.'}` });
-      setValues({}); setTemplateId(''); setTemplateName('');
+      setValues({}); setTemplateId(''); setTemplateName(''); setFromWeb(new Set()); setLookup({ state: 'idle' });
       await load();
       window.scrollTo({ top: 0, behavior: 'smooth' });
     } catch (e) { fail(e); }
     setBusy(null);
   }
+  /** Finds the product online (background job on the server) and fills only the fields that are still empty. */
+  async function fetchDetails(link: string) {
+    if (!lookupAvailable || !link.trim()) return;
+    const run = ++lookupRun.current;
+    setLookup({ state: 'running', text: 'Finding this product online… this takes up to a minute.', link });
+    try {
+      let r = await api<Lookup>('/catalog-forms/lookup', { method: 'POST', body: { marketplace: market, kind, link } });
+      for (let i = 0; i < 90 && (r.status === 'QUEUED' || r.status === 'RUNNING'); i++) {
+        await new Promise((ok) => setTimeout(ok, 2500));
+        if (run !== lookupRun.current) return;
+        r = await api<Lookup>(`/catalog-forms/lookup/${r.id}`);
+      }
+      if (run !== lookupRun.current) return;
+      if (r.status !== 'DONE') { setLookup({ state: 'failed', text: r.error ?? 'Could not find details online — please fill them in.' }); return; }
+      // Only fields that are still empty right now; what the client typed is never overwritten.
+      const cur = valuesRef.current;
+      const add = Object.fromEntries(Object.entries(r.fields).filter(([k]) => !String(cur[k] ?? '').trim()).map(([k, v]) => [k, String(v)]));
+      const filled = Object.keys(add);
+      setValues((x) => ({ ...x, ...Object.fromEntries(Object.entries(add).filter(([k]) => !String(x[k] ?? '').trim())) }));
+      setFromWeb((x) => new Set([...x, ...filled]));
+      const hosts = [...new Set(r.sources.map((u) => { try { return new URL(u).hostname.replace(/^www\./, ''); } catch { return ''; } }).filter(Boolean))];
+      setLookup({ state: 'done', link, sources: hosts, text: filled.length ? `Filled ${filled.length} details from the web — please check the highlighted fields, then add the rest.${r.notes ? ` Note: ${r.notes}` : ''}` : 'Nothing new found online — your fields are unchanged.' });
+    } catch (e) {
+      if (run === lookupRun.current) setLookup({ state: 'failed', text: (e as Error).message });
+    }
+  }
+  // Mapping: start as soon as a valid ASIN / FSN or link is pasted.
+  useEffect(() => {
+    const link = values.productLink ?? '';
+    if (!lookupAvailable || !link || lookup.link === link || !productRef(market, link)) return;
+    const t = setTimeout(() => { fetchDetails(link); }, 700);
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [values.productLink, lookupAvailable, market]);
+
   async function deleteTemplate() {
     const t = templates.find((x) => x.id === templateId);
     if (!t || !window.confirm(`Delete template "${t.name}"?`)) return;
@@ -97,12 +140,21 @@ export function CatalogForms() {
           {templateId && <button className="btn-ghost py-2 text-xs" onClick={deleteTemplate}>Delete template</button>}
         </div>
 
+        {lookupAvailable && lookup.state === 'idle' && <p className="text-xs text-ink-3">Tip: paste the product link first — we fill the product details we can find online, you add the rest.</p>}
+        {lookup.state !== 'idle' && (
+          <div role="status" aria-label="Online lookup" className={`rounded-xl px-4 py-3 text-sm ${lookup.state === 'failed' ? 'bg-amber-50 text-amber-900' : lookup.state === 'running' ? 'bg-ivory text-ink-2' : 'bg-emerald-50 text-emerald-900'}`}>
+            {lookup.text}
+            {lookup.sources && lookup.sources.length > 0 && <span className="mt-1 block text-xs opacity-80">Sources: {lookup.sources.join(', ')}</span>}
+          </div>
+        )}
         {def.sections.map((s) => (
           <fieldset key={s.title} className="space-y-3">
             <legend className="text-sm font-semibold">{s.title}</legend>
             {s.note && <p className="rounded-lg bg-sun/10 px-3 py-2 text-xs text-ink-2">{s.note}</p>}
             <div className="grid gap-3 sm:grid-cols-2">
-              {s.fields.map((f) => <FieldInput key={f.key} f={f} value={values[f.key] ?? ''} error={errors[f.key]} onChange={(v) => set(f.key, v)} note={f.key === 'productLink' ? refNote(market, values.productLink ?? '') : undefined} />)}
+              {s.fields.map((f) => <FieldInput key={f.key} f={f} value={values[f.key] ?? ''} error={errors[f.key]} onChange={(v) => set(f.key, v)} fromWeb={fromWeb.has(f.key)}
+                note={f.key === 'productLink' ? refNote(market, values.productLink ?? '') : undefined}
+                action={lookupAvailable && (f.key === 'productLink' || f.key === 'referenceLink') && (values[f.key] ?? '').trim() ? { label: lookup.state === 'running' ? 'Finding…' : 'Fetch details', disabled: lookup.state === 'running', run: () => fetchDetails(values[f.key] ?? '') } : undefined} />)}
             </div>
           </fieldset>
         ))}
@@ -141,10 +193,10 @@ function refNote(mp: Marketplace, link: string) {
   return { ok: false, text: /^https?:\/\//i.test(link.trim()) ? `${mp === 'AMAZON' ? 'ASIN' : 'FSN'} not visible in this link — your manager will open it to confirm the product.` : `Paste the product page link or the ${mp === 'AMAZON' ? '10-character ASIN' : '16-character FSN'}.` };
 }
 
-function FieldInput({ f, value, error, onChange, note }: { f: Field; value: string; error?: string; onChange: (v: string) => void; note?: { ok: boolean; text: string } }) {
+function FieldInput({ f, value, error, onChange, note, fromWeb, action }: { f: Field; value: string; error?: string; onChange: (v: string) => void; note?: { ok: boolean; text: string }; fromWeb?: boolean; action?: { label: string; disabled: boolean; run: () => void } }) {
   const id = `f-${f.key}`;
-  const label = <label className="label" htmlFor={id}>{f.label}{f.required && <span className="text-red-700">*</span>}</label>;
-  const cls = `input ${error ? 'border-red-400' : ''}`;
+  const label = <label className="label" htmlFor={id}>{f.label}{f.required && <span className="text-red-700">*</span>}{fromWeb && <span className="ml-2 chip bg-sky-50 normal-case tracking-normal text-sky-800" data-testid={`web-${f.key}`}>from web — check</span>}</label>;
+  const cls = `input ${error ? 'border-red-400' : fromWeb ? 'border-sky-300 bg-sky-50/40' : ''}`;
   let control;
   if (f.type === 'select') {
     control = <select id={id} className={cls} value={value} onChange={(e) => onChange(e.target.value)}><option value="">Select One</option>{f.options!.map((o) => <option key={o} value={o}>{o}</option>)}</select>;
@@ -161,7 +213,8 @@ function FieldInput({ f, value, error, onChange, note }: { f: Field; value: stri
   }
   return (
     <div className={f.type === 'textarea' ? 'sm:col-span-2' : ''}>
-      {label}{control}
+      {label}
+      {action ? <div className="flex gap-2"><div className="flex-1">{control}</div><button type="button" className="btn-ghost shrink-0 py-2 text-xs" disabled={action.disabled} onClick={action.run}>{action.label}</button></div> : control}
       {error ? <p className="mt-1 text-xs text-red-700">{error}</p> : note ? <p className={`mt-1 text-xs ${note.ok ? 'text-emerald-700' : 'text-amber-800'}`} data-testid="product-ref">{note.text}</p> : f.help && <p className="mt-1 text-xs text-ink-3">{f.help}</p>}
     </div>
   );

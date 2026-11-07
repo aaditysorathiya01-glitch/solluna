@@ -38,6 +38,7 @@ import { AdminClientsController, ChatController, OpsChatController } from './cha
 import { LabelCropsController } from './labels/label-crops.controller';
 import { CatalogFormsController } from './catalog-forms/catalog-forms.controller';
 import { CatalogFormsService } from './catalog-forms/catalog-forms.service';
+import { ProductLookupService } from './catalog-forms/product-lookup.service';
 import { LabelCropsService } from './labels/label-crops.service';
 
 @Module({
@@ -47,7 +48,7 @@ import { LabelCropsService } from './labels/label-crops.service';
   ],
   controllers: [HealthController, AuthController, AccountController, AdminUsersController, PublicController, AdminController, AdminPaymentsController, TicketsController, OpsTicketsController, CatalogController, OpsCatalogController, FulfilmentController, OpsFulfilmentController, BillingController, FeaturesController, NotificationsController, RequestsController, ApprovalsController, OpsController, DocumentsController, ChatController, OpsChatController, AdminClientsController, ClientReportsController, OpsReportsController, OpsDocumentsCaController, LabelCropsController, CatalogFormsController],
   providers: [
-    PrismaService, AuditService, AuthService, RazorpayClient, BillingService, SkillsService, EntitlementsService, DispatcherService, OrchestratorService, AccessService, StorageService, DocumentsService, ChatService, ReportsService, TicketsService, CatalogService, FulfilmentService, AdminService, LabelCropsService, CatalogFormsService,
+    PrismaService, AuditService, AuthService, RazorpayClient, BillingService, SkillsService, EntitlementsService, DispatcherService, OrchestratorService, AccessService, StorageService, DocumentsService, ChatService, ReportsService, TicketsService, CatalogService, FulfilmentService, AdminService, LabelCropsService, CatalogFormsService, ProductLookupService,
     { provide: APP_GUARD, useClass: ThrottlerGuard },
     { provide: APP_GUARD, useClass: AuthGuard },
   ],

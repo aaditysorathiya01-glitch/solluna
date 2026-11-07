@@ -26,6 +26,8 @@ Secrets (`JWT_SECRET`, `DATA_ENCRYPTION_KEY`, `ADMIN_PASSWORD`, `DATABASE_URL`) 
 
 Preview-only settings: `PREVIEW_MODE=true` (enables the no-payment test activation button), `PREVIEW_DEMO_SUBSCRIPTIONS`, `PREVIEW_BANNER` (amber banner + `noindex`), `KEEP_ALIVE_URL`, `TRUST_PROXY_HOPS=1`, `AUTH_RATE_LIMIT_PER_MIN=20`. Manager hand-off timing: `MANAGER_ASSIGN_DELAY_MIN` (default 5), `MANAGER_MESSAGE_GAP_SEC` (default 40).
 
+**Product lookup (listing forms):** add `ANTHROPIC_API_KEY` in Render → solluna-preview → Environment (secret, never committed). Optional: `LOOKUP_MODEL` (default `claude-opus-5-5`), `LOOKUP_DAILY_LIMIT` (default 25 per client per day). Without the key the "Fetch details" button is hidden.
+
 ## Demo data
 Accounts (passwords are held privately by the owner, not in the repository):
 

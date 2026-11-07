@@ -56,11 +56,12 @@ before(async () => {
     });
   });
   const rzpPort = await listen(rzp);
+  const claude = await (await import('../../api/test/claude-mock.mjs')).startClaudeMock();
   const apiPort = 4800 + Math.floor(Math.random() * 100), webPort = 3800 + Math.floor(Math.random() * 100);
   apiBase = `http://127.0.0.1:${apiPort}/api`; webBase = `http://127.0.0.1:${webPort}`;
 
   const a = start('node', ['dist/apps/api/src/main.js'], apiDir, {
-    DATABASE_URL, PORT: String(apiPort), JWT_SECRET: 'web-e2e-secret-web-e2e-secret-123', COOKIE_SECURE: 'false', MANAGER_ASSIGN_DELAY_MIN: '0', MANAGER_MESSAGE_GAP_SEC: '0',
+    DATABASE_URL, PORT: String(apiPort), JWT_SECRET: 'web-e2e-secret-web-e2e-secret-123', COOKIE_SECURE: 'false', MANAGER_ASSIGN_DELAY_MIN: '0', MANAGER_MESSAGE_GAP_SEC: '0', ANTHROPIC_API_KEY: 'test-key', ANTHROPIC_BASE_URL: `http://127.0.0.1:${claude.port}`,
     RAZORPAY_KEY_ID: KEY_ID, RAZORPAY_KEY_SECRET: KEY_SECRET, RAZORPAY_WEBHOOK_SECRET: 'wh', RAZORPAY_API_BASE: `http://127.0.0.1:${rzpPort}`, RATE_LIMIT_PER_MIN: '10000', AUTH_RATE_LIMIT_PER_MIN: '100', EXPOSE_AUTH_LINKS: 'true', APP_URL: 'http://web.invalid',
     SUPPLIER_LEGAL_NAME: 'Aaditya Jitendrabhai Sorathia', SUPPLIER_TRADE_NAME: 'Solluna', SUPPLIER_GSTIN: '24OPVPS8924H1ZQ', SUPPLIER_ADDRESS: 'Survey No 135, Plot No 9, Shreeji Nagar, Meghpar Kumbhardi Sim, Anjar, Kachchh, Gujarat 370110', SUPPLIER_EMAIL: 'solluna.play@gmail.com',
   });
@@ -534,6 +535,12 @@ test('client: onboarding checklist, marketplace details (no passwords), product 
   await c.getByText('Seller SKU ID is required').waitFor();
   await c.fill('#f-productLink', 'https://www.flipkart.com/jute-runner/p/itm123?pid=JTRFXQ7ZGHK2LMNP&lid=LST1');
   await c.getByTestId('product-ref').getByText('FSN: JTRFXQ7ZGHK2LMNP').waitFor();
+  // Pasting the link finds the product online and fills the empty product fields, marked for checking.
+  await c.getByRole('status', { name: 'Online lookup' }).getByText('Filled', { exact: false }).waitFor({ timeout: 20000 });
+  assert.equal(await c.inputValue('#f-hsn'), '34022090');
+  assert.ok(await c.getByTestId('web-hsn').isVisible(), 'prefilled field is marked "from web — check"');
+  assert.equal(await c.inputValue('#f-sellerSku'), '', 'seller data is left to the client');
+  await c.screenshot({ path: join(SHOTS, '10-lookup.png'), fullPage: true });
   await c.fill('#f-sellerSku', 'JTR-FK-1'); await c.selectOption('#f-listingStatus', 'Active');
   await c.fill('#f-mrp', '899'); await c.fill('#f-sellingPrice', '649'); await c.selectOption('#f-minOrderQty', '2');
   await c.selectOption('#f-fulfilmentBy', 'Seller'); await c.selectOption('#f-procurementType', 'Instock'); await c.fill('#f-procurementSlaDays', '2'); await c.fill('#f-stock', '40');
