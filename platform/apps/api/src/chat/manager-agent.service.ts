@@ -10,7 +10,7 @@ import { DispatcherService } from '../connectors/dispatcher.service';
 import { OrchestratorService } from '../orchestrator/orchestrator.service';
 import { ChatService, type ChatMessage } from './chat.service';
 import { systemPrompt, TOOLS } from './manager-prompt';
-import { checkInput, checkOutput, flagNotes, rewriteNote, SAFE_FALLBACK, type InputFlag, type OutputViolation } from './guardrails';
+import { checkInput, checkOutput, flagNotes, rewriteNote, SAFE_FALLBACK, SOFT_VIOLATIONS, type InputFlag, type OutputViolation } from './guardrails';
 
 /**
  * Client manager agent (owner decision, 7 Nov 2026). Each client's assigned manager answers in Manager Chat through
@@ -30,7 +30,10 @@ const PRICE = {
 export const USD_INR = Number(process.env.USD_INR ?? 88);
 const REPLY_DELAY_SEC = Number(process.env.AGENT_REPLY_DELAY_SEC ?? 15);
 const HUMAN_QUIET_MIN = Number(process.env.AGENT_HUMAN_QUIET_MIN ?? 30);
-const HISTORY = 40;
+/** Recent messages sent as-is; older ones live in a rolling summary (memory pattern adapted from claude-mem). */
+const HISTORY = Number(process.env.AGENT_HISTORY ?? 16);
+const DIGEST_AFTER = Number(process.env.AGENT_DIGEST_AFTER ?? 24);
+const DIGEST_SYSTEM = 'You keep the running notes for one client of SOLLUNA (Amazon / Flipkart account management). Update the notes with the new chat lines: what they sell, decisions, requests, pending items, preferences, language. Max 120 words, plain text, no greetings. Never include passwords, OTPs or card numbers.';
 const MAX_TURNS = 6;
 
 const MEMORY_KEY = z.string().trim().min(1).max(60).regex(/^[a-z0-9_.-]+$/i);
@@ -143,12 +146,15 @@ export class ManagerAgentService implements OnModuleInit {
         text = await converse();
         violations = text ? checkOutput(text, guardCtx) : [];
       }
+      // Style alone (soft) never blocks a reply after the one rewrite.
+      violations = violations.filter((x) => !SOFT_VIOLATIONS.includes(x));
       if (refused || violations.length) {
         fallback = true;
         text = SAFE_FALLBACK;
         await this.escalate(bound, { reason: refused ? 'The manager could not answer the last client message automatically.' : `Automatic reply blocked by guardrails (${violations.join(', ')}). Please answer the client.`, priority: 'P2' });
       }
 
+      await this.digest(orgId, conv.id).catch((e) => this.log.warn(`Digest for ${orgId} failed: ${(e as Error).message}`));
       const bubbles = text.split(/\n\s*\n/).map((x) => x.trim()).filter(Boolean).slice(0, 3);
       for (const body of bubbles) await this.chat.postAsManager(orgId, assignment.manager.id, body, { byAgent: true, notify: body === bubbles[0] });
       const cost = (usage.input * PRICE.input + usage.output * PRICE.output + usage.cacheRead * PRICE.cacheRead + usage.cacheWrite * PRICE.cacheWrite); // micro-USD (tokens × $/MTok)
@@ -175,12 +181,15 @@ export class ManagerAgentService implements OnModuleInit {
     ]);
     const client = await this.db.user.findFirst({ where: { organizationId: orgId, type: 'CUSTOMER', isActive: true }, orderBy: { createdAt: 'asc' }, select: { name: true } });
     const included = sub ? sub.plan.features.filter((f) => f.enabled).map((f) => `${FEATURES[f.featureKey as FeatureKey]?.label ?? f.featureKey}${f.limitValue != null ? ` (${f.limitValue}/month)` : ''}`) : [];
+    const summary = memory.find((m) => m.key === 'chat_summary')?.value;
+    const facts = memory.filter((m) => !m.key.startsWith('chat_summary'));
     return [
       `Client: ${client?.name ?? '—'} · Company: ${org.legalName}${org.brandName ? ` · Brand: ${org.brandName}` : ''}${org.gstin ? ` · GSTIN: ${org.gstin}` : ''}${org.city ? ` · ${org.city}` : ''}`,
       `Plan: ${sub ? `${sub.plan.name} (${sub.status})` : 'no active plan'}`,
       `Included services: ${included.join('; ') || '—'}`,
       `Seller accounts: ${accounts.length ? accounts.map((a) => `${a.marketplace} ${a.hasAccount === false ? 'no account yet' : `${a.storeName ?? ''} ${a.sellerId ?? ''} status ${a.status}`}`).join('; ') : 'not recorded yet'}`,
-      `Saved facts: ${memory.length ? memory.map((m) => `${m.key}=${m.value}`).join('; ') : 'none yet'}`,
+      `Saved facts: ${facts.length ? facts.map((m) => `${m.key}=${m.value}`).join('; ') : 'none yet'}`,
+      ...(summary ? [`Earlier chat (summary): ${summary}`] : []),
     ].join('\n');
   }
 
@@ -223,6 +232,36 @@ export class ManagerAgentService implements OnModuleInit {
     const ownNames = new Set((this.otherNames.byOrg.get(orgId) ?? []).map((x) => x.toLowerCase()));
     const otherClientNames = [...this.otherNames.byOrg.entries()].filter(([id]) => id !== orgId).flatMap(([, n]) => n).filter((n) => !ownNames.has(n.toLowerCase()));
     return { ownGstin: own.gstin, ownEmails: [own.contactEmail, ...own.users.map((u) => u.email)], otherClientNames };
+  }
+
+  /**
+   * Rolling chat summary: when enough messages have fallen out of the recent window, fold them into the client's
+   * `chat_summary` memory. The next replies send only the summary + recent messages, so long chats stay cheap.
+   */
+  private async digest(orgId: string, conversationId: string) {
+    const until = (await this.db.agentMemory.findUnique({ where: { organizationId_key: { organizationId: orgId, key: 'chat_summary_until' } } }))?.value;
+    const recent = await this.db.message.findMany({ where: { conversationId, isInternalNote: false }, orderBy: { createdAt: 'desc' }, take: HISTORY, select: { createdAt: true } });
+    if (recent.length < HISTORY) return;
+    const windowStart = recent[recent.length - 1].createdAt;
+    const older = await this.db.message.findMany({
+      where: { conversationId, isInternalNote: false, createdAt: { lt: windowStart, ...(until ? { gt: new Date(until) } : {}) } },
+      orderBy: { createdAt: 'asc' }, take: 200, select: { body: true, senderType: true, createdAt: true },
+    });
+    if (older.length < DIGEST_AFTER) return;
+    const previous = (await this.db.agentMemory.findUnique({ where: { organizationId_key: { organizationId: orgId, key: 'chat_summary' } } }))?.value ?? '(none yet)';
+    const lines = older.map((m) => `${m.senderType === 'CUSTOMER' ? 'Client' : 'Manager'}: ${checkInput(m.body).text}`).join('\n');
+    const res = await new Anthropic().messages.create({
+      model: AGENT_MODEL, max_tokens: 1000, output_config: { effort: 'low' }, system: DIGEST_SYSTEM,
+      messages: [{ role: 'user', content: `Current notes:\n${previous}\n\nNew chat lines:\n${lines}` }],
+    });
+    const notes = res.content.filter((b): b is Anthropic.TextBlock => b.type === 'text').map((b) => b.text).join(' ').trim().slice(0, 1200);
+    const cost = res.usage.input_tokens * PRICE.input + res.usage.output_tokens * PRICE.output;
+    await this.db.agentRun.create({ data: { organizationId: orgId, status: 'DONE', model: AGENT_MODEL, inputTokens: res.usage.input_tokens, outputTokens: res.usage.output_tokens, costMicroUsd: Math.round(cost), note: 'chat summary', finishedAt: new Date(), trace: { kind: 'digest', messages: older.length } } });
+    if (!notes) return;
+    const last = older[older.length - 1].createdAt.toISOString();
+    for (const [key, value] of [['chat_summary', notes], ['chat_summary_until', last]] as const) {
+      await this.db.agentMemory.upsert({ where: { organizationId_key: { organizationId: orgId, key } }, create: { organizationId: orgId, key, value }, update: { value } });
+    }
   }
 
   /** Tools are bound to the run's organization; the model cannot name another client. */

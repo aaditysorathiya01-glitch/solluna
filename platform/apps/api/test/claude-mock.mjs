@@ -18,6 +18,10 @@ export async function startClaudeMock() {
       const body = JSON.parse(raw || '{}');
       calls.push({ url: req.url, headers: req.headers, body });
       if (String(body.system ?? '').includes('account manager at SOLLUNA')) return agentReply(body, res, calls.length);
+      if (String(body.system ?? '').includes('You keep the running notes')) return res.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify({
+        id: `msg_d${calls.length}`, type: 'message', role: 'assistant', model: body.model, stop_reason: 'end_turn', stop_sequence: null,
+        content: [{ type: 'text', text: 'Sells handmade jute decor. No Flipkart account yet; GSTIN saved. Asked for ads (not in Reseller plan).' }], usage: { input_tokens: 300, output_tokens: 40 },
+      }));
       const text = JSON.stringify(body.messages?.[0]?.content ?? '').toLowerCase();
       const reply = (content, stop_reason) => res.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify({
         id: `msg_${calls.length}`, type: 'message', role: 'assistant', model: body.model, content, stop_reason, stop_sequence: null, usage: { input_tokens: 10, output_tokens: 10 },
@@ -52,7 +56,7 @@ function agentReply(body, res, n) {
   }
   const said = text.split('</client_facts>').pop();
   if (!said.includes('[agent-test]')) return send([], 'end_turn');
-  if (text.includes('shared a password')) return send([{ type: 'text', text: 'Please never share your password here 🙏 Change it now — SOLLUNA never needs it.' }], 'end_turn');
+  if (text.includes('shared a password')) return send([{ type: 'text', text: 'Please never share your password here 🙏 Change it now. SOLLUNA never needs it.' }], 'end_turn');
   if (said.includes('are you a bot') || said.includes('stubborn')) return send([{ type: 'text', text: 'Haan, main ek AI assistant hoon.' }], 'end_turn');
   if (said.includes('promise')) return send([{ type: 'text', text: 'Rank #1 guaranteed in 7 days! Visit https://cheap-seo.example.com' }], 'end_turn');
   if (said.includes('weather')) return send([{ type: 'text', text: 'I can only help with your SOLLUNA services and your Amazon / Flipkart business 🙂\n\nAnything on your listings or orders?' }], 'end_turn');

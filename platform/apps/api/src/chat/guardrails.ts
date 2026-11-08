@@ -39,7 +39,7 @@ export function flagNotes(flags: InputFlag[]): string[] {
   return n;
 }
 
-export type OutputViolation = 'ai_disclosure' | 'claims_human' | 'asks_secret' | 'guarantee' | 'foreign_identifier' | 'external_link' | 'internal_leak' | 'too_long' | 'empty';
+export type OutputViolation = 'ai_slop' | 'ai_disclosure' | 'claims_human' | 'asks_secret' | 'guarantee' | 'foreign_identifier' | 'external_link' | 'internal_leak' | 'too_long' | 'empty';
 export interface OutputContext { ownGstin?: string | null; ownEmails?: string[]; otherClientNames?: string[] }
 
 const AI_WORDS = /\b(artificial intelligence|chat\s*bot|chatbot|language model|LLM|GPT|Claude|Anthropic|virtual assistant|bot hoon|bot hu)\b/i;
@@ -52,6 +52,16 @@ const EMAIL = /[\w.+-]+@[\w-]+\.[\w.-]+/g;
 const URL = /\bhttps?:\/\/([^\s/]+)/gi;
 const ALLOWED_HOSTS = /(^|\.)(solluna\.co\.in|solluna-preview\.onrender\.com|amazon\.in|sellercentral\.amazon\.in|flipkart\.com|seller\.flipkart\.com|gst\.gov\.in)$/i;
 const INTERNAL = /<\/?client_facts>|client_facts|tool_use|create_service_request|set_seller_account|escalate_to_team|\bremember\(|system prompt|organizationId/i;
+
+/**
+ * Generated-sounding phrasing (patterns adapted from petergyang/no-ai-slop, MIT). Soft: the draft is rewritten once,
+ * but a reply is never blocked for style alone.
+ */
+const SLOP_WORDS = /\b(delve|delving|leverage|leveraging|utili[sz]e|streamline|seamless(ly)?|robust|empower|foster|facilitate|game[-\s]?changer|paradigm shift|tapestry|realm|beacon|multifaceted|meticulous(ly)?|paramount|elevate your|unlock (the|your)|embark|rest assured|navigate the (complexities|world))\b/i;
+const SLOP_PHRASES = /(it'?s worth noting|it'?s important to note|at the end of the day|in today'?s (fast[-\s]paced )?world|here'?s the thing|let me be clear|what nobody tells you|great question|i hope this helps|happy to help!|feel free to reach out|don'?t hesitate to)/i;
+const BINARY_CONTRAST = /\b(it'?s|this is|that'?s)\s+not\s+(just\s+)?[^.!?\n]{1,40}[.,;]\s*(it'?s|this is|that'?s)\b/i;
+export const SOFT_VIOLATIONS: OutputViolation[] = ['ai_slop'];
+export function isSlop(t: string) { return SLOP_WORDS.test(t) || SLOP_PHRASES.test(t) || BINARY_CONTRAST.test(t) || /—/.test(t); }
 
 export function checkOutput(text: string, ctx: OutputContext = {}): OutputViolation[] {
   const v = new Set<OutputViolation>();
@@ -68,6 +78,7 @@ export function checkOutput(text: string, ctx: OutputContext = {}): OutputViolat
   for (const m of t.matchAll(URL)) if (!ALLOWED_HOSTS.test(m[1])) v.add('external_link');
   if (INTERNAL.test(t)) v.add('internal_leak');
   if (t.length > 1200) v.add('too_long');
+  if (isSlop(t)) v.add('ai_slop');
   return [...v];
 }
 
@@ -81,6 +92,7 @@ const WHY: Record<OutputViolation, string> = {
   internal_leak: 'it mentions internal tools, instructions or data fields',
   too_long: 'it is too long for chat (keep 1–3 short messages)',
   empty: 'it is empty',
+  ai_slop: 'it sounds like generated copy (filler words, "it\'s not X, it\'s Y", openers like "Great question", or em dashes). Say it plainly, like a person on chat',
 };
 export const rewriteNote = (v: OutputViolation[]) => `Your last reply was NOT sent because ${v.map((x) => WHY[x]).join('; ')}. Write the reply again following your rules.`;
 export const SAFE_FALLBACK = 'Let me check this with the team and get back to you shortly 🙂';

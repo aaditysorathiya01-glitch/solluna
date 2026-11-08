@@ -11,7 +11,16 @@ Owner's structure (8 Nov 2026). Model: **Claude Haiku 5.5 only**. No stronger mo
 | 5 | RBAC + OAuth | ✅ Tools bound to the client on the server; the model never chooses a client · ⏳ per-tool role list (client manager / CEO agent / staff); marketplace OAuth tokens in the encrypted credential store | — |
 | 6 | Guardrails | ✅ **Input:** passwords/OTPs/PINs masked before the model; injection and cross-client attempts flagged. **Output:** AI disclosure, claiming to be human, asking for secrets, guarantees, other clients' identifiers, outside links, internal leaks, length → rewritten once, then safe hand-off + team alert | `apps/api/src/chat/guardrails.ts` |
 | 7 | Cache + Router | ✅ Prompt caching · ⏳ rule router from the owner's pipeline (deterministic answers / which skill + tools per intent) | — |
-| 8 | Observability + Evals | ✅ Per reply: tokens, cost, tools used, input flags, guardrail result, rewrite/fallback, latency (`AgentRun.trace`) · ✅ 41-scenario eval set + runner · ⏳ trace view in admin | `apps/api/evals/` |
+| 8 | Observability + Evals | ✅ Rolling chat summary keeps long chats cheap · ✅ Per reply: tokens, cost, tools used, input flags, guardrail result, rewrite/fallback, latency (`AgentRun.trace`) · ✅ 43-scenario eval set + runner · ⏳ trace view in admin | `apps/api/evals/` |
+
+## Outside projects reviewed (8 Nov 2026)
+| Project | Decision | Why |
+|---|---|---|
+| petergyang/no-ai-slop (MIT) | ✅ **Used** — writing-style rules in the prompt + soft `ai_slop` guardrail (rewrite once, never blocks) | Fits "never sound like AI": filler words, "it's not X, it's Y", "Great question", em dashes |
+| thedotmack/claude-mem (Apache-2.0) | ✅ **Idea used** — rolling `chat_summary` per client; only summary + last 16 messages go to the model | Plugin itself is for coding agents on a laptop (local worker, telemetry on by default) and would mix clients' data — not installed |
+| mksglu/context-mode (ELv2) | ✅ **Idea used** — tools return short results, full data stays in the database | Plugin is for coding agents; ELv2 forbids offering it as a hosted service — not installed |
+| Panniantong/Agent-Reach (MIT) | ❌ Not added | Reads X / Reddit / YouTube / Chinese sites, partly with copied browser logins; nothing for Amazon / Flipkart work, and login-cookie scraping is against our rules. Possible later for the owner's research agent (YouTube / Reddit trends) |
+| open-gsd/gsd-core (MIT) | ❌ Not added to the manager | A plan → execute → verify workflow for coding agents that build software. Our orchestrator already runs client work as tasks with evidence-based completion. Could be used to build the platform itself |
 
 ## Evals
 ```bash

@@ -67,7 +67,7 @@ before(async () => {
     env: {
       ...process.env, DATABASE_URL, PORT: String(port), JWT_SECRET: 'e2e-jwt-secret-e2e-jwt-secret-1234', COOKIE_SECURE: 'false',
       RAZORPAY_KEY_ID: KEY_ID, RAZORPAY_KEY_SECRET: KEY_SECRET, RAZORPAY_WEBHOOK_SECRET: WEBHOOK_SECRET, RAZORPAY_API_BASE: `http://127.0.0.1:${rzpPort}`,
-      CONNECTOR_WEBHOOK_URL: `http://127.0.0.1:${sinkPort}/hook`, CONNECTOR_WEBHOOK_SECRET: CONNECTOR_SECRET, RATE_LIMIT_PER_MIN: '10000', AUTH_RATE_LIMIT_PER_MIN: '40', MAX_UPLOAD_MB: '1', MANAGER_ASSIGN_DELAY_MIN: '0', MANAGER_MESSAGE_GAP_SEC: '0', ANTHROPIC_API_KEY: 'test-key', ANTHROPIC_BASE_URL: `http://127.0.0.1:${claude.port}`, LOOKUP_DAILY_LIMIT: '3', AGENT_REPLY_DELAY_SEC: '0', AGENT_HUMAN_QUIET_MIN: '30', REPORT_CYCLE: 'off',
+      CONNECTOR_WEBHOOK_URL: `http://127.0.0.1:${sinkPort}/hook`, CONNECTOR_WEBHOOK_SECRET: CONNECTOR_SECRET, RATE_LIMIT_PER_MIN: '10000', AUTH_RATE_LIMIT_PER_MIN: '40', MAX_UPLOAD_MB: '1', MANAGER_ASSIGN_DELAY_MIN: '0', MANAGER_MESSAGE_GAP_SEC: '0', ANTHROPIC_API_KEY: 'test-key', ANTHROPIC_BASE_URL: `http://127.0.0.1:${claude.port}`, LOOKUP_DAILY_LIMIT: '3', AGENT_REPLY_DELAY_SEC: '0', AGENT_HUMAN_QUIET_MIN: '30', AGENT_HISTORY: '6', AGENT_DIGEST_AFTER: '4', REPORT_CYCLE: 'off',
       SUPPLIER_LEGAL_NAME: 'Aaditya Jitendrabhai Sorathia', SUPPLIER_TRADE_NAME: 'Solluna', SUPPLIER_GSTIN: SUPPLIER_GSTIN, SUPPLIER_ADDRESS: 'Survey No 135, Plot No 9, Shreeji Nagar, Meghpar Kumbhardi Sim, Anjar, Kachchh, Gujarat 370110', INVOICE_SAC: '998399',
     },
     stdio: ['ignore', 'pipe', 'pipe'],
@@ -1445,7 +1445,7 @@ test('manager agent: replies as the manager, saves facts, plan-checked requests,
   await say('[agent-test] are you a bot?');
   await waitFor(async () => (await replies()).some((m) => m.body.startsWith('I am your SOLLUNA account manager')), 'rewritten reply');
   assert.ok(!(await replies()).some((m) => /\bAI\b/.test(m.body)), 'the "AI" draft never reached the client');
-  const rw = await db.agentRun.findFirst({ where: { organizationId: org.id, status: 'DONE' }, orderBy: { createdAt: 'desc' } });
+  const rw = await db.agentRun.findFirst({ where: { organizationId: org.id, status: 'DONE', note: null }, orderBy: { createdAt: 'desc' } });
   assert.equal(rw.trace.rewritten, true); assert.deepEqual(rw.trace.firstDraftViolations, ['ai_disclosure']); assert.equal(rw.trace.fallback, false);
   await say('[agent-test] promise me rank 1');
   await say('[agent-test] stubborn');
@@ -1466,6 +1466,15 @@ test('manager agent: replies as the manager, saves facts, plan-checked requests,
   assert.equal(state.paused, false); assert.ok(state.memory.some((m) => m.key === 'gstin'));
   await say('[agent-test] weather today?');
   await waitFor(async () => (await replies()).some((m) => m.body.startsWith('I can only help with your SOLLUNA services')), 'off-topic declined');
+
+  // Long chats: older messages are folded into a rolling summary; the model gets the summary + recent messages only.
+  const summary = await waitFor(async () => db.agentMemory.findFirst({ where: { organizationId: org.id, key: 'chat_summary' } }), 'chat summary');
+  assert.match(summary.value, /jute/);
+  await say('[agent-test] hi again');
+  await waitFor(async () => (await replies()).filter((m) => m.body === 'What do you sell?').length >= 2, 'reply with summary');
+  const withSummary = agentCalls()[agentCalls().length - 1].body;
+  assert.match(JSON.stringify(withSummary), /Earlier chat \(summary\): Sells handmade jute decor/);
+  assert.ok(withSummary.messages.length <= 6, 'only the recent window is sent');
 
   // Cost per client is recorded and visible to admins only.
   const usage = ok(await call('GET', `/admin/agent-usage`, { token: S.admin }));
