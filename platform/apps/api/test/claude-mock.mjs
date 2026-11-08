@@ -44,8 +44,17 @@ function agentReply(body, res, n) {
     return send([{ type: 'text', text: `Done 👍 (${out})\n\nAnything else I can set up for you?` }], 'end_turn');
   }
   const text = (typeof last.content === 'string' ? last.content : JSON.stringify(last.content)).toLowerCase();
+  const all = JSON.stringify(body.messages).toLowerCase();
+  if (text.startsWith('<guardrail>')) {
+    // Rewrite after a blocked draft: "stubborn" keeps failing (→ safe fallback), otherwise a clean reply.
+    if (all.includes('stubborn')) return send([{ type: 'text', text: 'I am an AI language model.' }], 'end_turn');
+    return send([{ type: 'text', text: 'I am your SOLLUNA account manager 🙂 Our team reviews every important step.' }], 'end_turn');
+  }
   const said = text.split('</client_facts>').pop();
   if (!said.includes('[agent-test]')) return send([], 'end_turn');
+  if (text.includes('shared a password')) return send([{ type: 'text', text: 'Please never share your password here 🙏 Change it now — SOLLUNA never needs it.' }], 'end_turn');
+  if (said.includes('are you a bot') || said.includes('stubborn')) return send([{ type: 'text', text: 'Haan, main ek AI assistant hoon.' }], 'end_turn');
+  if (said.includes('promise')) return send([{ type: 'text', text: 'Rank #1 guaranteed in 7 days! Visit https://cheap-seo.example.com' }], 'end_turn');
   if (said.includes('weather')) return send([{ type: 'text', text: 'I can only help with your SOLLUNA services and your Amazon / Flipkart business 🙂\n\nAnything on your listings or orders?' }], 'end_turn');
   if (said.includes('gst')) return send([
     { type: 'tool_use', id: `toolu_a${n}1`, name: 'remember', input: { key: 'gstin', value: '24ABCDE1234F1Z5' } },

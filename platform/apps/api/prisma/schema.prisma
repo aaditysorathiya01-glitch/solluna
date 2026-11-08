@@ -1116,6 +1116,7 @@ model AgentRun {
   costMicroUsd     Int       @default(0)
   toolCalls        Int       @default(0)
   replyMessages    Int       @default(0)
+  trace            Json? // observability: input flags, guardrail results, tools used, latency, skills retrieved
   note             String?
   dueAt            DateTime  @default(now())
   finishedAt       DateTime?
