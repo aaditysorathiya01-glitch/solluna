@@ -6,6 +6,7 @@ import type { AuthUser } from '../auth/auth.types';
 import { AccessService } from '../common/access.service';
 import { ChatService, type ChatEvent } from './chat.service';
 import { ManagerAgentService } from './manager-agent.service';
+import { AgentEvalsService } from './agent-evals.service';
 
 const HEARTBEAT_MS = 25_000;
 const heartbeat = () => interval(HEARTBEAT_MS).pipe(map((): MessageEvent => ({ type: 'ping', data: {} })));
@@ -70,7 +71,12 @@ export class OpsChatController {
 @Controller('admin')
 @StaffOnly('SUPER_ADMIN', 'OPERATIONS_MANAGER')
 export class AdminClientsController {
-  constructor(private readonly chat: ChatService, private readonly agent: ManagerAgentService) {}
+  constructor(private readonly chat: ChatService, private readonly agent: ManagerAgentService, private readonly evals: AgentEvalsService) {}
+
+  /** Manager quality check (eval set) on the server's own API key. Super admin only. */
+  @Post('agent-evals') @StaffOnly('SUPER_ADMIN') startEvals(@CurrentUser() u: AuthUser) { return this.evals.start(u); }
+  @Get('agent-evals') listEvals() { return this.evals.list(); }
+  @Get('agent-evals/:id') getEval(@Param('id') id: string) { return this.evals.get(id); }
 
   /** Manager-agent spend per client for a month (estimate from tokens). */
   @Get('agent-usage') agentUsage(@Query('month') month?: string) { return this.agent.usage(month); }

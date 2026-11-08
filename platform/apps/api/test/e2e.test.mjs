@@ -11,6 +11,7 @@ import { createHmac } from 'node:crypto';
 import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
+import { tmpdir } from 'node:os';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const apiDir = join(here, '..');
@@ -67,7 +68,7 @@ before(async () => {
     env: {
       ...process.env, DATABASE_URL, PORT: String(port), JWT_SECRET: 'e2e-jwt-secret-e2e-jwt-secret-1234', COOKIE_SECURE: 'false',
       RAZORPAY_KEY_ID: KEY_ID, RAZORPAY_KEY_SECRET: KEY_SECRET, RAZORPAY_WEBHOOK_SECRET: WEBHOOK_SECRET, RAZORPAY_API_BASE: `http://127.0.0.1:${rzpPort}`,
-      CONNECTOR_WEBHOOK_URL: `http://127.0.0.1:${sinkPort}/hook`, CONNECTOR_WEBHOOK_SECRET: CONNECTOR_SECRET, RATE_LIMIT_PER_MIN: '10000', AUTH_RATE_LIMIT_PER_MIN: '40', MAX_UPLOAD_MB: '1', MANAGER_ASSIGN_DELAY_MIN: '0', MANAGER_MESSAGE_GAP_SEC: '0', ANTHROPIC_API_KEY: 'test-key', ANTHROPIC_BASE_URL: `http://127.0.0.1:${claude.port}`, LOOKUP_DAILY_LIMIT: '3', AGENT_REPLY_DELAY_SEC: '0', AGENT_HUMAN_QUIET_MIN: '30', AGENT_HISTORY: '6', AGENT_DIGEST_AFTER: '4', REPORT_CYCLE: 'off',
+      CONNECTOR_WEBHOOK_URL: `http://127.0.0.1:${sinkPort}/hook`, CONNECTOR_WEBHOOK_SECRET: CONNECTOR_SECRET, RATE_LIMIT_PER_MIN: '10000', AUTH_RATE_LIMIT_PER_MIN: '40', MAX_UPLOAD_MB: '1', MANAGER_ASSIGN_DELAY_MIN: '0', MANAGER_MESSAGE_GAP_SEC: '0', ANTHROPIC_API_KEY: 'test-key', ANTHROPIC_BASE_URL: `http://127.0.0.1:${claude.port}`, LOOKUP_DAILY_LIMIT: '3', AGENT_REPLY_DELAY_SEC: '0', AGENT_HUMAN_QUIET_MIN: '30', AGENT_HISTORY: '6', AGENT_DIGEST_AFTER: '4', REPORT_CYCLE: 'off', EVAL_RESULTS_DIR: join(tmpdir(), 'solluna-evals'),
       SUPPLIER_LEGAL_NAME: 'Aaditya Jitendrabhai Sorathia', SUPPLIER_TRADE_NAME: 'Solluna', SUPPLIER_GSTIN: SUPPLIER_GSTIN, SUPPLIER_ADDRESS: 'Survey No 135, Plot No 9, Shreeji Nagar, Meghpar Kumbhardi Sim, Anjar, Kachchh, Gujarat 370110', INVOICE_SAC: '998399',
     },
     stdio: ['ignore', 'pipe', 'pipe'],
@@ -1514,6 +1515,17 @@ test('manager guardrails (unit) and eval runner', async () => {
   assert.equal(dryRun.code, 0, dryRun.stderr); assert.match(dryRun.stdout, /scenarios valid/);
   const live = await run([runner, '--only', 'onb-01,scope-01'], { ...process.env, ANTHROPIC_API_KEY: 'test-key', ANTHROPIC_BASE_URL: `http://127.0.0.1:${claude.port}` });
   assert.equal(live.code, 0, live.stderr); assert.match(live.stdout, /Score \d\/2/);
+
+  // Server-side quality check (Admin): runs the eval set with the server's key, in the background; super admin only.
+  const ops = await staff('OPERATIONS_MANAGER', S.admin);
+  assert.equal((await call('POST', '/admin/agent-evals', { token: ops.token })).status, 403, 'super admin only');
+  const started = ok(await call('POST', '/admin/agent-evals', { token: S.admin }));
+  assert.equal(started.status, 'RUNNING');
+  let done;
+  for (let i = 0; i < 240 && !done; i++) { const r = ok(await call('GET', `/admin/agent-evals/${started.id}`, { token: S.admin })); if (r.status !== 'RUNNING') done = r; else await new Promise((x) => setTimeout(x, 500)); }
+  assert.equal(done?.status, 'DONE', done?.error); assert.equal(done.total, 43); assert.equal(done.model, 'claude-haiku-5-5');
+  assert.ok(Array.isArray(done.report.results) && done.report.results.length === 43);
+  assert.ok(ok(await call('GET', '/admin/agent-evals', { token: S.admin })).some((r) => r.id === started.id));
 });
 
 test('security: login brute force is rate limited per IP', async () => {

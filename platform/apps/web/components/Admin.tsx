@@ -375,6 +375,55 @@ function ManagerCostPanel() {
       </div>
       {u.data && <p className="text-xs text-ink-3">{u.data.note}</p>}
       {u.error && <Empty>{u.error}</Empty>}
+      <QualityCheck />
     </div>
+  );
+}
+
+interface EvalRow { id: string; status: string; model: string | null; score: number | null; passed: number | null; total: number | null; costMicroUsd: number; error: string | null; createdAt: string }
+interface EvalResult { id: string; category: string; pass: boolean; fails: string[]; reply: string }
+
+/** Runs the manager's eval set on the server (its own API key) and shows what failed. */
+function QualityCheck() {
+  const runs = useApi<EvalRow[]>('/admin/agent-evals');
+  const [open, setOpen] = useState<{ id: string; results: EvalResult[] } | null>(null);
+  const [msg, setMsg] = useState<string | null>(null);
+  const running = runs.data?.some((r) => r.status === 'RUNNING');
+  async function start() {
+    setMsg(null);
+    try { await api('/admin/agent-evals', { method: 'POST' }); setMsg('Started. This takes 2–5 minutes; refresh to see the score.'); runs.reload(); }
+    catch (e) { setMsg(errText(e)); }
+  }
+  async function show(id: string) {
+    const r = await api<{ report: { results: EvalResult[] } | null }>(`/admin/agent-evals/${id}`);
+    setOpen({ id, results: r.report?.results ?? [] });
+  }
+  return (
+    <section className="card space-y-3 p-5" aria-label="Manager quality check">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div><h2 className="font-semibold">Quality check</h2><p className="text-xs text-ink-3">Runs the manager through the test chats (onboarding, off-topic, secrets, plan limits, escalation, style) with the server&rsquo;s API key. A full run costs a few US cents.</p></div>
+        <div className="flex gap-2"><button className="btn-ghost py-1.5 text-xs" onClick={runs.reload}>Refresh</button><button className="btn-primary py-1.5 text-xs" disabled={running} onClick={start}>{running ? 'Running…' : 'Run quality check'}</button></div>
+      </div>
+      {msg && <p role="status" className="text-xs text-ink-2">{msg}</p>}
+      <table className="w-full text-sm"><tbody>
+        {runs.data?.map((r) => (
+          <tr key={r.id} className="border-t border-ink/5">
+            <td className="py-2">{new Date(r.createdAt).toLocaleString('en-IN')}</td>
+            <td>{r.status === 'DONE' ? <strong>{r.passed}/{r.total} ({Math.round((r.score ?? 0) * 100)}%)</strong> : r.status === 'FAILED' ? <span className="text-red-700" title={r.error ?? ''}>Failed</span> : 'Running…'}</td>
+            <td className="text-xs text-ink-3">{r.model ?? ''} · ${(r.costMicroUsd / 1e6).toFixed(4)}</td>
+            <td className="text-right">{r.status === 'DONE' && <button className="text-xs underline" onClick={() => show(r.id)}>Details</button>}</td>
+          </tr>
+        ))}
+        {runs.data && !runs.data.length && <tr><td className="py-2 text-ink-3">No quality checks yet.</td></tr>}
+      </tbody></table>
+      {open && (
+        <div className="space-y-2 rounded-xl bg-ivory p-3" data-testid="eval-details">
+          {open.results.filter((x) => !x.pass).map((x) => (
+            <div key={x.id} className="text-xs"><p className="font-semibold">✗ {x.id} <span className="font-normal text-ink-3">({x.category})</span>: {x.fails.join('; ')}</p><p className="text-ink-3">Reply: {x.reply || '—'}</p></div>
+          ))}
+          {!open.results.some((x) => !x.pass) && <p className="text-xs">All checks passed.</p>}
+        </div>
+      )}
+    </section>
   );
 }

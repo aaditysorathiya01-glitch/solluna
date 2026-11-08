@@ -1125,3 +1125,21 @@ model AgentRun {
   @@index([status, dueAt])
   @@index([organizationId, createdAt])
 }
+
+/// Manager-agent quality check: one run of the eval set (apps/api/evals) on the server.
+model EvalRun {
+  id           String    @id @default(cuid())
+  status       String    @default("RUNNING") // RUNNING | DONE | FAILED
+  model        String?
+  score        Float?
+  passed       Int?
+  total        Int?
+  costMicroUsd Int       @default(0)
+  report       Json?
+  error        String?
+  startedById  String
+  createdAt    DateTime  @default(now())
+  finishedAt   DateTime?
+
+  @@index([createdAt])
+}

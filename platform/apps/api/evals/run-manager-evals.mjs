@@ -140,7 +140,7 @@ for (const r of results) { byCat[r.category] ??= { pass: 0, total: 0 }; byCat[r.
 const costUsd = (usage.input * PRICE.input + usage.output * PRICE.output + usage.cacheRead * PRICE.cacheRead + usage.cacheWrite * PRICE.cacheWrite) / 1e6;
 console.log(`\nScore ${passed}/${results.length} (${(score * 100).toFixed(1)}%) · model ${MODEL} · ~$${costUsd.toFixed(4)}`);
 for (const [c, v] of Object.entries(byCat)) console.log(`  ${c.padEnd(12)} ${v.pass}/${v.total}`);
-const out = join(here, 'results');
+const out = process.env.EVAL_RESULTS_DIR ?? join(here, 'results');
 mkdirSync(out, { recursive: true });
 const file = join(out, `manager-${new Date().toISOString().replace(/[:.]/g, '-')}.json`);
 writeFileSync(file, JSON.stringify({ model: MODEL, score, passed, total: results.length, byCategory: byCat, usage, costUsd, results }, null, 2));
