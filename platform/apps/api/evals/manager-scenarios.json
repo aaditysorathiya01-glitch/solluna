@@ -55,10 +55,10 @@
       ],
       "expect": {
         "tools": [
-          "set_seller_account"
+          "start_pipeline"
         ],
         "mustMatch": [
-          "ops@solluna\\.co\\.in|Seller accounts|user"
+          "Manage Users|ops@solluna\\.co\\.in|New User|Profile"
         ]
       }
     },
@@ -73,7 +73,7 @@
       ],
       "expect": {
         "tools": [
-          "set_seller_account"
+          "start_pipeline"
         ],
         "mustMatch": [
           "GST|PAN"
@@ -678,6 +678,78 @@
           "feel free to reach out"
         ],
         "maxChars": 300
+      }
+    },
+    {
+      "id": "pipe-01",
+      "category": "pipeline",
+      "accounts": "FLIPKART no account yet",
+      "facts": "Saved facts: none yet\n\nActive pipeline: Seller account (registration or admin access) — FLIPKART (new account)\nCurrent step 2/9: Flipkart sign-up page: mobile, email, password [with the client]\nStep instructions: Collect the client's own mobile number and email for the sign-up page, one at a time. Password: if the client wants to choose one, ask them to type it as \"password: <their password>\"; if not, call generate_temp_password.\nStep fields: mobile (Mobile number) = MISSING; email (Email ID) = MISSING; password (Password) = MISSING\nWhen every required field is saved, call pipeline_next.",
+      "chat": [
+        [
+          "client",
+          "My mobile is 9876543210"
+        ]
+      ],
+      "expect": {
+        "tools": [
+          "pipeline_save"
+        ],
+        "mustMatch": [
+          "email"
+        ]
+      }
+    },
+    {
+      "id": "pipe-02",
+      "category": "pipeline",
+      "facts": "Saved facts: none yet\n\nActive pipeline: Seller account (registration or admin access) — FLIPKART (new account)\nCurrent step 2/9: Flipkart sign-up page: mobile, email, password [with the client]\nStep fields: mobile (Mobile number) = 9876543210; email (Email ID) = riya@example.com; password (Password) = MISSING\nWhen every required field is saved, call pipeline_next.",
+      "chat": [
+        [
+          "client",
+          "password aap hi bana do"
+        ]
+      ],
+      "expect": {
+        "tools": [
+          "generate_temp_password"
+        ]
+      }
+    },
+    {
+      "id": "pipe-03",
+      "category": "pipeline",
+      "facts": "Saved facts: none yet\n\nActive pipeline: Seller account (registration or admin access) — FLIPKART (new account)\nCurrent step 2/9: Flipkart sign-up page: mobile, email, password [with the client]\nStep fields: mobile (Mobile number) = MISSING; email (Email ID) = MISSING; password (Password) = MISSING",
+      "chat": [
+        [
+          "client",
+          "Can you also start my Amazon ads now?"
+        ]
+      ],
+      "expect": {
+        "mustMatch": [
+          "mobile|number"
+        ]
+      }
+    },
+    {
+      "id": "pipe-04",
+      "category": "pipeline",
+      "facts": "Saved facts: none yet\n\nActive pipeline: Seller account (registration or admin access) — AMAZON (existing account)\nCurrent step 1/2: Client adds SOLLUNA as admin user [with the client]\nStep instructions: Walk the client through giving SOLLUNA admin access, one step at a time: Amazon Seller Central (India): Home → Settings → Manage permissions → Action → Invite employee. Invite \"ops@solluna.co.in\". Never ask for their password or OTP in this step. When they say the invite is sent, save invite_sent = yes.\nStep fields: invite_sent (Invite sent) = MISSING",
+      "chat": [
+        [
+          "client",
+          "how do I give you access?"
+        ]
+      ],
+      "expect": {
+        "mustMatch": [
+          "Settings",
+          "Invite"
+        ],
+        "mustNotMatch": [
+          "password|OTP"
+        ]
       }
     }
   ]

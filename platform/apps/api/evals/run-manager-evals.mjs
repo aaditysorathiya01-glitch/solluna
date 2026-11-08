@@ -87,6 +87,10 @@ function fakeTool(name, input) {
     return `Request opened: "${input.title}" (status QUEUED).`;
   }
   if (name === 'escalate_to_team') return 'The team has been alerted.';
+  if (name === 'start_pipeline') return `Pipeline started for ${input.marketplace} (${input.has_account ? 'existing account → admin access' : 'new account'}). Current step: ${input.has_account ? 'Client adds SOLLUNA as admin user' : 'Send the list of what is needed'}. Follow the step instructions in the facts.`;
+  if (name === 'pipeline_save') return `Saved ${input.field}.`;
+  if (name === 'generate_temp_password') return 'Temporary password created and stored securely (hidden).';
+  if (name === 'pipeline_next') return 'Next step: (as listed in the facts).';
   return `Unknown tool ${name}`;
 }
 

@@ -12,6 +12,7 @@ import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import { tmpdir } from 'node:os';
+import { readFileSync } from 'node:fs';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const apiDir = join(here, '..');
@@ -1486,6 +1487,91 @@ test('manager agent: replies as the manager, saves facts, plan-checked requests,
   void ops;
 });
 
+test('manager pipeline: seller-account registration step by step; OTP/password captured, hidden from the model, deleted after use', async () => {
+  const c = await registerCustomer('Pooja'); await pay(c, 'RESELLER');
+  const org = ok(await call('GET', '/auth/me', { token: c })).organization;
+  const waitFor = async (fn, what) => { for (let i = 0; i < 60; i++) { const v = await fn(); if (v) return v; await new Promise((x) => setTimeout(x, 250)); } throw new Error(`timed out: ${what}`); };
+  const say = async (body) => ok(await call('POST', '/chat/messages', { token: c, body: { body } }));
+  const doneRuns = () => db.agentRun.count({ where: { organizationId: org.id, status: { in: ['DONE', 'SKIPPED', 'FAILED'] } } });
+  // One command at a time: wait until the manager finished the previous one (quick messages are answered together).
+  const tool = async (name, input) => { const before = await doneRuns(); await say(`[agent-test] tool:${name} ${JSON.stringify(input)}`); await waitFor(async () => (await doneRuns()) > before, `${name} processed`); };
+  const lastResult = async () => { const r = await db.agentRun.findFirst({ where: { organizationId: org.id, note: null, status: 'DONE' }, orderBy: { createdAt: 'desc' } }); return r; };
+  const agentCalls = () => claude.calls.filter((x) => String(x.body.system ?? '').includes('account manager at SOLLUNA') && JSON.stringify(x.body).includes(org.legalName));
+  const runs = () => call('GET', `/ops/chats/${org.id}/pipelines`, { token: S.admin }).then(ok);
+  const toolResult = async (n) => { await waitFor(async () => agentCalls().length >= n, 'agent call'); const last = agentCalls()[agentCalls().length - 1].body.messages; return JSON.stringify(last); };
+
+  let n = agentCalls().length;
+  await tool('start_pipeline', { marketplace: 'FLIPKART', has_account: false });
+  await waitFor(async () => (await runs()).length === 1, 'pipeline started');
+  let r = (await runs())[0];
+  assert.equal(r.branch, 'FLIPKART_NEW'); assert.equal(r.step.title, 'Send the list of what is needed');
+  assert.ok(await db.marketplaceAccount.findFirst({ where: { organizationId: org.id, marketplace: 'FLIPKART', hasAccount: false } }));
+  await waitFor(async () => agentCalls().length >= n + 2, 'tool loop');
+
+  // Out-of-step fields and skipping are refused by the server.
+  n = agentCalls().length;
+  await tool('pipeline_save', { marketplace: 'FLIPKART', field: 'pan', value: 'ABCDE1234F' });
+  assert.match(await toolResult(n + 2), /not part of the current step/);
+  n = agentCalls().length;
+  await tool('pipeline_next', { marketplace: 'FLIPKART' });
+  assert.match(await toolResult(n + 2), /Still needed for this step: List sent/);
+  await tool('pipeline_save', { marketplace: 'FLIPKART', field: 'list_sent', value: 'yes' });
+  await tool('pipeline_next', { marketplace: 'FLIPKART' });
+  await waitFor(async () => (await runs())[0].step.title.includes('sign-up page'), 'step 2');
+
+  // Password typed by the client: captured encrypted, never sent to the model.
+  await tool('pipeline_save', { marketplace: 'FLIPKART', field: 'mobile', value: '+91 98765 43210' });
+  await tool('pipeline_save', { marketplace: 'FLIPKART', field: 'email', value: 'Pooja@Example.com' });
+  await say('password: Pooja@Secret9');
+  await waitFor(async () => (await runs())[0].secretFields.includes('password'), 'password captured');
+  r = (await runs())[0];
+  assert.equal(r.data.mobile, '9876543210'); assert.equal(r.data.email, 'pooja@example.com'); assert.equal(r.data.password, '(saved, encrypted)');
+  await new Promise((x) => setTimeout(x, 1500));
+  assert.ok(!JSON.stringify(claude.calls.slice(-6)).includes('Pooja@Secret9'), 'password never reaches the model');
+  assert.ok(!JSON.stringify(await db.pipelineRun.findFirst({ where: { organizationId: org.id } })).includes('Pooja@Secret9'), 'stored encrypted');
+  const ops = await staff('OPERATIONS_MANAGER', S.admin);
+  const support = await staff('SUPPORT_EXECUTIVE', S.admin);
+  await db.managerAssignment.create({ data: { organizationId: org.id, managerId: support.id, isPrimary: false } });
+  assert.equal((await call('POST', `/ops/chats/${org.id}/pipelines/${r.id}/secrets/password`, { token: support.token })).status, 403, 'only ops managers see secrets');
+  assert.equal(ok(await call('POST', `/ops/chats/${org.id}/pipelines/${r.id}/secrets/password`, { token: S.admin })).value, 'Pooja@Secret9');
+  assert.ok(await db.auditLog.findFirst({ where: { action: 'pipeline.secret_viewed', entityId: r.id } }), 'viewing is audited');
+  await tool('pipeline_next', { marketplace: 'FLIPKART' });
+  await waitFor(async () => (await runs())[0].step.by === 'team', 'team OTP step');
+  assert.equal((await runs())[0].step.title, 'Team fills the sign-up page; client sends the OTPs');
+
+  // OTP: captured from a bare number, hidden from the model, shown once to the team, then gone.
+  await say('482913');
+  await waitFor(async () => (await runs())[0].otpWaiting === 1, 'otp stored');
+  await new Promise((x) => setTimeout(x, 1500));
+  assert.ok(!JSON.stringify(claude.calls.slice(-4)).includes('482913'), 'OTP never reaches the model');
+  assert.ok(await db.notification.findFirst({ where: { organizationId: org.id, type: 'pipeline.otp' } }), 'team alerted');
+  assert.equal(ok(await call('POST', `/ops/chats/${org.id}/pipelines/${r.id}/otp`, { token: ops.token })).otp, '482913');
+  assert.equal((await call('POST', `/ops/chats/${org.id}/pipelines/${r.id}/otp`, { token: ops.token })).status, 404, 'deleted once shown');
+  assert.equal(await db.pipelineOtp.count({ where: { runId: r.id } }), 0);
+  n = agentCalls().length;
+  await tool('pipeline_next', { marketplace: 'FLIPKART' });
+  assert.match(await toolResult(n + 2), /done by the SOLLUNA team/, 'the manager cannot finish team steps');
+  ok(await call('POST', `/ops/chats/${org.id}/pipelines/${r.id}/advance`, { token: ops.token }));
+  r = (await runs())[0];
+  assert.equal(r.step.title, 'Business details page: PAN, GST, bank, address');
+  assert.equal(r.data.legal_name, org.legalName, 'known facts are prefilled, not asked again');
+
+  // Existing Amazon account: admin-access branch, no secrets; access step needs evidence-based Connected.
+  await tool('start_pipeline', { marketplace: 'AMAZON', has_account: true });
+  const amz = await waitFor(async () => (await runs()).find((x) => x.branch === 'AMAZON_HAS_ACCOUNT'), 'amazon pipeline');
+  await tool('pipeline_save', { marketplace: 'AMAZON', field: 'invite_sent', value: 'yes' });
+  const facts = await waitFor(async () => agentCalls().map((x) => JSON.stringify(x.body)).reverse().find((t) => t.includes('AMAZON (existing account)')), 'amazon facts');
+  assert.match(facts, /Settings → Manage permissions → Action → Invite employee/);
+  assert.ok(!/password|OTP/i.test(/Current step 1\/2[^"]*Step instructions: ([^"]*?)Step fields/.exec(facts)?.[1]?.replace('Never ask for their password or OTP in this step.', '') ?? ''), 'admin-access step asks for no secrets');
+  await tool('pipeline_next', { marketplace: 'AMAZON' });
+  await waitFor(async () => (await runs()).find((x) => x.id === amz.id).step?.by === 'team', 'verify step');
+  assert.equal((await call('POST', `/ops/chats/${org.id}/pipelines/${amz.id}/advance`, { token: ops.token })).status, 400, 'needs Connected first');
+  await db.marketplaceAccount.update({ where: { organizationId_marketplace: { organizationId: org.id, marketplace: 'AMAZON' } }, data: { status: 'CONNECTED', verifiedNote: 'invite accepted in Seller Central' } });
+  ok(await call('POST', `/ops/chats/${org.id}/pipelines/${amz.id}/advance`, { token: ops.token }));
+  assert.equal((await runs()).find((x) => x.id === amz.id).status, 'DONE');
+  void lastResult;
+});
+
 test('manager guardrails (unit) and eval runner', async () => {
   const g = (await import('../dist/apps/api/src/chat/guardrails.js')).default ?? await import('../dist/apps/api/src/chat/guardrails.js');
   const inp = g.checkInput('my password is Riya@2024 and OTP 482913');
@@ -1523,8 +1609,9 @@ test('manager guardrails (unit) and eval runner', async () => {
   assert.equal(started.status, 'RUNNING');
   let done;
   for (let i = 0; i < 240 && !done; i++) { const r = ok(await call('GET', `/admin/agent-evals/${started.id}`, { token: S.admin })); if (r.status !== 'RUNNING') done = r; else await new Promise((x) => setTimeout(x, 500)); }
-  assert.equal(done?.status, 'DONE', done?.error); assert.equal(done.total, 43); assert.equal(done.model, 'claude-haiku-5-5');
-  assert.ok(Array.isArray(done.report.results) && done.report.results.length === 43);
+  const scenarioCount = JSON.parse(readFileSync(join(dirname(fileURLToPath(import.meta.url)), '..', 'evals', 'manager-scenarios.json'), 'utf8')).scenarios.length;
+  assert.equal(done?.status, 'DONE', done?.error); assert.equal(done.total, scenarioCount); assert.equal(done.model, 'claude-haiku-5-5');
+  assert.ok(Array.isArray(done.report.results) && done.report.results.length === scenarioCount);
   assert.ok(ok(await call('GET', '/admin/agent-evals', { token: S.admin })).some((r) => r.id === started.id));
 });
 

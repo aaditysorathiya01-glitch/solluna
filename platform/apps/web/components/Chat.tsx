@@ -111,6 +111,7 @@ export function ChatPanel({ mode, orgId, onActivity }: { mode: 'client' | 'staff
           {query && <button type="button" className="btn-ghost px-3 py-1 text-xs" onClick={() => { setQuery(''); load(); }}>Clear</button>}
         </form>
       </div>
+      {mode === 'staff' && orgId && <PipelinesCard orgId={orgId} />}
       <div className="flex-1 space-y-3 overflow-y-auto bg-ivory/50 px-4 py-4" aria-live="polite" data-testid="chat-log">
         {!hist && !error && <p className="text-center text-sm text-ink-3">Loading conversation…</p>}
         {hist?.messages.length === 0 && <p className="text-center text-sm text-ink-3">{query ? 'No messages match.' : 'No messages yet. Ask anything about your account, listings or reports.'}</p>}
@@ -222,6 +223,41 @@ export function DocumentsPanel({ orgId, staff = false, myId }: { orgId?: string;
         </table>
       </div>
       <p className="text-xs text-ink-3">Files are checked by their content (not just the name) and only shared with your SOLLUNA team.</p>
+    </div>
+  );
+}
+
+interface PipelineRow { id: string; branch: string; status: string; step: { index: number; total: number; title: string; by: 'client' | 'team' } | null; data: Record<string, string>; secretFields: string[]; otpWaiting: number }
+
+/** Staff only: the client's seller-account pipelines, with the team's actions (one-time OTP view, secrets, step done). */
+function PipelinesCard({ orgId }: { orgId: string }) {
+  const [rows, setRows] = useState<PipelineRow[]>([]);
+  const [shown, setShown] = useState<string | null>(null);
+  const [err, setErr] = useState<string | null>(null);
+  const load = useCallback(() => api<PipelineRow[]>(`/ops/chats/${orgId}/pipelines`).then(setRows).catch(() => setRows([])), [orgId]);
+  useEffect(() => { load(); const t = setInterval(load, 15_000); return () => clearInterval(t); }, [load]);
+  const act = async (path: string, label: (r: Record<string, string>) => string) => {
+    setErr(null); setShown(null);
+    try { const r = await api<Record<string, string>>(`/ops/chats/${orgId}/pipelines/${path}`, { method: 'POST' }); setShown(label(r)); load(); }
+    catch (e) { setErr((e as Error).message); }
+  };
+  const active = rows.filter((r) => r.status === 'ACTIVE');
+  if (!active.length) return null;
+  return (
+    <div className="space-y-2 border-b border-ink/10 bg-white px-5 py-3 text-xs" aria-label="Pipelines" data-testid="pipelines">
+      {active.map((r) => (
+        <div key={r.id} className="space-y-1">
+          <p className="font-semibold">{r.branch.replace('_', ' · ').replace('HAS_ACCOUNT', 'admin access').replace('NEW', 'new account')} — step {(r.step?.index ?? 0) + 1}/{r.step?.total}: {r.step?.title} <span className={`chip ${r.step?.by === 'team' ? 'bg-amber-50 text-amber-800' : 'bg-ivory'}`}>{r.step?.by === 'team' ? 'Your turn' : 'With client'}</span></p>
+          <p className="text-ink-3">{Object.entries(r.data).map(([k, v]) => `${k}: ${v}`).join(' · ') || 'No details yet'}</p>
+          <div className="flex flex-wrap gap-2">
+            {r.otpWaiting > 0 && <button className="btn-gold py-1 text-xs" onClick={() => act(`${r.id}/otp`, (x) => `OTP ${x.otp} (deleted now — use it right away)`)}>Show OTP (one time)</button>}
+            {r.secretFields.map((f) => <button key={f} className="btn-ghost py-1 text-xs" onClick={() => act(`${r.id}/secrets/${f}`, (x) => `${f}: ${x.value}`)}>Show {f.replace('_', ' ')}</button>)}
+            {r.step?.by === 'team' && <button className="btn-primary py-1 text-xs" onClick={() => act(`${r.id}/advance`, (x) => x.result)}>Mark this step done</button>}
+          </div>
+        </div>
+      ))}
+      {shown && <p role="status" className="rounded bg-emerald-50 px-2 py-1 font-mono text-emerald-900">{shown}</p>}
+      {err && <p role="alert" className="text-red-700">{err}</p>}
     </div>
   );
 }

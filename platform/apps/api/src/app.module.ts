@@ -36,6 +36,7 @@ import { ReportsService } from './reports/reports.service';
 import { ReportCycleService } from './reports/report-cycle.service';
 import { ManagerAgentService } from './chat/manager-agent.service';
 import { AgentEvalsService } from './chat/agent-evals.service';
+import { PipelineService } from './chat/pipeline.service';
 import { ClientReportsController, OpsDocumentsCaController, OpsReportsController } from './reports/reports.controller';
 import { AdminClientsController, ChatController, OpsChatController } from './chat/chat.controller';
 import { LabelCropsController } from './labels/label-crops.controller';
@@ -51,7 +52,7 @@ import { LabelCropsService } from './labels/label-crops.service';
   ],
   controllers: [HealthController, AuthController, AccountController, AdminUsersController, PublicController, AdminController, AdminPaymentsController, TicketsController, OpsTicketsController, CatalogController, OpsCatalogController, FulfilmentController, OpsFulfilmentController, BillingController, FeaturesController, NotificationsController, RequestsController, ApprovalsController, OpsController, DocumentsController, ChatController, OpsChatController, AdminClientsController, ClientReportsController, OpsReportsController, OpsDocumentsCaController, LabelCropsController, CatalogFormsController],
   providers: [
-    PrismaService, AuditService, AuthService, RazorpayClient, BillingService, SkillsService, EntitlementsService, DispatcherService, OrchestratorService, AccessService, StorageService, DocumentsService, ChatService, ManagerAgentService, AgentEvalsService, ReportsService, ReportCycleService, TicketsService, CatalogService, FulfilmentService, AdminService, LabelCropsService, CatalogFormsService, ProductLookupService,
+    PrismaService, AuditService, AuthService, RazorpayClient, BillingService, SkillsService, EntitlementsService, DispatcherService, OrchestratorService, AccessService, StorageService, DocumentsService, ChatService, ManagerAgentService, AgentEvalsService, PipelineService, ReportsService, ReportCycleService, TicketsService, CatalogService, FulfilmentService, AdminService, LabelCropsService, CatalogFormsService, ProductLookupService,
     { provide: APP_GUARD, useClass: ThrottlerGuard },
     { provide: APP_GUARD, useClass: AuthGuard },
   ],

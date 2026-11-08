@@ -5,6 +5,23 @@ description: Manage SOLLUNA client onboarding and seller-account registration as
 
 # SOLLUNA — Seller Account Registration
 
+
+### SOLLUNA platform pipeline (owner, 8 Nov 2026)
+The client manager runs this skill as a fixed pipeline (`platform/apps/api/src/chat/pipelines.ts`), one marketplace at a time. It phrases replies freely but only works on the current step; the server refuses fields of other steps and team steps.
+- **Existing account (Flipkart / Amazon India):** client gives SOLLUNA admin access. No password, no OTP.
+  - Flipkart: Home → Profile → Manage Users → New User (Name SOLLUNA Operations, Email ops@solluna.co.in, Role Admin).
+  - Amazon India: Home → Settings → Manage permissions → Action → Invite employee (ops@solluna.co.in); after acceptance the client confirms and gives Admin / View & Edit permissions.
+  - The team accepts and verifies; the step closes only when the account is Connected with evidence.
+- **No account:** the account is opened in the client's own name, mobile and email.
+  1. List of what is needed.
+  2. Sign-up page: mobile, email, password (client's, typed as "password: …", or a temporary one SOLLUNA generates).
+  3. Team fills the sign-up page; the client sends the OTPs in chat (captured automatically, hidden from the model, encrypted, deleted when the team reads them, 10-minute life).
+  4. Business details: legal name, (Amazon) store name, PAN, GSTIN, bank account + IFSC + holder, pickup address + PIN, GST certificate + cancelled cheque uploaded. Known facts are prefilled.
+  5. Team submits and opens the account (more OTPs relayed the same way).
+  6. Admin access as above, verified.
+  7. Client changes the password → temporary password and every stored secret deleted.
+- Until the portal bot exists, team steps are done by an operations manager from the client's chat → Pipelines card (Show OTP once, Show password, Mark step done).
+
 ## 1. Role and objective
 
 Act as SOLLUNA's marketplace seller-account registration specialist.

@@ -7,6 +7,7 @@ import { AccessService } from '../common/access.service';
 import { ChatService, type ChatEvent } from './chat.service';
 import { ManagerAgentService } from './manager-agent.service';
 import { AgentEvalsService } from './agent-evals.service';
+import { PipelineService } from './pipeline.service';
 
 const HEARTBEAT_MS = 25_000;
 const heartbeat = () => interval(HEARTBEAT_MS).pipe(map((): MessageEvent => ({ type: 'ping', data: {} })));
@@ -36,7 +37,13 @@ export class ChatController {
 @Controller('ops/chats')
 @StaffOnly()
 export class OpsChatController {
-  constructor(private readonly chat: ChatService, private readonly access: AccessService, private readonly agent: ManagerAgentService) {}
+  constructor(private readonly chat: ChatService, private readonly access: AccessService, private readonly agent: ManagerAgentService, private readonly pipelines: PipelineService) {}
+
+  /** Manager pipelines for this client (seller-account registration / admin access) and the team's actions on them. */
+  @Get(':orgId/pipelines') async pipelineList(@CurrentUser() u: AuthUser, @Param('orgId') orgId: string) { await this.access.assertOrg(u, orgId); return this.pipelines.list(orgId); }
+  @Post(':orgId/pipelines/:runId/advance') @HttpCode(200) async pipelineAdvance(@CurrentUser() u: AuthUser, @Param('orgId') orgId: string, @Param('runId') runId: string) { await this.access.assertOrg(u, orgId); return this.pipelines.teamAdvance(u, orgId, runId); }
+  @Post(':orgId/pipelines/:runId/otp') @HttpCode(200) async pipelineOtp(@CurrentUser() u: AuthUser, @Param('orgId') orgId: string, @Param('runId') runId: string) { await this.access.assertOrg(u, orgId); return this.pipelines.takeOtp(u, orgId, runId); }
+  @Post(':orgId/pipelines/:runId/secrets/:field') @HttpCode(200) async pipelineSecret(@CurrentUser() u: AuthUser, @Param('orgId') orgId: string, @Param('runId') runId: string, @Param('field') field: string) { await this.access.assertOrg(u, orgId); return this.pipelines.reveal(u, orgId, runId, field); }
 
   @Get() inbox(@CurrentUser() u: AuthUser) { return this.chat.inbox(u); }
 

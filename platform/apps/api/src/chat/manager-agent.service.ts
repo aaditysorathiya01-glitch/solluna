@@ -10,6 +10,8 @@ import { DispatcherService } from '../connectors/dispatcher.service';
 import { OrchestratorService } from '../orchestrator/orchestrator.service';
 import { ChatService, type ChatMessage } from './chat.service';
 import { systemPrompt, TOOLS } from './manager-prompt';
+import { PipelineService } from './pipeline.service';
+import { stepsOf } from './pipelines';
 import { checkInput, checkOutput, flagNotes, rewriteNote, SAFE_FALLBACK, SOFT_VIOLATIONS, type InputFlag, type OutputViolation } from './guardrails';
 
 /**
@@ -50,7 +52,10 @@ export class ManagerAgentService implements OnModuleInit {
     private readonly dispatch: DispatcherService,
     private readonly orch: OrchestratorService,
     private readonly chat: ChatService,
+    private readonly pipelines: PipelineService,
   ) {
+    // OTP / password capture runs first and always (even when automatic replies are off), then the reply is queued.
+    chat.clientMessageListeners.push((orgId, body) => this.pipelines.capture(orgId, body));
     chat.clientMessageListeners.push((orgId) => this.enqueue(orgId));
   }
 
@@ -103,8 +108,10 @@ export class ManagerAgentService implements OnModuleInit {
 
       const started = Date.now();
       const bound: Bound = { orgId, runId };
-      const context = await this.clientFacts(orgId);
-      const { messages, flags } = await this.history(conv.id, context);
+      const pipelineText = await this.pipelines.contextFor(orgId);
+      const context = `${await this.clientFacts(orgId)}${pipelineText ? `\n\n${pipelineText}` : ''}`;
+      const secretStep = await this.secretStep(orgId);
+      const { messages, flags } = await this.history(conv.id, context, secretStep.otp, secretStep.otp || secretStep.password);
       const client = new Anthropic();
       const usage = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, tools: 0 };
       const toolNames: string[] = [];
@@ -136,7 +143,7 @@ export class ManagerAgentService implements OnModuleInit {
       };
 
       // Output guardrail: a failing draft is rewritten once, then replaced by a safe hand-off and escalated.
-      const guardCtx = await this.guardContext(orgId);
+      const guardCtx = { ...(await this.guardContext(orgId)), allowSecretRequest: secretStep.otp || secretStep.password };
       let text = await converse();
       let violations: OutputViolation[] = text ? checkOutput(text, guardCtx) : [];
       const firstViolations = violations;
@@ -194,7 +201,7 @@ export class ManagerAgentService implements OnModuleInit {
   }
 
   /** Recent chat as alternating turns: client = user, SOLLUNA = assistant. Internal notes are never included. */
-  private async history(conversationId: string, facts: string): Promise<{ messages: Anthropic.MessageParam[]; flags: InputFlag[] }> {
+  private async history(conversationId: string, facts: string, otpStep = false, secretStep = false): Promise<{ messages: Anthropic.MessageParam[]; flags: InputFlag[] }> {
     const rows = (await this.db.message.findMany({
       where: { conversationId, isInternalNote: false }, orderBy: { createdAt: 'desc' }, take: HISTORY,
       select: { body: true, senderType: true, attachments: { where: { deletedAt: null }, select: { fileName: true } } },
@@ -205,6 +212,8 @@ export class ManagerAgentService implements OnModuleInit {
       const role = r.senderType === 'CUSTOMER' ? 'user' : 'assistant';
       // Input guardrail: secrets never reach the model; flags of the newest client message steer the reply.
       const checked = role === 'user' ? checkInput(r.body) : { text: r.body, flags: [] as InputFlag[] };
+      // Inside an OTP / password step every code-like number is hidden too (a bare "482913").
+      if (role === 'user' && otpStep) checked.text = checked.text.replace(/(?<!\d)\d{4,8}(?!\d)/g, '[hidden by SOLLUNA]');
       if (role === 'user') lastFlags = checked.flags;
       const text = [checked.text, ...r.attachments.map((a) => `[attached file: ${a.fileName}]`)].filter(Boolean).join('\n');
       const last = turns[turns.length - 1];
@@ -216,9 +225,22 @@ export class ManagerAgentService implements OnModuleInit {
     const msgs: Anthropic.MessageParam[] = turns.map((t) => ({ role: t.role, content: t.text || '(empty)' }));
     // Client facts go with the latest client turn (fresh each time, after the cached history).
     const last = msgs[msgs.length - 1];
-    const notes = flagNotes(lastFlags);
+    const notes = secretStep && lastFlags.includes('secret_shared')
+      ? ['The client sent the OTP / password for the sign-up step. It was captured securely and passed to the team. Thank them briefly; do not repeat it and do not warn them.', ...flagNotes(lastFlags.filter((f) => f !== 'secret_shared'))]
+      : flagNotes(lastFlags);
     last.content = `<client_facts>\n${facts}${notes.length ? `\nGuardrail notes:\n- ${notes.join('\n- ')}` : ''}\n</client_facts>\n\n${last.content as string}`;
     return { messages: msgs, flags: lastFlags };
+  }
+
+  /** Whether a registration step is waiting for an OTP and / or the account password. */
+  private async secretStep(orgId: string) {
+    const out = { otp: false, password: false };
+    for (const run of await this.pipelines.active(orgId)) {
+      const step = stepsOf(run.pipeline, run.branch)[run.stepIndex];
+      if (step?.fields.some((f) => f.kind === 'otp')) out.otp = true;
+      if (step?.fields.some((f) => f.key === 'password')) out.password = true;
+    }
+    return out;
   }
 
   private otherNames: { at: number; byOrg: Map<string, string[]> } | null = null;
@@ -288,6 +310,25 @@ export class ManagerAgentService implements OnModuleInit {
       if (req.entitlement === 'OUT_OF_PLAN') return `Not in the client's plan: ${FEATURES[d.feature_key].label}. Request recorded as out of plan; tell the client which plan includes it.`;
       if (req.entitlement === 'LIMIT_REACHED') return 'The monthly limit for this service is used up; the request is waiting. Tell the client.';
       return `Request opened: "${req.title}" (status ${req.status}).`;
+    }
+    if (name === 'start_pipeline') {
+      const d = z.object({ marketplace: z.enum(['AMAZON', 'FLIPKART']), has_account: z.boolean() }).parse(input);
+      await this.useTool(b, 'set_seller_account', { marketplace: d.marketplace, has_account: d.has_account, store_name: null, seller_id: null });
+      const run = await this.pipelines.start(b.orgId, d.marketplace, d.has_account);
+      const step = stepsOf(run.pipeline, run.branch)[run.stepIndex];
+      return `Pipeline started for ${d.marketplace} (${d.has_account ? 'existing account → admin access' : 'new account'}). Current step: ${step?.title}. Follow the step instructions in the facts.`;
+    }
+    if (name === 'pipeline_save') {
+      const d = z.object({ marketplace: z.enum(['AMAZON', 'FLIPKART']), field: z.string().trim().min(1).max(40), value: z.string().max(500) }).parse(input);
+      return this.pipelines.save(b.orgId, d.marketplace, d.field, d.value);
+    }
+    if (name === 'generate_temp_password') {
+      const d = z.object({ marketplace: z.enum(['AMAZON', 'FLIPKART']) }).parse(input);
+      return this.pipelines.generatePassword(b.orgId, d.marketplace);
+    }
+    if (name === 'pipeline_next') {
+      const d = z.object({ marketplace: z.enum(['AMAZON', 'FLIPKART']) }).parse(input);
+      return this.pipelines.next(b.orgId, d.marketplace);
     }
     if (name === 'escalate_to_team') {
       const d = z.object({ reason: z.string().trim().min(3).max(1000), priority: z.enum(['P1', 'P2', 'P3', 'P4']) }).parse(input);

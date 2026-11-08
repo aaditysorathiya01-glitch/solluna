@@ -77,7 +77,7 @@ export function welcomeLines(kind: string, planCode: string, planName: string, m
 export class ChatService implements OnModuleInit {
   readonly events = new Subject<ChatEvent>();
   /** Called after every client message (the manager agent queues its reply here). */
-  readonly clientMessageListeners: ((orgId: string) => Promise<unknown>)[] = [];
+  readonly clientMessageListeners: ((orgId: string, body: string) => Promise<unknown>)[] = [];
 
   constructor(
     private readonly db: PrismaService,
@@ -148,7 +148,7 @@ export class ChatService implements OnModuleInit {
 
     this.events.next({ type: 'message', organizationId: orgId, internal: d.internal, message: message as ChatMessage });
     await this.notify(user, orgId, message as ChatMessage);
-    if (user.type === 'CUSTOMER') for (const l of this.clientMessageListeners) await l(orgId).catch((e) => Logger.error(e, 'ChatListener'));
+    if (user.type === 'CUSTOMER') for (const l of this.clientMessageListeners) await l(orgId, d.body).catch((e) => Logger.error(e, 'ChatListener'));
     return message;
   }
 

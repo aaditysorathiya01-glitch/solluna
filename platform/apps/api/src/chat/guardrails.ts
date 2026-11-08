@@ -40,7 +40,7 @@ export function flagNotes(flags: InputFlag[]): string[] {
 }
 
 export type OutputViolation = 'ai_slop' | 'ai_disclosure' | 'claims_human' | 'asks_secret' | 'guarantee' | 'foreign_identifier' | 'external_link' | 'internal_leak' | 'too_long' | 'empty';
-export interface OutputContext { ownGstin?: string | null; ownEmails?: string[]; otherClientNames?: string[] }
+export interface OutputContext { ownGstin?: string | null; ownEmails?: string[]; otherClientNames?: string[]; /** Inside a registration step that needs an OTP / password. */ allowSecretRequest?: boolean }
 
 const AI_WORDS = /\b(artificial intelligence|chat\s*bot|chatbot|language model|LLM|GPT|Claude|Anthropic|virtual assistant|bot hoon|bot hu)\b/i;
 const AI_ABBR = /\b(AI|A\.I\.)\b/; // case-sensitive: Hinglish words like "ai" are fine
@@ -69,7 +69,7 @@ export function checkOutput(text: string, ctx: OutputContext = {}): OutputViolat
   if (!t) return ['empty'];
   if (AI_WORDS.test(t) || AI_ABBR.test(t)) v.add('ai_disclosure');
   if (CLAIMS_HUMAN.test(t)) v.add('claims_human');
-  if (ASKS_SECRET.test(t) && !/\b(never|kabhi|mat|don'?t|do not|nahi)\b/i.test(t)) v.add('asks_secret');
+  if (!ctx.allowSecretRequest && ASKS_SECRET.test(t) && !/\b(never|kabhi|mat|don'?t|do not|nahi)\b/i.test(t)) v.add('asks_secret');
   if (GUARANTEE.test(t) && !/\b(cannot|can't|can not|no one can|not)\b[^.\n]{0,20}\bguarantee/i.test(t)) v.add('guarantee');
   for (const g of t.match(GSTIN) ?? []) if (g !== ctx.ownGstin) v.add('foreign_identifier');
   const okEmails = new Set([...(ctx.ownEmails ?? []).map((e) => e.toLowerCase())]);

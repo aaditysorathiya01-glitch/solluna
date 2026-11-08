@@ -1143,3 +1143,32 @@ model EvalRun {
 
   @@index([createdAt])
 }
+
+/// Manager pipeline run (apps/api/src/chat/pipelines.ts): one per client per marketplace flow.
+model PipelineRun {
+  id             String   @id @default(cuid())
+  organizationId String
+  pipeline       String // SELLER_ACCOUNT_REGISTRATION
+  branch         String // FLIPKART_NEW | FLIPKART_HAS_ACCOUNT | AMAZON_NEW | AMAZON_HAS_ACCOUNT
+  stepIndex      Int      @default(0)
+  data           Json     @default("{}") // non-secret field values
+  secrets        Json? // field → AES-GCM ciphertext (password, bank account); deleted when the run finishes
+  status         String   @default("ACTIVE") // ACTIVE | DONE | CANCELLED
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  @@index([organizationId, status])
+}
+
+/// OTP sent by the client during seller-account registration: encrypted, short-lived, deleted when the team reads it.
+model PipelineOtp {
+  id             String   @id @default(cuid())
+  runId          String
+  organizationId String
+  cipher         String
+  expiresAt      DateTime
+  createdAt      DateTime @default(now())
+
+  @@index([runId])
+  @@index([expiresAt])
+}
