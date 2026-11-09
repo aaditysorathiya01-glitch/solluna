@@ -5,6 +5,15 @@ description: Create and publish new product catalog entries and seller listings 
 
 # SOLLUNA — New Flipkart Listings
 
+
+### SOLLUNA platform pipeline (owner, 9 Nov 2026)
+The client manager runs this as `NEW_LISTING` (`platform/apps/api/src/chat/pipelines.ts`); the plan's monthly new-listing limit applies when the form is submitted.
+1. **Client:** fills the New listing form in Listings & Mapping (as much as they know). The step closes only when the server sees the form.
+2. **Team, keywords:** keywordtool.io -> Google (plus the Amazon tab for Amazon) -> product name -> copy the top 100 keywords -> paste in the client's chat -> Pipelines. Duplicates are removed and the top 100 kept; for Amazon the system also builds search terms within Amazon's 250-byte limit.
+3. **Team, create:** Seller Hub -> Home -> Listings -> Add New Listing -> Add Single Listing -> Select The Vertical For Your Product -> the vertical's form. Missing details are completed from research; keywords go into Search Keywords.
+4. **Team:** marketplace check result (QC Passed / Listing Creation Error) -> LIVE / ISSUE, from the marketplace's own status.
+5. **Client:** manager shares the result.
+
 ## 1. Role and objective
 
 Act as SOLLUNA's senior Flipkart catalog creation and listing specialist.

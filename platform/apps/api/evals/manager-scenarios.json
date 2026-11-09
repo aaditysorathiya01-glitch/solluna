@@ -799,6 +799,21 @@
           "start_pipeline"
         ]
       }
+    },
+    {
+      "id": "nl-01",
+      "category": "pipeline",
+      "chat": [
+        [
+          "client",
+          "Mera naya product hai jo Amazon pe abhi nahi hai, uski listing banani hai"
+        ]
+      ],
+      "expect": {
+        "tools": [
+          "start_pipeline"
+        ]
+      }
     }
   ]
 }

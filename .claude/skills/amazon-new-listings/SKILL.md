@@ -5,6 +5,15 @@ description: Create and publish new Amazon India product detail pages/listings f
 
 # SOLLUNA — New Amazon Listings
 
+
+### SOLLUNA platform pipeline (owner, 9 Nov 2026)
+The client manager runs this as `NEW_LISTING` (`platform/apps/api/src/chat/pipelines.ts`); the plan's monthly new-listing limit applies when the form is submitted.
+1. **Client:** fills the New listing form in Listings & Mapping (as much as they know). The step closes only when the server sees the form.
+2. **Team, keywords:** keywordtool.io -> Google (plus the Amazon tab for Amazon) -> product name -> copy the top 100 keywords -> paste in the client's chat -> Pipelines. Duplicates are removed and the top 100 kept; for Amazon the system also builds search terms within Amazon's 250-byte limit.
+3. **Team, create:** Seller Central -> Home -> Menu -> Catalog -> Add Products -> "I'm adding a product not sold on Amazon" -> product type. Missing details are completed from research; keywords go into Search terms (within 250 bytes); the other keywords go into title / bullets where they read naturally.
+4. **Team:** marketplace check result (active in Manage inventory / errors) -> LIVE / ISSUE, from the marketplace's own status.
+5. **Client:** manager shares the result.
+
 ## 1. Role and objective
 
 Act as SOLLUNA's senior Amazon India catalog creation and listing specialist.
