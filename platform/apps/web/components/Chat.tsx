@@ -227,7 +227,7 @@ export function DocumentsPanel({ orgId, staff = false, myId }: { orgId?: string;
   );
 }
 
-interface PipelineRow { id: string; pipeline: string; title: string; branch: string; status: string; step: { index: number; total: number; title: string; by: 'client' | 'team'; fields: { key: string; label: string; required: boolean; hint: string | null }[] } | null; data: Record<string, string>; secretFields: string[]; otpWaiting: number }
+interface PipelineRow { id: string; pipeline: string; title: string; branch: string; status: string; step: { index: number; total: number; title: string; by: 'client' | 'team'; fields: { key: string; label: string; required: boolean; hint: string | null }[] } | null; data: Record<string, string>; secretFields: string[]; otpWaiting: number; forms?: { title: string; ref: string | null; sku: string | null }[] }
 
 /** Staff only: the client's seller-account pipelines, with the team's actions (one-time OTP view, secrets, step done). */
 function PipelinesCard({ orgId }: { orgId: string }) {
@@ -250,6 +250,7 @@ function PipelinesCard({ orgId }: { orgId: string }) {
         <div key={r.id} className="space-y-1">
           <p className="font-semibold">{r.title} · {r.branch.replace('_', ' · ').replace('HAS_ACCOUNT', 'admin access').replace('NEW', 'new account').replace(' · BRAND', '')} — step {(r.step?.index ?? 0) + 1}/{r.step?.total}: {r.step?.title} <span className={`chip ${r.step?.by === 'team' ? 'bg-amber-50 text-amber-800' : 'bg-ivory'}`}>{r.step?.by === 'team' ? 'Your turn' : 'With client'}</span></p>
           <p className="text-ink-3">{Object.entries(r.data).map(([k, v]) => `${k}: ${v}`).join(' · ') || 'No details yet'}</p>
+          {!!r.forms?.length && <ul className="list-disc pl-4 text-ink-2">{r.forms.map((f, i) => <li key={i}>{f.ref ?? f.title}{f.sku ? ` · SKU ${f.sku}` : ''}</li>)}</ul>}
           <div className="flex flex-wrap gap-2">
             {r.otpWaiting > 0 && <button className="btn-gold py-1 text-xs" onClick={() => act(`${r.id}/otp`, (x) => `OTP ${x.otp} (deleted now — use it right away)`)}>Show OTP (one time)</button>}
             {r.secretFields.map((f) => <button key={f} className="btn-ghost py-1 text-xs" onClick={() => act(`${r.id}/secrets/${f}`, (x) => `${f}: ${x.value}`)}>Show {f.replace('_', ' ')}</button>)}

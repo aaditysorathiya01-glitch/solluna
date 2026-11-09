@@ -13,7 +13,7 @@ const PASSWORD_CAPTURE = /\b(?:password|passwd|pwd)\b\s*(?:is|:|=|hai|h)?\s*(\S{
 const OTP_CAPTURE = /(?<![\d])(\d{4,8})(?![\d])/;
 
 type Run = { id: string; organizationId: string; pipeline: string; branch: string; stepIndex: number; data: Prisma.JsonValue; secrets: Prisma.JsonValue; status: string; createdAt: Date };
-const branchFor = (pipeline: string, mp: Marketplace, hasAccount: boolean | null) => (pipeline === 'BRAND_APPROVAL' ? `${mp}_BRAND` : `${mp}_${hasAccount ? 'HAS_ACCOUNT' : 'NEW'}`);
+const branchFor = (pipeline: string, mp: Marketplace, hasAccount: boolean | null) => (pipeline === 'BRAND_APPROVAL' ? `${mp}_BRAND` : pipeline === 'CATALOG_MAPPING' ? `${mp}_MAPPING` : `${mp}_${hasAccount ? 'HAS_ACCOUNT' : 'NEW'}`);
 const mpOf = (branch: string) => branch.split('_')[0] as Marketplace;
 /** {{date-180}} → the date 180 days ago (Amazon invoice rule), e.g. 13-May-2026. */
 const withDates = (t: string) => t.replace(/\{\{date-(\d+)\}\}/g, (_, d) => new Date(Date.now() - Number(d) * 86_400_000).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric', timeZone: 'Asia/Kolkata' }).replace(/ /g, '-'));
@@ -60,12 +60,19 @@ export class PipelineService {
 
   /** Saves one field of the CURRENT step only (the manager cannot fill other steps). */
   async save(orgId: string, pipeline: string, marketplace: string, field: string, value: string) {
-    const run = await this.runFor(orgId, pipeline, marketplace);
+    let run = await this.runFor(orgId, pipeline, marketplace);
     const step = this.step(run);
     const f = step?.fields.find((x) => x.key === field);
     if (!step || !f) throw new BadRequestException(`"${field}" is not part of the current step (${step?.title ?? 'none'}). Stay on the current step.`);
     if (step.by === 'team') throw new BadRequestException('This step is done by the SOLLUNA team; you cannot fill it.');
     if (f.kind === 'otp') throw new BadRequestException('OTPs are captured automatically from the client message; do not save them.');
+    if (f.kind === 'form') {
+      const forms = await this.db.catalogForm.count({ where: { organizationId: orgId, marketplace: mpOf(run.branch), kind: 'MAPPING', createdAt: { gte: run.createdAt } } });
+      if (!forms) throw new BadRequestException(f.hint ?? 'No form submitted yet.');
+      value = 'yes';
+      await this.db.pipelineRun.update({ where: { id: run.id }, data: { data: { ...(run.data as object), forms_count: String(forms) } } });
+      run = (await this.db.pipelineRun.findUniqueOrThrow({ where: { id: run.id } }));
+    }
     if (f.kind === 'document') {
       const docs = await this.db.document.count({ where: { organizationId: orgId, deletedAt: null, createdAt: { gte: run.createdAt } } });
       if (docs < (f.minDocs ?? 1)) throw new BadRequestException(f.hint ?? 'Ask the client to upload the document here in chat first.');
@@ -172,12 +179,15 @@ export class PipelineService {
 
   async list(orgId: string) {
     const runs = await this.db.pipelineRun.findMany({ where: { organizationId: orgId }, orderBy: { createdAt: 'desc' }, take: 10 });
+    // Mapping runs: the forms the client submitted since the run started (what the team maps).
+    const forms = await this.db.catalogForm.findMany({ where: { organizationId: orgId, kind: 'MAPPING' }, orderBy: { createdAt: 'desc' }, take: 50, select: { marketplace: true, title: true, data: true, createdAt: true } });
     const otps = await this.db.pipelineOtp.groupBy({ by: ['runId'], where: { organizationId: orgId, expiresAt: { gt: new Date() } }, _count: { _all: true } });
     return runs.map((r) => {
       const steps = stepsOf(r.pipeline, r.branch);
       const st = steps[r.stepIndex];
       return { id: r.id, pipeline: r.pipeline, title: PIPELINES[r.pipeline]?.title ?? r.pipeline, branch: r.branch, status: r.status,
         step: st ? { index: r.stepIndex, total: steps.length, title: st.title, by: st.by, fields: st.by === 'team' ? st.fields.filter((f) => f.kind === 'text').map((f) => ({ key: f.key, label: f.label, required: Boolean(f.required), hint: f.hint ?? null })) : [] } : null,
+        forms: r.pipeline === 'CATALOG_MAPPING' ? forms.filter((f) => f.marketplace === mpOf(r.branch) && f.createdAt >= r.createdAt).map((f) => ({ title: f.title, ref: (f.data as Record<string, string>).productRef ?? (f.data as Record<string, string>).productLink, sku: (f.data as Record<string, string>).sellerSku })) : [],
         data: r.data, secretFields: Object.keys((r.secrets as object) ?? {}), otpWaiting: otps.find((o) => o.runId === r.id)?._count._all ?? 0, createdAt: r.createdAt };
     });
   }

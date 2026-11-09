@@ -6,7 +6,8 @@
 import { config } from '../common/config';
 
 export type Marketplace = 'AMAZON' | 'FLIPKART';
-export type FieldKind = 'text' | 'secret' | 'otp' | 'confirm' | 'document';
+/** form = the client submitted a Listings & Mapping form (checked on the server). */
+export type FieldKind = 'text' | 'secret' | 'otp' | 'confirm' | 'document' | 'form';
 export interface PipeField { key: string; label: string; kind: FieldKind; required?: boolean; pattern?: RegExp; hint?: string; generate?: 'password'; prefill?: string; /** document: files the client must upload during this run */ minDocs?: number }
 export interface PipeStep {
   key: string; title: string;
@@ -146,7 +147,31 @@ const brandApprovalAmazon: PipeStep[] = [
     fields: [{ key: 'informed', label: 'Client informed', kind: 'confirm', required: true }] },
 ];
 
+/** Unlimited Existing Catalog Mapping (owner, 9 Nov 2026): the client fills the Mapping form; the team maps it on the marketplace. */
+const MAP_PATH: Record<Marketplace, string> = {
+  FLIPKART: 'Seller Hub → Home → Listings → Add New Listing → paste the FSN in "Create listings using products available on Flipkart" → Start Selling → fill the details from the client\'s mapping form → submit',
+  AMAZON: 'Seller Central → Home → Menu → Catalog → Add Products → search the ASIN → condition New → Sell this product (Apply to sell if the brand is gated — then run Brand Approval first) → fill the offer from the client\'s mapping form → submit',
+};
+const catalogMapping = (mp: Marketplace): PipeStep[] => [
+  { key: 'mapping_form', title: 'Client fills the Mapping form for each product', by: 'client',
+    instructions: `Ask the client to open Listings & Mapping → ${mp === 'AMAZON' ? 'Amazon' : 'Flipkart'} → Mapping, paste the product ${mp === 'AMAZON' ? 'ASIN or Amazon.in link' : 'FSN or Flipkart link'} and fill the form, one form per product (a saved template fills repeat products faster). Help with any field they are unsure about. When they say they have submitted, save forms_submitted = yes — the server checks the forms really arrived.`,
+    fields: [{ key: 'forms_submitted', label: 'Mapping form(s) submitted', kind: 'form', required: true, hint: `No ${mp === 'AMAZON' ? 'Amazon' : 'Flipkart'} mapping form has been submitted yet. Ask the client to submit it in Listings & Mapping first.` }] },
+  { key: 'map', title: `SOLLUNA maps the product(s) on ${mp === 'AMAZON' ? 'Amazon' : 'Flipkart'}`, by: 'team',
+    instructions: 'The team is adding the client\'s offer to the existing product page(s) now. Tell the client it is in progress and you will confirm when it is live.',
+    fields: [{ key: 'listing_refs', label: `${mp === 'AMAZON' ? 'SKU / ASIN' : 'SKU / Listing ID'} of each mapped product`, kind: 'text', required: true, hint: MAP_PATH[mp] }] },
+  { key: 'live', title: `${mp === 'AMAZON' ? 'Amazon' : 'Flipkart'} confirms the listing(s)`, by: 'team',
+    instructions: 'The marketplace is processing the listing (QC / activation). Tell the client you will update them as soon as it is live. Do not say it is live before the team confirms.',
+    fields: [
+      { key: 'outcome', label: 'Result', kind: 'text', required: true, pattern: /^(LIVE|ISSUE)$/, hint: 'LIVE (marketplace shows it active) or ISSUE' },
+      { key: 'issue', label: 'Issue to fix (if any)', kind: 'text' },
+    ] },
+  { key: 'result', title: 'Tell the client the result', by: 'client',
+    instructions: 'Tell the client the result (outcome, listing_refs). If LIVE: their offer is active on the existing product page. If ISSUE: explain the issue simply and what is needed from them; if it needs a new form, start the Catalog Mapping pipeline again. Then save informed = yes.',
+    fields: [{ key: 'informed', label: 'Client informed', kind: 'confirm', required: true }] },
+];
+
 export const PIPELINES: Record<string, Pipeline> = {
+  CATALOG_MAPPING: { key: 'CATALOG_MAPPING', title: 'Catalog mapping', branches: { FLIPKART_MAPPING: catalogMapping('FLIPKART'), AMAZON_MAPPING: catalogMapping('AMAZON') } },
   BRAND_APPROVAL: { key: 'BRAND_APPROVAL', title: 'Brand approval', branches: { FLIPKART_BRAND: brandApprovalFlipkart, AMAZON_BRAND: brandApprovalAmazon } },
   SELLER_ACCOUNT_REGISTRATION: {
     key: 'SELLER_ACCOUNT_REGISTRATION', title: 'Seller account (registration or admin access)',
@@ -176,3 +201,5 @@ export function validate(f: PipeField, value: string): string | null {
   if (f.pattern && !f.pattern.test(normalise(f, value))) return `${f.label} looks wrong${f.hint ? ` (${f.hint})` : ''}`;
   return null;
 }
+
+export const PIPELINE_KEYS = ['SELLER_ACCOUNT_REGISTRATION', 'BRAND_APPROVAL', 'CATALOG_MAPPING'] as const;

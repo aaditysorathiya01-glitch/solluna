@@ -1631,6 +1631,37 @@ test('manager pipeline: Flipkart brand approval — brand + FSN + document type,
   assert.match(amzFacts, /at least 100 units/);
 });
 
+test('manager pipeline: catalog mapping — client fills the Mapping form (server-checked), team maps, live confirmed, result', async () => {
+  const c = await registerCustomer('Neel'); await pay(c, 'RESELLER');
+  const org = ok(await call('GET', '/auth/me', { token: c })).organization;
+  const waitFor = async (fn, what) => { for (let i = 0; i < 60; i++) { const v = await fn(); if (v) return v; await new Promise((x) => setTimeout(x, 250)); } throw new Error(`timed out: ${what}`); };
+  const doneRuns = () => db.agentRun.count({ where: { organizationId: org.id, status: { in: ['DONE', 'SKIPPED', 'FAILED'] }, OR: [{ note: null }, { note: { not: 'chat summary' } }] } });
+  const tool = async (name, input) => { const before = await doneRuns(); ok(await call('POST', '/chat/messages', { token: c, body: { body: `[agent-test] tool:${name} ${JSON.stringify({ pipeline: 'CATALOG_MAPPING', marketplace: 'FLIPKART', ...input })}` } })); await waitFor(async () => (await doneRuns()) > before, name); };
+  const lastToolResult = () => JSON.stringify(claude.calls.filter((x) => JSON.stringify(x.body).includes(org.legalName)).at(-1).body.messages.at(-1));
+  const run = async () => (ok(await call('GET', `/ops/chats/${org.id}/pipelines`, { token: S.admin }))).find((r) => r.pipeline === 'CATALOG_MAPPING');
+
+  await tool('start_pipeline', { has_account: null });
+  let r = await waitFor(run, 'mapping pipeline');
+  assert.equal(r.title, 'Catalog mapping'); assert.equal(r.branch, 'FLIPKART_MAPPING');
+  await tool('pipeline_save', { field: 'forms_submitted', value: 'yes' });
+  assert.match(lastToolResult(), /No Flipkart mapping form has been submitted yet/, 'the client must really submit the form');
+  const form = { sellerSku: 'VIM-2', listingStatus: 'Active', mrp: 120, sellingPrice: 110, procurementType: 'Instock', procurementSlaDays: 2, lengthCm: 10, breadthCm: 8, heightCm: 5, weightKg: 1, stock: 40, hsn: '34011190', taxCode: 'GST_18', countryOfOrigin: 'India', manufacturerDetails: 'HUL, Mumbai', packerDetails: 'HUL, Mumbai', productLink: 'DWBFYJSXEA7PSBXF' };
+  ok(await call('POST', '/catalog-forms', { token: c, body: { marketplace: 'FLIPKART', kind: 'MAPPING', data: form } }));
+  await tool('pipeline_save', { field: 'forms_submitted', value: 'yes' });
+  await tool('pipeline_next', {});
+  r = await run();
+  assert.equal(r.step.by, 'team'); assert.equal(r.data.forms_count, '1');
+  assert.deepEqual(r.forms.map((f) => [f.ref, f.sku]), [['DWBFYJSXEA7PSBXF', 'VIM-2']], 'team sees what to map');
+  assert.match(r.step.fields[0].hint, /Add New Listing → paste the FSN/);
+  const ops = await staff('OPERATIONS_MANAGER', S.admin);
+  ok(await call('POST', `/ops/chats/${org.id}/pipelines/${r.id}/advance`, { token: ops.token, body: { fields: { listing_refs: 'VIM-2 / LSTDWBFYJSXEA7PSBXF' } } }));
+  ok(await call('POST', `/ops/chats/${org.id}/pipelines/${r.id}/advance`, { token: ops.token, body: { fields: { outcome: 'live' } } }));
+  r = await run(); assert.equal(r.data.outcome, 'LIVE'); assert.equal(r.step.title, 'Tell the client the result');
+  await tool('pipeline_save', { field: 'informed', value: 'yes' });
+  await tool('pipeline_next', {});
+  assert.equal((await run()).status, 'DONE');
+});
+
 test('manager guardrails (unit) and eval runner', async () => {
   const g = (await import('../dist/apps/api/src/chat/guardrails.js')).default ?? await import('../dist/apps/api/src/chat/guardrails.js');
   const inp = g.checkInput('my password is Riya@2024 and OTP 482913');

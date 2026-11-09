@@ -1,6 +1,7 @@
 import type Anthropic from '@anthropic-ai/sdk';
 import { FEATURE_KEYS } from '../../../../packages/permissions/src/features';
 import { config } from '../common/config';
+import { PIPELINE_KEYS } from './pipelines';
 
 /** Manager agent prompt and tool definitions (layer 2 + 4). Shared by the service and the eval runner. */
 export const TOOLS: Anthropic.Tool[] = [
@@ -33,9 +34,9 @@ export const TOOLS: Anthropic.Tool[] = [
   },
   {
     name: 'start_pipeline', strict: true,
-    description: 'Start a pipeline for one marketplace. SELLER_ACCOUNT_REGISTRATION: once the client says whether they already have a seller account there (has_account true/false). BRAND_APPROVAL: when the client wants to sell a brand that needs approval (has_account null). The plan check runs on the server.',
+    description: 'Start a pipeline for one marketplace. SELLER_ACCOUNT_REGISTRATION: once the client says whether they already have a seller account there (has_account true/false). BRAND_APPROVAL: when the client wants to sell a brand that needs approval (has_account null). CATALOG_MAPPING: when the client wants to sell a product that already exists on the marketplace (has_account null). The plan check runs on the server.',
     input_schema: { type: 'object', additionalProperties: false, required: ['pipeline', 'marketplace', 'has_account'], properties: {
-      pipeline: { type: 'string', enum: ['SELLER_ACCOUNT_REGISTRATION', 'BRAND_APPROVAL'] },
+      pipeline: { type: 'string', enum: [...PIPELINE_KEYS] },
       marketplace: { type: 'string', enum: ['AMAZON', 'FLIPKART'] }, has_account: { type: ['boolean', 'null'] },
     } },
   },
@@ -43,7 +44,7 @@ export const TOOLS: Anthropic.Tool[] = [
     name: 'pipeline_save', strict: true,
     description: 'Save one field of the CURRENT pipeline step (see "Step fields"). Fields of other steps are refused. Never use it for OTPs (they are captured automatically).',
     input_schema: { type: 'object', additionalProperties: false, required: ['pipeline', 'marketplace', 'field', 'value'], properties: {
-      pipeline: { type: 'string', enum: ['SELLER_ACCOUNT_REGISTRATION', 'BRAND_APPROVAL'] },
+      pipeline: { type: 'string', enum: [...PIPELINE_KEYS] },
       marketplace: { type: 'string', enum: ['AMAZON', 'FLIPKART'] }, field: { type: 'string' }, value: { type: 'string' },
     } },
   },
@@ -56,7 +57,7 @@ export const TOOLS: Anthropic.Tool[] = [
     name: 'pipeline_next', strict: true,
     description: 'Move to the next pipeline step when every required field of the current client step is saved.',
     input_schema: { type: 'object', additionalProperties: false, required: ['pipeline', 'marketplace'], properties: {
-      pipeline: { type: 'string', enum: ['SELLER_ACCOUNT_REGISTRATION', 'BRAND_APPROVAL'] }, marketplace: { type: 'string', enum: ['AMAZON', 'FLIPKART'] },
+      pipeline: { type: 'string', enum: [...PIPELINE_KEYS] }, marketplace: { type: 'string', enum: ['AMAZON', 'FLIPKART'] },
     } },
   },
   {
@@ -92,7 +93,7 @@ Pipelines (strict)
 
 Onboarding (when facts below are missing, work through them naturally)
 1. Their business: what they sell, category, brand name, roughly how many SKUs and orders a month.
-   (Brand approval: when they want to sell a brand Flipkart or Amazon gates, call start_pipeline with pipeline BRAND_APPROVAL.)
+   (Brand approval: when they want to sell a brand Flipkart or Amazon gates, call start_pipeline with pipeline BRAND_APPROVAL. Products already on Flipkart / Amazon: start_pipeline with pipeline CATALOG_MAPPING.)
 2. Seller accounts: ask whether they already have a Flipkart and/or Amazon India seller account. For each marketplace, call start_pipeline (pipeline SELLER_ACCOUNT_REGISTRATION) with has_account true or false, then follow that pipeline step by step (existing account → give SOLLUNA admin access; no account → SOLLUNA opens it in the client's own name, mobile and email).
 3. Save every useful fact with remember (one key per fact). Do not ask again for facts already listed.
 

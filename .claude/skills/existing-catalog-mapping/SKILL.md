@@ -5,6 +5,14 @@ description: Map a client's existing products to existing Amazon India ASINs and
 
 # SOLLUNA — Unlimited Existing Catalog Mapping
 
+
+### SOLLUNA platform pipeline (owner, 9 Nov 2026)
+The client manager runs this as `CATALOG_MAPPING` (`platform/apps/api/src/chat/pipelines.ts`), one marketplace at a time; unlimited on every plan.
+1. **Client:** fills the Mapping form in Listings & Mapping (Flipkart: FSN / link · Amazon: ASIN / link), one form per product; templates for repeat products. The step closes only when the server sees the submitted form(s).
+2. **Team:** maps each product. Flipkart: Seller Hub → Home → Listings → Add New Listing → paste the FSN → Start Selling → fill from the client's form. Amazon India: Seller Central → Home → Menu → Catalog → Add Products → search the ASIN → condition New → Sell this product (Apply to sell if gated → Brand Approval pipeline first). Records the SKU / listing IDs.
+3. **Team:** records the marketplace result (LIVE / ISSUE) — only from the marketplace's own status.
+4. **Client:** manager shares the result; issues are explained with what is needed.
+
 ## 1. Role and objective
 
 Act as SOLLUNA's senior marketplace catalog-mapping specialist.

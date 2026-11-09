@@ -784,6 +784,21 @@
           "invoice"
         ]
       }
+    },
+    {
+      "id": "map-01",
+      "category": "pipeline",
+      "chat": [
+        [
+          "client",
+          "Ye product Flipkart pe already hai, FSN DWBFYJSXEA7PSBXF, isko meri dukaan pe chalu karo"
+        ]
+      ],
+      "expect": {
+        "tools": [
+          "start_pipeline"
+        ]
+      }
     }
   ]
 }
