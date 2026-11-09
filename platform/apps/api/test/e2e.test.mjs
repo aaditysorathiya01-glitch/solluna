@@ -1492,7 +1492,7 @@ test('manager pipeline: seller-account registration step by step; OTP/password c
   const org = ok(await call('GET', '/auth/me', { token: c })).organization;
   const waitFor = async (fn, what) => { for (let i = 0; i < 60; i++) { const v = await fn(); if (v) return v; await new Promise((x) => setTimeout(x, 250)); } throw new Error(`timed out: ${what}`); };
   const say = async (body) => ok(await call('POST', '/chat/messages', { token: c, body: { body } }));
-  const doneRuns = () => db.agentRun.count({ where: { organizationId: org.id, status: { in: ['DONE', 'SKIPPED', 'FAILED'] } } });
+  const doneRuns = () => db.agentRun.count({ where: { organizationId: org.id, status: { in: ['DONE', 'SKIPPED', 'FAILED'] }, OR: [{ note: null }, { note: { not: 'chat summary' } }] } });
   // One command at a time: wait until the manager finished the previous one (quick messages are answered together).
   const tool = async (name, input) => { const before = await doneRuns(); await say(`[agent-test] tool:${name} ${JSON.stringify(input)}`); await waitFor(async () => (await doneRuns()) > before, `${name} processed`); };
   const lastResult = async () => { const r = await db.agentRun.findFirst({ where: { organizationId: org.id, note: null, status: 'DONE' }, orderBy: { createdAt: 'desc' } }); return r; };
@@ -1576,7 +1576,7 @@ test('manager pipeline: Flipkart brand approval — brand + FSN + document type,
   const c = await registerCustomer('Kiran'); await pay(c, 'RESELLER');
   const org = ok(await call('GET', '/auth/me', { token: c })).organization;
   const waitFor = async (fn, what) => { for (let i = 0; i < 60; i++) { const v = await fn(); if (v) return v; await new Promise((x) => setTimeout(x, 250)); } throw new Error(`timed out: ${what}`); };
-  const doneRuns = () => db.agentRun.count({ where: { organizationId: org.id, status: { in: ['DONE', 'SKIPPED', 'FAILED'] } } });
+  const doneRuns = () => db.agentRun.count({ where: { organizationId: org.id, status: { in: ['DONE', 'SKIPPED', 'FAILED'] }, OR: [{ note: null }, { note: { not: 'chat summary' } }] } });
   const tool = async (name, input) => { const before = await doneRuns(); ok(await call('POST', '/chat/messages', { token: c, body: { body: `[agent-test] tool:${name} ${JSON.stringify({ pipeline: 'BRAND_APPROVAL', marketplace: 'FLIPKART', ...input })}` } })); await waitFor(async () => (await doneRuns()) > before, `${name}`); };
   const lastToolResult = () => JSON.stringify(claude.calls.filter((x) => JSON.stringify(x.body).includes(org.legalName)).at(-1).body.messages.at(-1));
   const run = async () => (ok(await call('GET', `/ops/chats/${org.id}/pipelines`, { token: S.admin }))).find((r) => r.pipeline === 'BRAND_APPROVAL');
@@ -1617,6 +1617,18 @@ test('manager pipeline: Flipkart brand approval — brand + FSN + document type,
   await tool('pipeline_save', { field: 'informed', value: 'yes' });
   await tool('pipeline_next', {});
   assert.equal((await run()).status, 'DONE');
+  // Amazon India "Apply to sell": invoices only, ASIN from the link, client's phone prefilled, 180-day date filled in.
+  const amzTool = (name, input) => tool(name, { marketplace: 'AMAZON', ...input });
+  await amzTool('start_pipeline', { has_account: null });
+  const amzRun = async () => (ok(await call('GET', `/ops/chats/${org.id}/pipelines`, { token: S.admin }))).find((x) => x.branch === 'AMAZON_BRAND');
+  let a = await waitFor(amzRun, 'amazon brand pipeline');
+  assert.match(a.data.contact_phone, /^9\d{9}$/, "client's own phone prefilled");
+  await amzTool('pipeline_save', { field: 'brand_name', value: 'Vim' });
+  await amzTool('pipeline_save', { field: 'asin', value: 'https://www.amazon.in/Vim-Bar/dp/B07XYZ1234?th=1' });
+  a = await amzRun(); assert.equal(a.data.asin, 'B07XYZ1234');
+  const amzFacts = claude.calls.filter((x) => JSON.stringify(x.body).includes(org.legalName)).map((x) => JSON.stringify(x.body)).reverse().find((t) => t.includes('Brand approval — AMAZON'));
+  assert.match(amzFacts, /dated on or after \d{2}-[A-Z][a-z]{2}-\d{4} \(within 180 days\)/); assert.ok(!amzFacts.includes('{{date'), 'date filled in');
+  assert.match(amzFacts, /at least 100 units/);
 });
 
 test('manager guardrails (unit) and eval runner', async () => {

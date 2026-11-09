@@ -115,8 +115,39 @@ const brandApprovalFlipkart: PipeStep[] = [
     fields: [{ key: 'informed', label: 'Client informed', kind: 'confirm', required: true }] },
 ];
 
+const ASIN = /^[A-Z0-9]{10}$/;
+/** Amazon India "Apply to sell" (owner, 9 Nov 2026): only purchase invoices; contact email = SOLLUNA, phone = client. */
+const AMAZON_INVOICE_RULES = 'At least 1 purchase invoice for these products from a manufacturer or distributor. Each must 1) be dated on or after {{date-180}} (within 180 days), 2) include their name and address, 3) include the name and address of the manufacturer or distributor, 4) together show a combined purchase of at least 100 units. Pricing may be hidden (optional). Amazon may verify by contacting the vendor named on the invoice. Files: PDF, DOCX, PNG, GIF or JPG, up to 10 MB each.';
+const brandApprovalAmazon: PipeStep[] = [
+  { key: 'brand_details', title: 'Brand, an ASIN of that brand, and the contact phone', by: 'client',
+    instructions: `Ask which brand they want approval for and the ASIN (or Amazon.in link) of ANY product of that brand. Amazon accepts purchase invoices only — tell them briefly what is needed: ${AMAZON_INVOICE_RULES} Confirm the phone number Amazon may call (contact_phone, the client's own number). SOLLUNA's email is given as the contact email.`,
+    fields: [
+      { key: 'brand_name', label: 'Brand name', kind: 'text', required: true },
+      { key: 'asin', label: 'ASIN of a product of the brand', kind: 'text', required: true, pattern: ASIN, hint: '10-character ASIN or an Amazon.in product link' },
+      { key: 'contact_phone', label: 'Client phone for Amazon', kind: 'text', required: true, pattern: /^[6-9]\d{9}$/, hint: '10-digit Indian mobile', prefill: 'org.contactPhone' },
+    ] },
+  { key: 'document', title: 'Client uploads purchase invoice(s); check Amazon\'s requirements', by: 'client',
+    instructions: `Ask the client to upload the purchase invoice(s) here in chat. Then go through Amazon's requirements one or two at a time and ask them to confirm each: ${AMAZON_INVOICE_RULES} If a point is not met (older than 180 days, fewer than 100 units in total, missing addresses), explain what is needed. Save requirements_ok = yes only when every point is confirmed.`,
+    fields: [
+      { key: 'document', label: 'Invoice uploaded', kind: 'document', required: true, minDocs: 1, hint: 'Ask the client to upload the purchase invoice here in chat first.' },
+      { key: 'requirements_ok', label: 'All requirements confirmed', kind: 'confirm', required: true },
+    ] },
+  { key: 'apply', title: 'SOLLUNA applies to sell the brand on Amazon', by: 'team',
+    instructions: 'The team is submitting the application on Amazon now. Tell the client it is being submitted and that Amazon may call their number or contact the vendor.',
+    fields: [{ key: 'request_id', label: 'Amazon application reference', kind: 'text', required: true, hint: `Seller Central: Home → Menu → Catalog → Add Products → search the ASIN → condition New → Apply to sell → upload invoice(s) → contact email ${config.opsUser.email}, phone = client's → tick all boxes → Submit. Enter the reference shown, or "submitted"` }] },
+  { key: 'decision', title: 'Amazon reviews the application', by: 'team',
+    instructions: 'Amazon is reviewing the application. Tell the client it is under review and you will update them as soon as Amazon decides. Do not promise approval or a date.',
+    fields: [
+      { key: 'outcome', label: 'Amazon decision', kind: 'text', required: true, pattern: /^(APPROVED|REJECTED)$/, hint: 'APPROVED or REJECTED' },
+      { key: 'rejection_reason', label: 'Rejection reason (if rejected)', kind: 'text' },
+    ] },
+  { key: 'result', title: 'Tell the client the result', by: 'client',
+    instructions: 'Tell the client Amazon\'s decision (outcome). If APPROVED: they can now list this brand — offer to start the listing or mapping. If REJECTED: share rejection_reason in simple words and offer to apply again with other invoices (start_pipeline BRAND_APPROVAL again). Then save informed = yes.',
+    fields: [{ key: 'informed', label: 'Client informed', kind: 'confirm', required: true }] },
+];
+
 export const PIPELINES: Record<string, Pipeline> = {
-  BRAND_APPROVAL: { key: 'BRAND_APPROVAL', title: 'Brand approval', branches: { FLIPKART_BRAND: brandApprovalFlipkart } },
+  BRAND_APPROVAL: { key: 'BRAND_APPROVAL', title: 'Brand approval', branches: { FLIPKART_BRAND: brandApprovalFlipkart, AMAZON_BRAND: brandApprovalAmazon } },
   SELLER_ACCOUNT_REGISTRATION: {
     key: 'SELLER_ACCOUNT_REGISTRATION', title: 'Seller account (registration or admin access)',
     branches: {
@@ -133,6 +164,8 @@ export function normalise(f: PipeField, v: string) {
   if (f.key === 'email') return t.toLowerCase();
   if (f.key === 'mobile') return t.replace(/\D/g, '').replace(/^91(?=\d{10}$)/, '');
   if (f.key.endsWith('pincode')) return t.replace(/\D/g, '');
+  if (f.key === 'asin') return (/\/(?:dp|gp\/product)\/([A-Z0-9]{10})/i.exec(t)?.[1] ?? t).replace(/\s+/g, '').toUpperCase();
+  if (f.key === 'contact_phone') return t.replace(/\D/g, '').replace(/^91(?=\d{10}$)/, '');
   if (f.key === 'fsn') return (/[?&]pid=([A-Z0-9]{16})/i.exec(t)?.[1] ?? t).replace(/\s+/g, '').toUpperCase();
   if (f.pattern) return t.replace(/\s+/g, '').toUpperCase();
   return t;

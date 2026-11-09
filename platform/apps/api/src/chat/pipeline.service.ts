@@ -15,6 +15,8 @@ const OTP_CAPTURE = /(?<![\d])(\d{4,8})(?![\d])/;
 type Run = { id: string; organizationId: string; pipeline: string; branch: string; stepIndex: number; data: Prisma.JsonValue; secrets: Prisma.JsonValue; status: string; createdAt: Date };
 const branchFor = (pipeline: string, mp: Marketplace, hasAccount: boolean | null) => (pipeline === 'BRAND_APPROVAL' ? `${mp}_BRAND` : `${mp}_${hasAccount ? 'HAS_ACCOUNT' : 'NEW'}`);
 const mpOf = (branch: string) => branch.split('_')[0] as Marketplace;
+/** {{date-180}} → the date 180 days ago (Amazon invoice rule), e.g. 13-May-2026. */
+const withDates = (t: string) => t.replace(/\{\{date-(\d+)\}\}/g, (_, d) => new Date(Date.now() - Number(d) * 86_400_000).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric', timeZone: 'Asia/Kolkata' }).replace(/ /g, '-'));
 
 /**
  * Runs the manager's pipelines (pipelines.ts). Secrets (passwords, bank account numbers) are AES-GCM encrypted and
@@ -44,11 +46,12 @@ export class PipelineService {
       if (existing.branch === branch) return existing;
       await this.db.pipelineRun.update({ where: { id: existing.id }, data: { status: 'CANCELLED', secrets: Prisma.DbNull } });
     }
-    const org = await this.db.organization.findUniqueOrThrow({ where: { id: orgId }, select: { legalName: true, brandName: true, gstin: true, address: true, pincode: true } });
+    const org = await this.db.organization.findUniqueOrThrow({ where: { id: orgId }, select: { legalName: true, brandName: true, gstin: true, address: true, pincode: true, contactPhone: true } });
     const prefill: Record<string, string> = {};
     for (const s of stepsOf(pipeline, branch)) for (const f of s.fields) {
       const src = f.prefill?.replace('org.', '') as keyof typeof org | undefined;
-      if (src && org[src]) prefill[f.key] = String(org[src]);
+      // Prefilled values are normalised and checked like client answers; a value that fails is simply asked again.
+      if (src && org[src] && !validate(f, String(org[src]))) prefill[f.key] = normalise(f, String(org[src]));
     }
     const run = await this.db.pipelineRun.create({ data: { organizationId: orgId, pipeline, branch, data: prefill } });
     await this.audit.log({ action: 'pipeline.start', entity: 'PipelineRun', entityId: run.id, organizationId: orgId, after: { branch } });
@@ -158,7 +161,7 @@ export class PipelineService {
       return [
         `Active pipeline: ${PIPELINES[run.pipeline].title} — ${mpOf(run.branch)}${run.pipeline === 'SELLER_ACCOUNT_REGISTRATION' ? ` (${run.branch.endsWith('NEW') ? 'new account' : 'existing account'})` : ''}`,
         `Current step ${run.stepIndex + 1}/${steps.length}: ${step.title} [${step.by === 'team' ? 'SOLLUNA team is doing this' : 'with the client'}]`,
-        `Step instructions: ${step.instructions}`,
+        `Step instructions: ${withDates(step.instructions)}`,
         fields.length ? `Step fields: ${fields.join('; ')}` : '',
         step.by === 'client' ? 'When every required field is saved, call pipeline_next.' : '',
       ].filter(Boolean).join('\n');

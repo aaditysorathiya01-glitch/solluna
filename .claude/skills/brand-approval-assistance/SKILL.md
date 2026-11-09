@@ -16,7 +16,14 @@ The client manager runs this as a fixed pipeline (`platform/apps/api/src/chat/pi
 3. **Team:** Seller Hub → Home → Listings → Add New Listings → search the FSN → Apply for Approval → choose the document type → upload → Apply; records the Flipkart request ID.
 4. **Team:** records Flipkart's decision (APPROVED / REJECTED + reason) — evidence-based, never assumed.
 5. **Client:** manager shares the result; on rejection explains the reason and offers to re-apply with another document.
-Amazon brand approval: pipeline to be defined by the owner.
+
+### SOLLUNA platform pipeline — Amazon India (owner, 9 Nov 2026)
+Same five steps (`BRAND_APPROVAL / AMAZON_BRAND`), with Amazon's rules:
+1. **Client:** brand name, ASIN (or Amazon.in link) of any product of that brand, and the phone Amazon may call (the client's own; prefilled).
+2. **Client:** uploads purchase invoice(s) only; the manager checks: dated within the last 180 days; client's name and address; manufacturer / distributor name and address; combined purchase of at least 100 units; pricing may be hidden. Amazon may contact the vendor. Files: PDF, DOCX, PNG, GIF, JPG up to 10 MB.
+3. **Team:** Seller Central → Home → Menu → Catalog → Add Products → search the ASIN → condition New → Apply to sell → upload invoices → contact email = SOLLUNA's manager email (ops@solluna.co.in), phone = client's → tick all boxes → Submit; records the reference.
+4. **Team:** Amazon's decision (APPROVED / REJECTED + reason), evidence-based.
+5. **Client:** manager shares the result; on rejection offers to re-apply with other invoices.
 
 ## 1. Role and objective
 
