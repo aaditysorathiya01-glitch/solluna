@@ -257,7 +257,9 @@ function PipelinesCard({ orgId }: { orgId: string }) {
             {r.step?.by === 'team' && r.step.fields.map((f) => (
               <label key={f.key} className="flex items-center gap-1" title={f.hint ?? ''}>
                 <span className="text-ink-3">{f.label}{f.required && '*'}</span>
-                <input className="input w-40 py-1 text-xs" value={inputs[`${r.id}.${f.key}`] ?? ''} placeholder={f.hint ?? ''} onChange={(e) => setInputs({ ...inputs, [`${r.id}.${f.key}`]: e.target.value })} data-testid={`team-${f.key}`} />
+                {f.key === 'keywords'
+                  ? <textarea className="input h-20 w-72 py-1 text-xs" value={inputs[`${r.id}.${f.key}`] ?? ''} placeholder="Paste the top 100 keywords (one per line)" onChange={(e) => setInputs({ ...inputs, [`${r.id}.${f.key}`]: e.target.value })} data-testid={`team-${f.key}`} />
+                  : <input className="input w-40 py-1 text-xs" value={inputs[`${r.id}.${f.key}`] ?? ''} placeholder={f.hint ?? ''} onChange={(e) => setInputs({ ...inputs, [`${r.id}.${f.key}`]: e.target.value })} data-testid={`team-${f.key}`} />}
               </label>
             ))}
             {r.step?.by === 'team' && <button className="btn-primary py-1 text-xs" onClick={() => act(`${r.id}/advance`, (x) => x.result, { fields: Object.fromEntries((r.step?.fields ?? []).map((f) => [f.key, inputs[`${r.id}.${f.key}`] ?? ''])) })}>Mark this step done</button>}

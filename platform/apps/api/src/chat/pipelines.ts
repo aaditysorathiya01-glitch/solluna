@@ -8,7 +8,7 @@ import { config } from '../common/config';
 export type Marketplace = 'AMAZON' | 'FLIPKART';
 /** form = the client submitted a Listings & Mapping form (checked on the server). */
 export type FieldKind = 'text' | 'secret' | 'otp' | 'confirm' | 'document' | 'form';
-export interface PipeField { key: string; label: string; kind: FieldKind; required?: boolean; pattern?: RegExp; hint?: string; generate?: 'password'; prefill?: string; /** document: files the client must upload during this run */ minDocs?: number }
+export interface PipeField { key: string; label: string; kind: FieldKind; required?: boolean; pattern?: RegExp; hint?: string; generate?: 'password'; prefill?: string; /** document: files the client must upload during this run */ minDocs?: number; /** form: which Listings & Mapping form counts (default MAPPING) */ formKind?: 'MAPPING' | 'NEW_LISTING' }
 export interface PipeStep {
   key: string; title: string;
   /** Who completes the step: the client (through the manager) or the SOLLUNA team / bot. */
@@ -170,7 +170,37 @@ const catalogMapping = (mp: Marketplace): PipeStep[] => [
     fields: [{ key: 'informed', label: 'Client informed', kind: 'confirm', required: true }] },
 ];
 
+/**
+ * New listings (owner, 9 Nov 2026): the client fills the New listing form; the team researches the top 100 keywords on
+ * keywordtool.io (product name → copy the top 100) and creates the listing with the client's details + researched details.
+ */
+const CREATE_PATH: Record<Marketplace, string> = {
+  FLIPKART: 'Seller Hub → Home → Listings → Add New Listing → Add Single Listing → Select The Vertical For Your Product → fill the vertical\'s form from the client\'s New listing form, complete the rest from research, Search Keywords = the researched keywords → send for QC',
+  AMAZON: 'Seller Central → Home → Menu → Catalog → Add Products → "I\'m adding a product not sold on Amazon" → product type → fill from the client\'s New listing form, complete the rest from research; Search terms = search_terms (Amazon keeps them short), the other keywords go into title / bullet points where they read naturally → save and finish',
+};
+const newListing = (mp: Marketplace): PipeStep[] => [
+  { key: 'listing_form', title: 'Client fills the New listing form', by: 'client',
+    instructions: `Ask the client to open Listings & Mapping → ${mp === 'AMAZON' ? 'Amazon' : 'Flipkart'} → New listing and fill the form (product details, images, price, stock, tax, manufacturing). Whatever they do not know, SOLLUNA completes from research. The plan's monthly new-listing limit applies. When they say it is submitted, save form_submitted = yes — the server checks the form arrived.`,
+    fields: [{ key: 'form_submitted', label: 'New listing form submitted', kind: 'form', required: true, formKind: 'NEW_LISTING', hint: `No ${mp === 'AMAZON' ? 'Amazon' : 'Flipkart'} new listing form has been submitted yet. Ask the client to submit it in Listings & Mapping first.` }] },
+  { key: 'keywords', title: 'SOLLUNA researches the top 100 keywords', by: 'team',
+    instructions: 'The team is researching search keywords for the product. Tell the client the listing is being prepared.',
+    fields: [{ key: 'keywords', label: 'Top 100 keywords', kind: 'text', required: true, hint: 'keywordtool.io → Google (and the Amazon tab for Amazon listings) → type the product name → copy the top 100 keywords → paste here (one per line or comma-separated)' }] },
+  { key: 'create', title: `SOLLUNA creates the listing on ${mp === 'AMAZON' ? 'Amazon' : 'Flipkart'}`, by: 'team',
+    instructions: 'The team is creating the listing now. Tell the client it is in progress and you will confirm when the marketplace has checked it.',
+    fields: [{ key: 'listing_ref', label: mp === 'AMAZON' ? 'SKU / ASIN' : 'SKU / Listing ID', kind: 'text', required: true, hint: CREATE_PATH[mp] }] },
+  { key: 'live', title: `${mp === 'AMAZON' ? 'Amazon' : 'Flipkart'} checks the listing (${mp === 'AMAZON' ? 'processing' : 'QC'})`, by: 'team',
+    instructions: 'The marketplace is checking the new listing. Tell the client you will update them as soon as it is live. Do not say it is live before the team confirms.',
+    fields: [
+      { key: 'outcome', label: 'Result', kind: 'text', required: true, pattern: /^(LIVE|ISSUE)$/, hint: mp === 'AMAZON' ? 'LIVE (active in Manage inventory) or ISSUE' : 'LIVE (QC Passed / active) or ISSUE (e.g. Listing Creation Error)' },
+      { key: 'issue', label: 'Issue to fix (if any)', kind: 'text' },
+    ] },
+  { key: 'result', title: 'Tell the client the result', by: 'client',
+    instructions: 'Tell the client the result (outcome, listing_ref). If LIVE: the new listing is active. If ISSUE: explain the issue simply and what is needed from them. Then save informed = yes.',
+    fields: [{ key: 'informed', label: 'Client informed', kind: 'confirm', required: true }] },
+];
+
 export const PIPELINES: Record<string, Pipeline> = {
+  NEW_LISTING: { key: 'NEW_LISTING', title: 'New listing', branches: { FLIPKART_LISTING: newListing('FLIPKART'), AMAZON_LISTING: newListing('AMAZON') } },
   CATALOG_MAPPING: { key: 'CATALOG_MAPPING', title: 'Catalog mapping', branches: { FLIPKART_MAPPING: catalogMapping('FLIPKART'), AMAZON_MAPPING: catalogMapping('AMAZON') } },
   BRAND_APPROVAL: { key: 'BRAND_APPROVAL', title: 'Brand approval', branches: { FLIPKART_BRAND: brandApprovalFlipkart, AMAZON_BRAND: brandApprovalAmazon } },
   SELLER_ACCOUNT_REGISTRATION: {
@@ -191,6 +221,7 @@ export function normalise(f: PipeField, v: string) {
   if (f.key.endsWith('pincode')) return t.replace(/\D/g, '');
   if (f.key === 'asin') return (/\/(?:dp|gp\/product)\/([A-Z0-9]{10})/i.exec(t)?.[1] ?? t).replace(/\s+/g, '').toUpperCase();
   if (f.key === 'contact_phone') return t.replace(/\D/g, '').replace(/^91(?=\d{10}$)/, '');
+  if (f.key === 'keywords') return keywordList(t).join(', ');
   if (f.key === 'fsn') return (/[?&]pid=([A-Z0-9]{16})/i.exec(t)?.[1] ?? t).replace(/\s+/g, '').toUpperCase();
   if (f.pattern) return t.replace(/\s+/g, '').toUpperCase();
   return t;
@@ -202,4 +233,22 @@ export function validate(f: PipeField, value: string): string | null {
   return null;
 }
 
-export const PIPELINE_KEYS = ['SELLER_ACCOUNT_REGISTRATION', 'BRAND_APPROVAL', 'CATALOG_MAPPING'] as const;
+export const PIPELINE_KEYS = ['SELLER_ACCOUNT_REGISTRATION', 'BRAND_APPROVAL', 'CATALOG_MAPPING', 'NEW_LISTING'] as const;
+
+/** Keywords pasted from keywordtool.io: one per line or comma-separated → de-duplicated, top 100 kept, in order. */
+export function keywordList(raw: string) {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const k of raw.split(/[\n,;\t]+/).map((x) => x.trim().replace(/\s+/g, ' ').toLowerCase()).filter(Boolean)) if (!seen.has(k)) { seen.add(k); out.push(k); }
+  return out.slice(0, 100);
+}
+/** Amazon search terms: unique words from the keywords (in rank order) within Amazon's 250-byte limit. */
+export function amazonSearchTerms(keywords: string[], maxBytes = 250) {
+  const words: string[] = [];
+  for (const w of keywords.join(' ').split(' ')) {
+    if (!w || words.includes(w)) continue;
+    if (Buffer.byteLength([...words, w].join(' ')) > maxBytes) break;
+    words.push(w);
+  }
+  return words.join(' ');
+}

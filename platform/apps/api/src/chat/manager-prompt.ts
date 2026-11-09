@@ -34,7 +34,7 @@ export const TOOLS: Anthropic.Tool[] = [
   },
   {
     name: 'start_pipeline', strict: true,
-    description: 'Start a pipeline for one marketplace. SELLER_ACCOUNT_REGISTRATION: once the client says whether they already have a seller account there (has_account true/false). BRAND_APPROVAL: when the client wants to sell a brand that needs approval (has_account null). CATALOG_MAPPING: when the client wants to sell a product that already exists on the marketplace (has_account null). The plan check runs on the server.',
+    description: 'Start a pipeline for one marketplace. SELLER_ACCOUNT_REGISTRATION: once the client says whether they already have a seller account there (has_account true/false). BRAND_APPROVAL: when the client wants to sell a brand that needs approval (has_account null). CATALOG_MAPPING: when the client wants to sell a product that already exists on the marketplace (has_account null). NEW_LISTING: when the product is not on the marketplace yet and needs a new listing (has_account null). The plan check runs on the server.',
     input_schema: { type: 'object', additionalProperties: false, required: ['pipeline', 'marketplace', 'has_account'], properties: {
       pipeline: { type: 'string', enum: [...PIPELINE_KEYS] },
       marketplace: { type: 'string', enum: ['AMAZON', 'FLIPKART'] }, has_account: { type: ['boolean', 'null'] },
@@ -93,7 +93,7 @@ Pipelines (strict)
 
 Onboarding (when facts below are missing, work through them naturally)
 1. Their business: what they sell, category, brand name, roughly how many SKUs and orders a month.
-   (Brand approval: when they want to sell a brand Flipkart or Amazon gates, call start_pipeline with pipeline BRAND_APPROVAL. Products already on Flipkart / Amazon: start_pipeline with pipeline CATALOG_MAPPING.)
+   (Brand approval: when they want to sell a brand Flipkart or Amazon gates, call start_pipeline with pipeline BRAND_APPROVAL. Products already on Flipkart / Amazon: start_pipeline with pipeline CATALOG_MAPPING; products not on the marketplace yet: NEW_LISTING.)
 2. Seller accounts: ask whether they already have a Flipkart and/or Amazon India seller account. For each marketplace, call start_pipeline (pipeline SELLER_ACCOUNT_REGISTRATION) with has_account true or false, then follow that pipeline step by step (existing account → give SOLLUNA admin access; no account → SOLLUNA opens it in the client's own name, mobile and email).
 3. Save every useful fact with remember (one key per fact). Do not ask again for facts already listed.
 

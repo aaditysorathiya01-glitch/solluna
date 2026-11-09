@@ -1662,6 +1662,42 @@ test('manager pipeline: catalog mapping — client fills the Mapping form (serve
   assert.equal((await run()).status, 'DONE');
 });
 
+test('manager pipeline: new listing — form server-checked, team pastes top-100 keywords (deduped; Amazon search terms ≤ 250 bytes), creates, QC, result', async () => {
+  const c = await registerCustomer('Isha'); await pay(c, 'RESELLER');
+  const org = ok(await call('GET', '/auth/me', { token: c })).organization;
+  const waitFor = async (fn, what) => { for (let i = 0; i < 60; i++) { const v = await fn(); if (v) return v; await new Promise((x) => setTimeout(x, 250)); } throw new Error(`timed out: ${what}`); };
+  const doneRuns = () => db.agentRun.count({ where: { organizationId: org.id, status: { in: ['DONE', 'SKIPPED', 'FAILED'] }, OR: [{ note: null }, { note: { not: 'chat summary' } }] } });
+  const tool = async (name, input) => { const before = await doneRuns(); ok(await call('POST', '/chat/messages', { token: c, body: { body: `[agent-test] tool:${name} ${JSON.stringify({ pipeline: 'NEW_LISTING', marketplace: 'AMAZON', ...input })}` } })); await waitFor(async () => (await doneRuns()) > before, name); };
+  const lastToolResult = () => JSON.stringify(claude.calls.filter((x) => JSON.stringify(x.body).includes(org.legalName)).at(-1).body.messages.at(-1));
+  const run = async () => (ok(await call('GET', `/ops/chats/${org.id}/pipelines`, { token: S.admin }))).find((r) => r.pipeline === 'NEW_LISTING');
+
+  await tool('start_pipeline', { has_account: null });
+  let r = await waitFor(run, 'new listing pipeline');
+  assert.equal(r.title, 'New listing'); assert.equal(r.branch, 'AMAZON_LISTING');
+  await tool('pipeline_save', { field: 'form_submitted', value: 'yes' });
+  assert.match(lastToolResult(), /No Amazon new listing form has been submitted yet/);
+  const img = (await upload(c, 'main.png', PNG, { kind: 'LISTING_ASSETS' })).body.id;
+  ok(await call('POST', '/catalog-forms', { token: c, body: { marketplace: 'AMAZON', kind: 'NEW_LISTING', data: { productType: 'Cleaning Agents', brand: 'Roff', modelNumber: 'Cera Clean 1L', images: img, hsn: '34022090', fulfilmentChannel: 'Merchant Fulfilled (Self Ship / Easy Ship)', stock: 20, sellingPrice: 199, mrp: 249, countryOfOrigin: 'India' } } }));
+  await tool('pipeline_save', { field: 'form_submitted', value: 'yes' });
+  await tool('pipeline_next', {});
+  r = await run();
+  assert.equal(r.step.title, 'SOLLUNA researches the top 100 keywords'); assert.match(r.step.fields[0].hint, /keywordtool\.io/);
+  assert.deepEqual(r.forms.map((f) => f.ref), ['Cera Clean 1L'], 'team sees the submitted form');
+  const pasted = ['cera clean', 'roff cera clean', 'Roff Cera Clean', 'pidilite roff cera clean', ...Array.from({ length: 120 }, (_, i) => `roff cera clean price ${i}`)].join('\n');
+  const ops = await staff('OPERATIONS_MANAGER', S.admin);
+  ok(await call('POST', `/ops/chats/${org.id}/pipelines/${r.id}/advance`, { token: ops.token, body: { fields: { keywords: pasted } } }));
+  r = await run();
+  const kws = r.data.keywords.split(', ');
+  assert.equal(kws.length, 100, 'top 100 kept'); assert.equal(kws[1], 'roff cera clean'); assert.equal(kws.filter((k) => k === 'roff cera clean').length, 1, 'duplicates removed');
+  assert.ok(Buffer.byteLength(r.data.search_terms) <= 250 && r.data.search_terms.startsWith('cera clean roff pidilite'), r.data.search_terms);
+  assert.match(r.step.fields[0].hint, /not sold on Amazon/);
+  ok(await call('POST', `/ops/chats/${org.id}/pipelines/${r.id}/advance`, { token: ops.token, body: { fields: { listing_ref: 'ROFF-1L / B0NEW12345' } } }));
+  ok(await call('POST', `/ops/chats/${org.id}/pipelines/${r.id}/advance`, { token: ops.token, body: { fields: { outcome: 'LIVE' } } }));
+  await tool('pipeline_save', { field: 'informed', value: 'yes' });
+  await tool('pipeline_next', {});
+  assert.equal((await run()).status, 'DONE');
+});
+
 test('manager guardrails (unit) and eval runner', async () => {
   const g = (await import('../dist/apps/api/src/chat/guardrails.js')).default ?? await import('../dist/apps/api/src/chat/guardrails.js');
   const inp = g.checkInput('my password is Riya@2024 and OTP 482913');
