@@ -28,7 +28,7 @@ Preview-only settings: `PREVIEW_MODE=true` (enables the no-payment test activati
 
 **Client manager agent (Manager Chat):** the same `ANTHROPIC_API_KEY` switches on automatic manager replies (model `MANAGER_AGENT_MODEL`, default `claude-haiku-5-5`; `MANAGER_AGENT=off` to disable). No limits yet — Admin → Manager cost shows the estimated spend per client (`USD_INR`, default 88).
 
-**Product lookup (listing forms):** add `ANTHROPIC_API_KEY` in Render → solluna-preview → Environment (secret, never committed). Optional: `LOOKUP_MODEL` (default `claude-opus-5-5`), `LOOKUP_DAILY_LIMIT` (default 25 per client per day). Without the key the "Fetch details" button is hidden.
+**Product lookup (listing forms):** add `ANTHROPIC_API_KEY` in Render → solluna-preview → Environment (secret, never committed). Optional: `LOOKUP_MODEL` (default `claude-haiku-5-5`), `LOOKUP_DAILY_LIMIT` (default 25 per client per day). Without the key the "Fetch details" button is hidden.
 
 ## Demo data
 Accounts (passwords are held privately by the owner, not in the repository):

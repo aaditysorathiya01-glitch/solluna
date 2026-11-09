@@ -15,7 +15,9 @@ import type { AuthUser } from '../auth/auth.types';
  * The client checks and completes the rest (price, stock, SKU, packer … are the seller's own data).
  * Runs in the background processor below, never inside the HTTP request. Requires ANTHROPIC_API_KEY.
  */
-const MODEL = process.env.LOOKUP_MODEL || 'claude-opus-5-5';
+/** Owner (9 Nov 2026): Haiku everywhere. Haiku takes the basic web search / fetch tools and has no server-side fallback. */
+const MODEL = process.env.LOOKUP_MODEL || 'claude-haiku-5-5';
+const BASIC_TOOLS = /haiku/i.test(MODEL);
 const DAILY_LIMIT = Number(process.env.LOOKUP_DAILY_LIMIT ?? 25);
 const REUSE_DAYS = 7;
 const CONCURRENCY = 2;
@@ -159,15 +161,20 @@ export class ProductLookupService implements OnModuleInit {
       const res = await client.beta.messages.create({
         model: MODEL,
         max_tokens: 16000,
-        betas: ['server-side-fallback-2026-07-01'],
-        fallbacks: 'default',
+        ...(BASIC_TOOLS ? {} : { betas: ['server-side-fallback-2026-07-01'], fallbacks: 'default' as const }),
         output_config: { effort: 'medium' },
         system: SYSTEM,
-        tools: [
-          { type: 'web_search_20260209', name: 'web_search', max_uses: 6, user_location: { type: 'approximate', country: 'IN' } },
-          { type: 'web_fetch_20260209', name: 'web_fetch', max_uses: 3 },
-          DETAILS_TOOL,
-        ],
+        tools: BASIC_TOOLS
+          ? [
+            { type: 'web_search_20250305', name: 'web_search', max_uses: 6, user_location: { type: 'approximate', country: 'IN' } },
+            { type: 'web_fetch_20250910', name: 'web_fetch', max_uses: 3 },
+            DETAILS_TOOL,
+          ]
+          : [
+            { type: 'web_search_20260209', name: 'web_search', max_uses: 6, user_location: { type: 'approximate', country: 'IN' } },
+            { type: 'web_fetch_20260209', name: 'web_fetch', max_uses: 3 },
+            DETAILS_TOOL,
+          ],
         tool_choice: { type: 'auto' },
         messages,
       });

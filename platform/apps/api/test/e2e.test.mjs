@@ -1350,8 +1350,8 @@ test('product lookup: link → background web lookup → only valid form fields;
   assert.equal(r.fields.sellerSku, undefined, 'seller data is never invented');
   const lookupCalls = () => claude.calls.filter((x) => x.body.tools?.some((t) => t.name === 'submit_product_details'));
   const req = lookupCalls()[lookupCalls().length - 1];
-  assert.equal(req.body.model, 'claude-opus-5-5'); assert.equal(req.body.fallbacks, 'default');
-  assert.deepEqual(req.body.tools.map((t) => t.type ?? t.name), ['web_search_20260209', 'web_fetch_20260209', 'submit_product_details']);
+  assert.equal(req.body.model, 'claude-haiku-5-5', 'Haiku, per owner'); assert.equal(req.body.fallbacks, undefined, 'Haiku has no server-side fallback');
+  assert.deepEqual(req.body.tools.map((t) => t.type ?? t.name), ['web_search_20250305', 'web_fetch_20250910', 'submit_product_details']);
   assert.match(JSON.stringify(req.body.messages[0].content), /TCLFX7ZGHYQ2KJWE/);
 
   // New listing form: same product, its own fields (title, features, images…); reused for 7 days without a new API call.
