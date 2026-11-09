@@ -14,6 +14,8 @@ export interface PipeStep {
   /** Who completes the step: the client (through the manager) or the SOLLUNA team / bot. */
   by: 'client' | 'team';
   instructions: string; fields: PipeField[];
+  /** After this step: when data[field] === equals, go back to `step` and clear the listed fields (e.g. marketplace asked for more info). */
+  loop?: { field: string; equals: string; step: string; clear: string[] };
 }
 export interface Pipeline { key: string; title: string; branches: Record<string, PipeStep[]> }
 
@@ -199,7 +201,40 @@ const newListing = (mp: Marketplace): PipeStep[] => [
     fields: [{ key: 'informed', label: 'Client informed', kind: 'confirm', required: true }] },
 ];
 
+/** Marketplace Support & Communication (owner, 9 Nov 2026): SOLLUNA raises and follows the seller-support ticket. */
+const FK_TOPICS = ['Orders and logistics', 'Listings and catalog', 'Payments', 'Account', 'Inventory management', 'Seller performance', 'Returns and SPF', 'Other'];
+const TICKET_PATH: Record<Marketplace, string> = {
+  FLIPKART: 'Seller Hub → Home → Help → Help Center → search the topic → choose the issue → Raise a ticket → fill everything from the client\'s details → submit. Running tickets: Help Center → My Tickets',
+  AMAZON: 'Seller Central → Home → Help → Get help and resources → choose the topic → raise the case (contact us) → fill everything from the client\'s details → submit. Running cases: Case log',
+};
+const marketplaceSupport = (mp: Marketplace): PipeStep[] => [
+  { key: 'issue', title: 'Understand the issue', by: 'client',
+    instructions: `Find out exactly what the problem is, one question at a time: what happened, since when, and the order ID / SKU / ${mp === 'AMAZON' ? 'ASIN' : 'FSN'} / payment or settlement reference if there is one. Ask for screenshots or documents if they help (upload here in chat). ${mp === 'FLIPKART' ? `Pick the Help Center topic (one of: ${FK_TOPICS.join(', ')}).` : 'Note the help topic it belongs to (orders, listings, payments, account, inventory, performance, returns, other).'} Account suspension, legal notices or money stuck for long: also escalate_to_team (P1).`,
+    fields: [
+      { key: 'topic', label: 'Help topic', kind: 'text', required: true, ...(mp === 'FLIPKART' ? { pattern: new RegExp(`^(${FK_TOPICS.join('|').toUpperCase()})$`), hint: FK_TOPICS.join(', ') } : {}) },
+      { key: 'issue_summary', label: 'What is the issue', kind: 'text', required: true },
+      { key: 'references', label: 'Order ID / SKU / FSN / ASIN / payment reference', kind: 'text' },
+    ] },
+  { key: 'raise', title: `SOLLUNA raises the ${mp === 'AMAZON' ? 'case' : 'ticket'} with ${mp === 'AMAZON' ? 'Amazon' : 'Flipkart'}`, by: 'team',
+    instructions: 'The team is raising the ticket with the marketplace now. Tell the client it is being raised and you will share the ticket number.',
+    fields: [{ key: 'ticket_id', label: mp === 'AMAZON' ? 'Amazon case ID' : 'Flipkart ticket ID', kind: 'text', required: true, hint: TICKET_PATH[mp] }] },
+  { key: 'review', title: `${mp === 'AMAZON' ? 'Amazon' : 'Flipkart'} works on the ${mp === 'AMAZON' ? 'case' : 'ticket'}`, by: 'team',
+    instructions: 'The marketplace is working on the ticket (ticket_id). Tell the client it is with the marketplace and you will update them as soon as there is a reply. Do not promise a result or a date.',
+    fields: [
+      { key: 'outcome', label: 'Marketplace reply', kind: 'text', required: true, pattern: /^(RESOLVED|NEEDS_INFO|CLOSED)$/, hint: 'RESOLVED, NEEDS_INFO (they asked for more) or CLOSED (not resolved)' },
+      { key: 'marketplace_reply', label: 'What the marketplace said', kind: 'text', required: true },
+    ] },
+  { key: 'update', title: 'Update the client', by: 'client',
+    instructions: 'Tell the client the marketplace\'s reply (outcome, marketplace_reply) in simple words. RESOLVED: confirm what was fixed. CLOSED (not resolved): explain why and the next option (escalate_to_team if needed). NEEDS_INFO: collect exactly what the marketplace asked for and save it as more_info — the team then replies on the same ticket. Then save informed = yes and call pipeline_next.',
+    fields: [
+      { key: 'more_info', label: 'Information the marketplace asked for', kind: 'text' },
+      { key: 'informed', label: 'Client informed', kind: 'confirm', required: true },
+    ],
+    loop: { field: 'outcome', equals: 'NEEDS_INFO', step: 'review', clear: ['outcome', 'marketplace_reply', 'informed'] } },
+];
+
 export const PIPELINES: Record<string, Pipeline> = {
+  MARKETPLACE_SUPPORT: { key: 'MARKETPLACE_SUPPORT', title: 'Marketplace support ticket', branches: { FLIPKART_SUPPORT: marketplaceSupport('FLIPKART'), AMAZON_SUPPORT: marketplaceSupport('AMAZON') } },
   NEW_LISTING: { key: 'NEW_LISTING', title: 'New listing', branches: { FLIPKART_LISTING: newListing('FLIPKART'), AMAZON_LISTING: newListing('AMAZON') } },
   CATALOG_MAPPING: { key: 'CATALOG_MAPPING', title: 'Catalog mapping', branches: { FLIPKART_MAPPING: catalogMapping('FLIPKART'), AMAZON_MAPPING: catalogMapping('AMAZON') } },
   BRAND_APPROVAL: { key: 'BRAND_APPROVAL', title: 'Brand approval', branches: { FLIPKART_BRAND: brandApprovalFlipkart, AMAZON_BRAND: brandApprovalAmazon } },
@@ -221,6 +256,7 @@ export function normalise(f: PipeField, v: string) {
   if (f.key.endsWith('pincode')) return t.replace(/\D/g, '');
   if (f.key === 'asin') return (/\/(?:dp|gp\/product)\/([A-Z0-9]{10})/i.exec(t)?.[1] ?? t).replace(/\s+/g, '').toUpperCase();
   if (f.key === 'contact_phone') return t.replace(/\D/g, '').replace(/^91(?=\d{10}$)/, '');
+  if (f.key === 'topic' && f.pattern) return t.toUpperCase();
   if (f.key === 'keywords') return keywordList(t).join(', ');
   if (f.key === 'fsn') return (/[?&]pid=([A-Z0-9]{16})/i.exec(t)?.[1] ?? t).replace(/\s+/g, '').toUpperCase();
   if (f.pattern) return t.replace(/\s+/g, '').toUpperCase();
@@ -233,7 +269,7 @@ export function validate(f: PipeField, value: string): string | null {
   return null;
 }
 
-export const PIPELINE_KEYS = ['SELLER_ACCOUNT_REGISTRATION', 'BRAND_APPROVAL', 'CATALOG_MAPPING', 'NEW_LISTING'] as const;
+export const PIPELINE_KEYS = ['SELLER_ACCOUNT_REGISTRATION', 'BRAND_APPROVAL', 'CATALOG_MAPPING', 'NEW_LISTING', 'MARKETPLACE_SUPPORT'] as const;
 
 /** Keywords pasted from keywordtool.io: one per line or comma-separated → de-duplicated, top 100 kept, in order. */
 export function keywordList(raw: string) {

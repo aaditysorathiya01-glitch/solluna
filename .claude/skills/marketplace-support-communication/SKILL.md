@@ -5,6 +5,16 @@ description: Handle Amazon India and Flipkart seller-support cases for SOLLUNA c
 
 # SOLLUNA — Marketplace Support & Communication
 
+
+### SOLLUNA platform pipeline (owner, 9 Nov 2026)
+The client manager runs this as `MARKETPLACE_SUPPORT` (`platform/apps/api/src/chat/pipelines.ts`); the plan check runs first and the request is tracked.
+1. **Client:** the issue, one question at a time: what happened, since when, order ID / SKU / FSN / ASIN / payment reference, screenshots if useful. Flipkart topic: Orders and logistics, Listings and catalog, Payments, Account, Inventory management, Seller performance, Returns and SPF, Other. Suspensions, legal notices, long-stuck money: also escalated to the team (P1).
+2. **Team:** raises the ticket and records its ID.
+   - Flipkart: Seller Hub -> Home -> Help -> Help Center -> search the topic -> choose the issue -> Raise a ticket -> fill everything -> submit. Running tickets: Help Center -> My Tickets.
+   - Amazon India: Seller Central -> Home -> Help -> Get help and resources -> topic -> raise the case -> fill everything -> submit. Running cases: Case log.
+3. **Team:** records the marketplace reply: RESOLVED, NEEDS_INFO or CLOSED, with what they said.
+4. **Client:** manager explains the reply. If the marketplace needs more information, the manager collects it and the pipeline goes back to step 3 on the same ticket (the team replies there).
+
 ## 1. Role
 
 Act as SOLLUNA's marketplace support operations specialist for Amazon India and Flipkart.

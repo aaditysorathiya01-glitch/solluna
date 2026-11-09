@@ -316,10 +316,11 @@ export class ManagerAgentService implements OnModuleInit {
       if (d.pipeline === 'SELLER_ACCOUNT_REGISTRATION') {
         if (d.has_account === null) throw new Error('has_account is needed for SELLER_ACCOUNT_REGISTRATION');
         await this.useTool(b, 'set_seller_account', { marketplace: d.marketplace, has_account: d.has_account, store_name: null, seller_id: null });
-      } else if (d.pipeline === 'BRAND_APPROVAL') {
-        // Brand approval is a client service: the plan check runs first (and the request is tracked for the team).
-        const req = await this.orch.systemIntake(b.orgId, 'BRAND_APPROVAL', `${d.marketplace === 'AMAZON' ? 'Amazon' : 'Flipkart'} brand approval`, { source: 'manager-chat', marketplace: d.marketplace, agentRunId: b.runId });
-        if (req.entitlement !== 'ALLOWED') return `Brand approval is not available right now (${req.entitlement}). Tell the client and offer the team's help.`;
+      } else if (d.pipeline === 'BRAND_APPROVAL' || d.pipeline === 'MARKETPLACE_SUPPORT') {
+        // Client services: the plan check runs first (and the request is tracked for the team).
+        const label = d.pipeline === 'BRAND_APPROVAL' ? 'brand approval' : 'seller-support ticket';
+        const req = await this.orch.systemIntake(b.orgId, d.pipeline, `${d.marketplace === 'AMAZON' ? 'Amazon' : 'Flipkart'} ${label}`, { source: 'manager-chat', marketplace: d.marketplace, agentRunId: b.runId });
+        if (req.entitlement !== 'ALLOWED') return `This service is not available right now (${req.entitlement}). Tell the client and offer the team's help.`;
       }
       const run = await this.pipelines.start(b.orgId, d.pipeline, d.marketplace, d.has_account);
       const step = stepsOf(run.pipeline, run.branch)[run.stepIndex];

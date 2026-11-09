@@ -814,6 +814,21 @@
           "start_pipeline"
         ]
       }
+    },
+    {
+      "id": "sup-01",
+      "category": "pipeline",
+      "chat": [
+        [
+          "client",
+          "Flipkart ne 12 orders ka payment abhi tak nahi diya, ticket raise karo"
+        ]
+      ],
+      "expect": {
+        "tools": [
+          "start_pipeline"
+        ]
+      }
     }
   ]
 }

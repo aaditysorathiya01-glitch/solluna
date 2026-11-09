@@ -13,7 +13,7 @@ const PASSWORD_CAPTURE = /\b(?:password|passwd|pwd)\b\s*(?:is|:|=|hai|h)?\s*(\S{
 const OTP_CAPTURE = /(?<![\d])(\d{4,8})(?![\d])/;
 
 type Run = { id: string; organizationId: string; pipeline: string; branch: string; stepIndex: number; data: Prisma.JsonValue; secrets: Prisma.JsonValue; status: string; createdAt: Date };
-const branchFor = (pipeline: string, mp: Marketplace, hasAccount: boolean | null) => (pipeline === 'BRAND_APPROVAL' ? `${mp}_BRAND` : pipeline === 'CATALOG_MAPPING' ? `${mp}_MAPPING` : pipeline === 'NEW_LISTING' ? `${mp}_LISTING` : `${mp}_${hasAccount ? 'HAS_ACCOUNT' : 'NEW'}`);
+const branchFor = (pipeline: string, mp: Marketplace, hasAccount: boolean | null) => (pipeline === 'BRAND_APPROVAL' ? `${mp}_BRAND` : pipeline === 'CATALOG_MAPPING' ? `${mp}_MAPPING` : pipeline === 'NEW_LISTING' ? `${mp}_LISTING` : pipeline === 'MARKETPLACE_SUPPORT' ? `${mp}_SUPPORT` : `${mp}_${hasAccount ? 'HAS_ACCOUNT' : 'NEW'}`);
 const mpOf = (branch: string) => branch.split('_')[0] as Marketplace;
 /** {{date-180}} → the date 180 days ago (Amazon invoice rule), e.g. 13-May-2026. */
 const withDates = (t: string) => t.replace(/\{\{date-(\d+)\}\}/g, (_, d) => new Date(Date.now() - Number(d) * 86_400_000).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric', timeZone: 'Asia/Kolkata' }).replace(/ /g, '-'));
@@ -115,6 +115,17 @@ export class PipelineService {
 
   private async advanceRun(run: Run, actor: AuthUser | null) {
     const steps = stepsOf(run.pipeline, run.branch);
+    // Loop back (e.g. the marketplace asked for more information): same ticket, team replies again.
+    const loop = steps[run.stepIndex]?.loop;
+    const data = run.data as Record<string, string>;
+    if (loop && data[loop.field] === loop.equals) {
+      const back = steps.findIndex((s) => s.key === loop.step);
+      const cleared = Object.fromEntries(Object.entries(data).filter(([k]) => !loop.clear.includes(k)));
+      await this.db.pipelineRun.update({ where: { id: run.id }, data: { stepIndex: back, data: cleared } });
+      await this.audit.log({ actor, action: 'pipeline.loop', entity: 'PipelineRun', entityId: run.id, organizationId: run.organizationId, after: { to: loop.step } });
+      await this.dispatch.notifyStaff({ roles: ['OPERATIONS_MANAGER'], organizationId: run.organizationId, type: 'pipeline.team_step', title: `${PIPELINES[run.pipeline].title}: reply to the marketplace`, body: `${mpOf(run.branch)} — the client sent the requested information (more_info). Reply on the same ticket, then record the new answer.` });
+      return `Back to: ${steps[back].title}. The team will reply on the same ticket with the client's information.`;
+    }
     const nextIndex = run.stepIndex + 1;
     if (nextIndex >= steps.length) {
       await this.db.$transaction([

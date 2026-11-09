@@ -1698,6 +1698,42 @@ test('manager pipeline: new listing — form server-checked, team pastes top-100
   assert.equal((await run()).status, 'DONE');
 });
 
+test('manager pipeline: marketplace support — issue, team raises ticket, NEEDS_INFO loops back on the same ticket, resolved, client informed', async () => {
+  const c = await registerCustomer('Om'); await pay(c, 'RESELLER');
+  const org = ok(await call('GET', '/auth/me', { token: c })).organization;
+  const waitFor = async (fn, what) => { for (let i = 0; i < 60; i++) { const v = await fn(); if (v) return v; await new Promise((x) => setTimeout(x, 250)); } throw new Error(`timed out: ${what}`); };
+  const doneRuns = () => db.agentRun.count({ where: { organizationId: org.id, status: { in: ['DONE', 'SKIPPED', 'FAILED'] }, OR: [{ note: null }, { note: { not: 'chat summary' } }] } });
+  const tool = async (name, input) => { const before = await doneRuns(); ok(await call('POST', '/chat/messages', { token: c, body: { body: `[agent-test] tool:${name} ${JSON.stringify({ pipeline: 'MARKETPLACE_SUPPORT', marketplace: 'FLIPKART', ...input })}` } })); await waitFor(async () => (await doneRuns()) > before, name); };
+  const lastToolResult = () => JSON.stringify(claude.calls.filter((x) => JSON.stringify(x.body).includes(org.legalName)).at(-1).body.messages.at(-1));
+  const run = async () => (ok(await call('GET', `/ops/chats/${org.id}/pipelines`, { token: S.admin }))).find((r) => r.pipeline === 'MARKETPLACE_SUPPORT');
+  const ops = await staff('OPERATIONS_MANAGER', S.admin);
+  const advance = async (id, fields) => ok(await call('POST', `/ops/chats/${org.id}/pipelines/${id}/advance`, { token: ops.token, body: { fields } }));
+
+  await tool('start_pipeline', { has_account: null });
+  let r = await waitFor(run, 'support pipeline');
+  assert.ok(await db.serviceRequest.findFirst({ where: { organizationId: org.id, featureKey: 'MARKETPLACE_SUPPORT', entitlement: 'ALLOWED' } }), 'plan-checked and tracked');
+  await tool('pipeline_save', { field: 'topic', value: 'GST bill' });
+  assert.match(lastToolResult(), /Help topic looks wrong/);
+  await tool('pipeline_save', { field: 'topic', value: 'payments' });
+  await tool('pipeline_save', { field: 'issue_summary', value: 'Settlement for 12 orders of 1-7 Nov not received' });
+  await tool('pipeline_save', { field: 'references', value: 'OD4312, OD4318' });
+  await tool('pipeline_next', {});
+  r = await run(); assert.equal(r.data.topic, 'PAYMENTS'); assert.match(r.step.fields[0].hint, /Help Center → search the topic → choose the issue → Raise a ticket/);
+  await advance(r.id, { ticket_id: 'FK-77881' });
+  await advance(r.id, { outcome: 'needs_info', marketplace_reply: 'Share bank statement for 1-7 Nov' });
+  r = await run(); assert.equal(r.step.title, 'Update the client');
+  await tool('pipeline_save', { field: 'more_info', value: 'Bank statement uploaded in chat' });
+  await tool('pipeline_save', { field: 'informed', value: 'yes' });
+  await tool('pipeline_next', {});
+  r = await run();
+  assert.equal(r.step.title, 'Flipkart works on the ticket', 'NEEDS_INFO goes back to the marketplace step');
+  assert.equal(r.data.ticket_id, 'FK-77881', 'same ticket'); assert.equal(r.data.more_info, 'Bank statement uploaded in chat'); assert.equal(r.data.outcome, undefined, 'old reply cleared');
+  await advance(r.id, { outcome: 'RESOLVED', marketplace_reply: 'Settlement released on 12 Nov' });
+  await tool('pipeline_save', { field: 'informed', value: 'yes' });
+  await tool('pipeline_next', {});
+  assert.equal((await run()).status, 'DONE');
+});
+
 test('manager guardrails (unit) and eval runner', async () => {
   const g = (await import('../dist/apps/api/src/chat/guardrails.js')).default ?? await import('../dist/apps/api/src/chat/guardrails.js');
   const inp = g.checkInput('my password is Riya@2024 and OTP 482913');

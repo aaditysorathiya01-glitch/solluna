@@ -34,7 +34,7 @@ export const TOOLS: Anthropic.Tool[] = [
   },
   {
     name: 'start_pipeline', strict: true,
-    description: 'Start a pipeline for one marketplace. SELLER_ACCOUNT_REGISTRATION: once the client says whether they already have a seller account there (has_account true/false). BRAND_APPROVAL: when the client wants to sell a brand that needs approval (has_account null). CATALOG_MAPPING: when the client wants to sell a product that already exists on the marketplace (has_account null). NEW_LISTING: when the product is not on the marketplace yet and needs a new listing (has_account null). The plan check runs on the server.',
+    description: 'Start a pipeline for one marketplace. SELLER_ACCOUNT_REGISTRATION: once the client says whether they already have a seller account there (has_account true/false). BRAND_APPROVAL: when the client wants to sell a brand that needs approval (has_account null). CATALOG_MAPPING: when the client wants to sell a product that already exists on the marketplace (has_account null). NEW_LISTING: when the product is not on the marketplace yet and needs a new listing (has_account null). MARKETPLACE_SUPPORT: when the client has a problem that needs a ticket with Flipkart / Amazon seller support (orders, payments, listings, account, returns…) (has_account null). The plan check runs on the server.',
     input_schema: { type: 'object', additionalProperties: false, required: ['pipeline', 'marketplace', 'has_account'], properties: {
       pipeline: { type: 'string', enum: [...PIPELINE_KEYS] },
       marketplace: { type: 'string', enum: ['AMAZON', 'FLIPKART'] }, has_account: { type: ['boolean', 'null'] },
