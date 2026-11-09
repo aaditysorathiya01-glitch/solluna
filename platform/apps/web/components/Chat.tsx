@@ -227,18 +227,19 @@ export function DocumentsPanel({ orgId, staff = false, myId }: { orgId?: string;
   );
 }
 
-interface PipelineRow { id: string; branch: string; status: string; step: { index: number; total: number; title: string; by: 'client' | 'team' } | null; data: Record<string, string>; secretFields: string[]; otpWaiting: number }
+interface PipelineRow { id: string; pipeline: string; title: string; branch: string; status: string; step: { index: number; total: number; title: string; by: 'client' | 'team'; fields: { key: string; label: string; required: boolean; hint: string | null }[] } | null; data: Record<string, string>; secretFields: string[]; otpWaiting: number }
 
 /** Staff only: the client's seller-account pipelines, with the team's actions (one-time OTP view, secrets, step done). */
 function PipelinesCard({ orgId }: { orgId: string }) {
   const [rows, setRows] = useState<PipelineRow[]>([]);
   const [shown, setShown] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
+  const [inputs, setInputs] = useState<Record<string, string>>({});
   const load = useCallback(() => api<PipelineRow[]>(`/ops/chats/${orgId}/pipelines`).then(setRows).catch(() => setRows([])), [orgId]);
   useEffect(() => { load(); const t = setInterval(load, 15_000); return () => clearInterval(t); }, [load]);
-  const act = async (path: string, label: (r: Record<string, string>) => string) => {
+  const act = async (path: string, label: (r: Record<string, string>) => string, body?: unknown) => {
     setErr(null); setShown(null);
-    try { const r = await api<Record<string, string>>(`/ops/chats/${orgId}/pipelines/${path}`, { method: 'POST' }); setShown(label(r)); load(); }
+    try { const r = await api<Record<string, string>>(`/ops/chats/${orgId}/pipelines/${path}`, { method: 'POST', body }); setShown(label(r)); setInputs({}); load(); }
     catch (e) { setErr((e as Error).message); }
   };
   const active = rows.filter((r) => r.status === 'ACTIVE');
@@ -247,12 +248,18 @@ function PipelinesCard({ orgId }: { orgId: string }) {
     <div className="space-y-2 border-b border-ink/10 bg-white px-5 py-3 text-xs" aria-label="Pipelines" data-testid="pipelines">
       {active.map((r) => (
         <div key={r.id} className="space-y-1">
-          <p className="font-semibold">{r.branch.replace('_', ' · ').replace('HAS_ACCOUNT', 'admin access').replace('NEW', 'new account')} — step {(r.step?.index ?? 0) + 1}/{r.step?.total}: {r.step?.title} <span className={`chip ${r.step?.by === 'team' ? 'bg-amber-50 text-amber-800' : 'bg-ivory'}`}>{r.step?.by === 'team' ? 'Your turn' : 'With client'}</span></p>
+          <p className="font-semibold">{r.title} · {r.branch.replace('_', ' · ').replace('HAS_ACCOUNT', 'admin access').replace('NEW', 'new account').replace(' · BRAND', '')} — step {(r.step?.index ?? 0) + 1}/{r.step?.total}: {r.step?.title} <span className={`chip ${r.step?.by === 'team' ? 'bg-amber-50 text-amber-800' : 'bg-ivory'}`}>{r.step?.by === 'team' ? 'Your turn' : 'With client'}</span></p>
           <p className="text-ink-3">{Object.entries(r.data).map(([k, v]) => `${k}: ${v}`).join(' · ') || 'No details yet'}</p>
           <div className="flex flex-wrap gap-2">
             {r.otpWaiting > 0 && <button className="btn-gold py-1 text-xs" onClick={() => act(`${r.id}/otp`, (x) => `OTP ${x.otp} (deleted now — use it right away)`)}>Show OTP (one time)</button>}
             {r.secretFields.map((f) => <button key={f} className="btn-ghost py-1 text-xs" onClick={() => act(`${r.id}/secrets/${f}`, (x) => `${f}: ${x.value}`)}>Show {f.replace('_', ' ')}</button>)}
-            {r.step?.by === 'team' && <button className="btn-primary py-1 text-xs" onClick={() => act(`${r.id}/advance`, (x) => x.result)}>Mark this step done</button>}
+            {r.step?.by === 'team' && r.step.fields.map((f) => (
+              <label key={f.key} className="flex items-center gap-1" title={f.hint ?? ''}>
+                <span className="text-ink-3">{f.label}{f.required && '*'}</span>
+                <input className="input w-40 py-1 text-xs" value={inputs[`${r.id}.${f.key}`] ?? ''} placeholder={f.hint ?? ''} onChange={(e) => setInputs({ ...inputs, [`${r.id}.${f.key}`]: e.target.value })} data-testid={`team-${f.key}`} />
+              </label>
+            ))}
+            {r.step?.by === 'team' && <button className="btn-primary py-1 text-xs" onClick={() => act(`${r.id}/advance`, (x) => x.result, { fields: Object.fromEntries((r.step?.fields ?? []).map((f) => [f.key, inputs[`${r.id}.${f.key}`] ?? ''])) })}>Mark this step done</button>}
           </div>
         </div>
       ))}

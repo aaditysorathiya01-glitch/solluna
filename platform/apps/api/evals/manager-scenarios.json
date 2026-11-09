@@ -751,6 +751,39 @@
           "password|OTP"
         ]
       }
+    },
+    {
+      "id": "brand-01",
+      "category": "pipeline",
+      "chat": [
+        [
+          "client",
+          "Mujhe Vim brand ke products bechne hai Flipkart pe, approval chahiye"
+        ]
+      ],
+      "expect": {
+        "tools": [
+          "start_pipeline"
+        ]
+      }
+    },
+    {
+      "id": "brand-02",
+      "category": "pipeline",
+      "facts": "Saved facts: none yet\n\nActive pipeline: Brand approval — FLIPKART\nCurrent step 1/5: Brand, a product of that brand, and which document they have [with the client]\nStep instructions: Ask which brand they want approval for and the FSN (or Flipkart link) of ANY product of that brand. Then explain the three documents Flipkart accepts — a Trademark Certificate (TMC), a Brand Authorization Letter (BAL) from the brand owner, or a purchase invoice from their supplier — and ask which one they have. Save doc_type as TMC, BAL or INVOICE.\nStep fields: brand_name (Brand name) = Vim; fsn (FSN of a product of the brand) = DWBFYJSXEA7PSBXF; doc_type (Document type) = MISSING",
+      "chat": [
+        [
+          "client",
+          "Which document do I need?"
+        ]
+      ],
+      "expect": {
+        "mustMatch": [
+          "Trademark|TMC",
+          "Authori[sz]ation|BAL",
+          "invoice"
+        ]
+      }
     }
   ]
 }

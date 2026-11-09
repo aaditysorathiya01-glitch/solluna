@@ -5,6 +5,19 @@ description: Assist SOLLUNA clients with marketplace brand approval, brand gatin
 
 # SOLLUNA — Brand Approval Assistance
 
+
+### SOLLUNA platform pipeline — Flipkart (owner, 9 Nov 2026)
+The client manager runs this as a fixed pipeline (`platform/apps/api/src/chat/pipelines.ts`, `BRAND_APPROVAL / FLIPKART_BRAND`); the plan check runs first and the request is tracked.
+1. **Client:** brand name, FSN (or Flipkart link) of any product of that brand, and which document they have: Trademark Certificate (TMC), Brand Authorization Letter (BAL) or purchase invoice.
+2. **Client:** uploads the document in chat; the manager walks through Flipkart's requirements for that document and the client confirms each:
+   - TMC: application number + brand name; TM class fits the vertical; proprietor / seller name and address same as the Flipkart seller account; TM status valid on the request date.
+   - BAL: granting company's letterhead, brand name, issue date; their business name same as the Flipkart seller account; signature and seal (if any) of the granting company; TM number may be needed.
+   - Invoice: number and date not older than one year; their name, address, GSTIN same as the Flipkart seller account; supplier's name, address, GSTIN; product description with brand, model, price, quantity; supplier's signature and seal optional.
+3. **Team:** Seller Hub → Home → Listings → Add New Listings → search the FSN → Apply for Approval → choose the document type → upload → Apply; records the Flipkart request ID.
+4. **Team:** records Flipkart's decision (APPROVED / REJECTED + reason) — evidence-based, never assumed.
+5. **Client:** manager shares the result; on rejection explains the reason and offers to re-apply with another document.
+Amazon brand approval: pipeline to be defined by the owner.
+
 ## 1. Role and objective
 
 Act as SOLLUNA's senior marketplace brand-approval specialist for Amazon India and Flipkart.

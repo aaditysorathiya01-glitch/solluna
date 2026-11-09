@@ -312,23 +312,30 @@ export class ManagerAgentService implements OnModuleInit {
       return `Request opened: "${req.title}" (status ${req.status}).`;
     }
     if (name === 'start_pipeline') {
-      const d = z.object({ marketplace: z.enum(['AMAZON', 'FLIPKART']), has_account: z.boolean() }).parse(input);
-      await this.useTool(b, 'set_seller_account', { marketplace: d.marketplace, has_account: d.has_account, store_name: null, seller_id: null });
-      const run = await this.pipelines.start(b.orgId, d.marketplace, d.has_account);
+      const d = z.object({ pipeline: z.enum(['SELLER_ACCOUNT_REGISTRATION', 'BRAND_APPROVAL']), marketplace: z.enum(['AMAZON', 'FLIPKART']), has_account: z.boolean().nullable() }).parse(input);
+      if (d.pipeline === 'SELLER_ACCOUNT_REGISTRATION') {
+        if (d.has_account === null) throw new Error('has_account is needed for SELLER_ACCOUNT_REGISTRATION');
+        await this.useTool(b, 'set_seller_account', { marketplace: d.marketplace, has_account: d.has_account, store_name: null, seller_id: null });
+      } else {
+        // Brand approval is a client service: the plan check runs first (and the request is tracked for the team).
+        const req = await this.orch.systemIntake(b.orgId, 'BRAND_APPROVAL', `${d.marketplace === 'AMAZON' ? 'Amazon' : 'Flipkart'} brand approval`, { source: 'manager-chat', marketplace: d.marketplace, agentRunId: b.runId });
+        if (req.entitlement !== 'ALLOWED') return `Brand approval is not available right now (${req.entitlement}). Tell the client and offer the team's help.`;
+      }
+      const run = await this.pipelines.start(b.orgId, d.pipeline, d.marketplace, d.has_account);
       const step = stepsOf(run.pipeline, run.branch)[run.stepIndex];
-      return `Pipeline started for ${d.marketplace} (${d.has_account ? 'existing account → admin access' : 'new account'}). Current step: ${step?.title}. Follow the step instructions in the facts.`;
+      return `Pipeline ${d.pipeline} started for ${d.marketplace}. Current step: ${step?.title}. Follow the step instructions in the facts.`;
     }
     if (name === 'pipeline_save') {
-      const d = z.object({ marketplace: z.enum(['AMAZON', 'FLIPKART']), field: z.string().trim().min(1).max(40), value: z.string().max(500) }).parse(input);
-      return this.pipelines.save(b.orgId, d.marketplace, d.field, d.value);
+      const d = z.object({ pipeline: z.enum(['SELLER_ACCOUNT_REGISTRATION', 'BRAND_APPROVAL']), marketplace: z.enum(['AMAZON', 'FLIPKART']), field: z.string().trim().min(1).max(40), value: z.string().max(500) }).parse(input);
+      return this.pipelines.save(b.orgId, d.pipeline, d.marketplace, d.field, d.value);
     }
     if (name === 'generate_temp_password') {
       const d = z.object({ marketplace: z.enum(['AMAZON', 'FLIPKART']) }).parse(input);
       return this.pipelines.generatePassword(b.orgId, d.marketplace);
     }
     if (name === 'pipeline_next') {
-      const d = z.object({ marketplace: z.enum(['AMAZON', 'FLIPKART']) }).parse(input);
-      return this.pipelines.next(b.orgId, d.marketplace);
+      const d = z.object({ pipeline: z.enum(['SELLER_ACCOUNT_REGISTRATION', 'BRAND_APPROVAL']), marketplace: z.enum(['AMAZON', 'FLIPKART']) }).parse(input);
+      return this.pipelines.next(b.orgId, d.pipeline, d.marketplace);
     }
     if (name === 'escalate_to_team') {
       const d = z.object({ reason: z.string().trim().min(3).max(1000), priority: z.enum(['P1', 'P2', 'P3', 'P4']) }).parse(input);

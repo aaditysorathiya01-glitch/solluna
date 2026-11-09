@@ -41,7 +41,7 @@ export class OpsChatController {
 
   /** Manager pipelines for this client (seller-account registration / admin access) and the team's actions on them. */
   @Get(':orgId/pipelines') async pipelineList(@CurrentUser() u: AuthUser, @Param('orgId') orgId: string) { await this.access.assertOrg(u, orgId); return this.pipelines.list(orgId); }
-  @Post(':orgId/pipelines/:runId/advance') @HttpCode(200) async pipelineAdvance(@CurrentUser() u: AuthUser, @Param('orgId') orgId: string, @Param('runId') runId: string) { await this.access.assertOrg(u, orgId); return this.pipelines.teamAdvance(u, orgId, runId); }
+  @Post(':orgId/pipelines/:runId/advance') @HttpCode(200) async pipelineAdvance(@CurrentUser() u: AuthUser, @Param('orgId') orgId: string, @Param('runId') runId: string, @Body() body: unknown) { await this.access.assertOrg(u, orgId); return this.pipelines.teamAdvance(u, orgId, runId, body); }
   @Post(':orgId/pipelines/:runId/otp') @HttpCode(200) async pipelineOtp(@CurrentUser() u: AuthUser, @Param('orgId') orgId: string, @Param('runId') runId: string) { await this.access.assertOrg(u, orgId); return this.pipelines.takeOtp(u, orgId, runId); }
   @Post(':orgId/pipelines/:runId/secrets/:field') @HttpCode(200) async pipelineSecret(@CurrentUser() u: AuthUser, @Param('orgId') orgId: string, @Param('runId') runId: string, @Param('field') field: string) { await this.access.assertOrg(u, orgId); return this.pipelines.reveal(u, orgId, runId, field); }
 

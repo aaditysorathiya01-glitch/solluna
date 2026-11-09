@@ -1501,7 +1501,7 @@ test('manager pipeline: seller-account registration step by step; OTP/password c
   const toolResult = async (n) => { await waitFor(async () => agentCalls().length >= n, 'agent call'); const last = agentCalls()[agentCalls().length - 1].body.messages; return JSON.stringify(last); };
 
   let n = agentCalls().length;
-  await tool('start_pipeline', { marketplace: 'FLIPKART', has_account: false });
+  await tool('start_pipeline', { pipeline: 'SELLER_ACCOUNT_REGISTRATION', marketplace: 'FLIPKART', has_account: false });
   await waitFor(async () => (await runs()).length === 1, 'pipeline started');
   let r = (await runs())[0];
   assert.equal(r.branch, 'FLIPKART_NEW'); assert.equal(r.step.title, 'Send the list of what is needed');
@@ -1510,18 +1510,18 @@ test('manager pipeline: seller-account registration step by step; OTP/password c
 
   // Out-of-step fields and skipping are refused by the server.
   n = agentCalls().length;
-  await tool('pipeline_save', { marketplace: 'FLIPKART', field: 'pan', value: 'ABCDE1234F' });
+  await tool('pipeline_save', { pipeline: 'SELLER_ACCOUNT_REGISTRATION', marketplace: 'FLIPKART', field: 'pan', value: 'ABCDE1234F' });
   assert.match(await toolResult(n + 2), /not part of the current step/);
   n = agentCalls().length;
-  await tool('pipeline_next', { marketplace: 'FLIPKART' });
+  await tool('pipeline_next', { pipeline: 'SELLER_ACCOUNT_REGISTRATION', marketplace: 'FLIPKART' });
   assert.match(await toolResult(n + 2), /Still needed for this step: List sent/);
-  await tool('pipeline_save', { marketplace: 'FLIPKART', field: 'list_sent', value: 'yes' });
-  await tool('pipeline_next', { marketplace: 'FLIPKART' });
+  await tool('pipeline_save', { pipeline: 'SELLER_ACCOUNT_REGISTRATION', marketplace: 'FLIPKART', field: 'list_sent', value: 'yes' });
+  await tool('pipeline_next', { pipeline: 'SELLER_ACCOUNT_REGISTRATION', marketplace: 'FLIPKART' });
   await waitFor(async () => (await runs())[0].step.title.includes('sign-up page'), 'step 2');
 
   // Password typed by the client: captured encrypted, never sent to the model.
-  await tool('pipeline_save', { marketplace: 'FLIPKART', field: 'mobile', value: '+91 98765 43210' });
-  await tool('pipeline_save', { marketplace: 'FLIPKART', field: 'email', value: 'Pooja@Example.com' });
+  await tool('pipeline_save', { pipeline: 'SELLER_ACCOUNT_REGISTRATION', marketplace: 'FLIPKART', field: 'mobile', value: '+91 98765 43210' });
+  await tool('pipeline_save', { pipeline: 'SELLER_ACCOUNT_REGISTRATION', marketplace: 'FLIPKART', field: 'email', value: 'Pooja@Example.com' });
   await say('password: Pooja@Secret9');
   await waitFor(async () => (await runs())[0].secretFields.includes('password'), 'password captured');
   r = (await runs())[0];
@@ -1535,7 +1535,7 @@ test('manager pipeline: seller-account registration step by step; OTP/password c
   assert.equal((await call('POST', `/ops/chats/${org.id}/pipelines/${r.id}/secrets/password`, { token: support.token })).status, 403, 'only ops managers see secrets');
   assert.equal(ok(await call('POST', `/ops/chats/${org.id}/pipelines/${r.id}/secrets/password`, { token: S.admin })).value, 'Pooja@Secret9');
   assert.ok(await db.auditLog.findFirst({ where: { action: 'pipeline.secret_viewed', entityId: r.id } }), 'viewing is audited');
-  await tool('pipeline_next', { marketplace: 'FLIPKART' });
+  await tool('pipeline_next', { pipeline: 'SELLER_ACCOUNT_REGISTRATION', marketplace: 'FLIPKART' });
   await waitFor(async () => (await runs())[0].step.by === 'team', 'team OTP step');
   assert.equal((await runs())[0].step.title, 'Team fills the sign-up page; client sends the OTPs');
 
@@ -1549,7 +1549,7 @@ test('manager pipeline: seller-account registration step by step; OTP/password c
   assert.equal((await call('POST', `/ops/chats/${org.id}/pipelines/${r.id}/otp`, { token: ops.token })).status, 404, 'deleted once shown');
   assert.equal(await db.pipelineOtp.count({ where: { runId: r.id } }), 0);
   n = agentCalls().length;
-  await tool('pipeline_next', { marketplace: 'FLIPKART' });
+  await tool('pipeline_next', { pipeline: 'SELLER_ACCOUNT_REGISTRATION', marketplace: 'FLIPKART' });
   assert.match(await toolResult(n + 2), /done by the SOLLUNA team/, 'the manager cannot finish team steps');
   ok(await call('POST', `/ops/chats/${org.id}/pipelines/${r.id}/advance`, { token: ops.token }));
   r = (await runs())[0];
@@ -1557,19 +1557,66 @@ test('manager pipeline: seller-account registration step by step; OTP/password c
   assert.equal(r.data.legal_name, org.legalName, 'known facts are prefilled, not asked again');
 
   // Existing Amazon account: admin-access branch, no secrets; access step needs evidence-based Connected.
-  await tool('start_pipeline', { marketplace: 'AMAZON', has_account: true });
+  await tool('start_pipeline', { pipeline: 'SELLER_ACCOUNT_REGISTRATION', marketplace: 'AMAZON', has_account: true });
   const amz = await waitFor(async () => (await runs()).find((x) => x.branch === 'AMAZON_HAS_ACCOUNT'), 'amazon pipeline');
-  await tool('pipeline_save', { marketplace: 'AMAZON', field: 'invite_sent', value: 'yes' });
+  await tool('pipeline_save', { pipeline: 'SELLER_ACCOUNT_REGISTRATION', marketplace: 'AMAZON', field: 'invite_sent', value: 'yes' });
   const facts = await waitFor(async () => agentCalls().map((x) => JSON.stringify(x.body)).reverse().find((t) => t.includes('AMAZON (existing account)')), 'amazon facts');
   assert.match(facts, /Settings → Manage permissions → Action → Invite employee/);
   assert.ok(!/password|OTP/i.test(/Current step 1\/2[^"]*Step instructions: ([^"]*?)Step fields/.exec(facts)?.[1]?.replace('Never ask for their password or OTP in this step.', '') ?? ''), 'admin-access step asks for no secrets');
-  await tool('pipeline_next', { marketplace: 'AMAZON' });
+  await tool('pipeline_next', { pipeline: 'SELLER_ACCOUNT_REGISTRATION', marketplace: 'AMAZON' });
   await waitFor(async () => (await runs()).find((x) => x.id === amz.id).step?.by === 'team', 'verify step');
   assert.equal((await call('POST', `/ops/chats/${org.id}/pipelines/${amz.id}/advance`, { token: ops.token })).status, 400, 'needs Connected first');
   await db.marketplaceAccount.update({ where: { organizationId_marketplace: { organizationId: org.id, marketplace: 'AMAZON' } }, data: { status: 'CONNECTED', verifiedNote: 'invite accepted in Seller Central' } });
   ok(await call('POST', `/ops/chats/${org.id}/pipelines/${amz.id}/advance`, { token: ops.token }));
   assert.equal((await runs()).find((x) => x.id === amz.id).status, 'DONE');
   void lastResult;
+});
+
+test('manager pipeline: Flipkart brand approval — brand + FSN + document type, upload, requirements, team applies, decision, result', async () => {
+  const c = await registerCustomer('Kiran'); await pay(c, 'RESELLER');
+  const org = ok(await call('GET', '/auth/me', { token: c })).organization;
+  const waitFor = async (fn, what) => { for (let i = 0; i < 60; i++) { const v = await fn(); if (v) return v; await new Promise((x) => setTimeout(x, 250)); } throw new Error(`timed out: ${what}`); };
+  const doneRuns = () => db.agentRun.count({ where: { organizationId: org.id, status: { in: ['DONE', 'SKIPPED', 'FAILED'] } } });
+  const tool = async (name, input) => { const before = await doneRuns(); ok(await call('POST', '/chat/messages', { token: c, body: { body: `[agent-test] tool:${name} ${JSON.stringify({ pipeline: 'BRAND_APPROVAL', marketplace: 'FLIPKART', ...input })}` } })); await waitFor(async () => (await doneRuns()) > before, `${name}`); };
+  const lastToolResult = () => JSON.stringify(claude.calls.filter((x) => JSON.stringify(x.body).includes(org.legalName)).at(-1).body.messages.at(-1));
+  const run = async () => (ok(await call('GET', `/ops/chats/${org.id}/pipelines`, { token: S.admin }))).find((r) => r.pipeline === 'BRAND_APPROVAL');
+
+  await tool('start_pipeline', { has_account: null });
+  let r = await waitFor(run, 'brand pipeline');
+  assert.equal(r.title, 'Brand approval'); assert.equal(r.step.index, 0);
+  assert.ok(await db.serviceRequest.findFirst({ where: { organizationId: org.id, featureKey: 'BRAND_APPROVAL', entitlement: 'ALLOWED' } }), 'tracked as a plan-checked request');
+  await tool('pipeline_save', { field: 'brand_name', value: 'Vim' });
+  await tool('pipeline_save', { field: 'fsn', value: 'https://www.flipkart.com/vim-bar/p/itm1?pid=DWBFYJSXEA7PSBXF&lid=X' });
+  await tool('pipeline_save', { field: 'doc_type', value: 'GST bill' });
+  assert.match(lastToolResult(), /Document type looks wrong/);
+  await tool('pipeline_save', { field: 'doc_type', value: 'invoice' });
+  r = await run();
+  assert.deepEqual([r.data.brand_name, r.data.fsn, r.data.doc_type], ['Vim', 'DWBFYJSXEA7PSBXF', 'INVOICE'], 'FSN taken from the link');
+  await tool('pipeline_next', {});
+  assert.equal((await run()).step.key ?? (await run()).step.title, "Client uploads the document; check it meets Flipkart's requirements");
+  await tool('pipeline_save', { field: 'document', value: 'yes' });
+  assert.match(lastToolResult(), /upload the document here in chat first/);
+  const facts = claude.calls.filter((x) => JSON.stringify(x.body).includes(org.legalName)).map((x) => JSON.stringify(x.body)).reverse().find((t) => t.includes('Current step 2/5'));
+  assert.match(facts, /not older than one year/, 'Flipkart requirements are in the step');
+  assert.equal((await upload(c, 'invoice.pdf', PDF, { kind: 'BRAND_AUTH' })).status, 201);
+  await tool('pipeline_save', { field: 'document', value: 'yes' });
+  await tool('pipeline_save', { field: 'requirements_ok', value: 'yes' });
+  await tool('pipeline_next', {});
+  r = await run();
+  assert.equal(r.step.by, 'team'); assert.deepEqual(r.step.fields.map((f) => f.key), ['request_id']);
+  await tool('pipeline_save', { field: 'request_id', value: '1000018109' });
+  assert.match(lastToolResult(), /done by the SOLLUNA team/, 'the manager cannot fill team steps');
+
+  const ops = await staff('OPERATIONS_MANAGER', S.admin);
+  assert.equal((await call('POST', `/ops/chats/${org.id}/pipelines/${r.id}/advance`, { token: ops.token, body: {} })).status, 400, 'request ID required');
+  ok(await call('POST', `/ops/chats/${org.id}/pipelines/${r.id}/advance`, { token: ops.token, body: { fields: { request_id: '1000018109' } } }));
+  r = await run(); assert.equal(r.step.title, 'Flipkart reviews the request'); assert.equal(r.data.request_id, '1000018109');
+  assert.equal((await call('POST', `/ops/chats/${org.id}/pipelines/${r.id}/advance`, { token: ops.token, body: { fields: { outcome: 'maybe' } } })).status, 400);
+  ok(await call('POST', `/ops/chats/${org.id}/pipelines/${r.id}/advance`, { token: ops.token, body: { fields: { outcome: 'approved' } } }));
+  r = await run(); assert.equal(r.step.title, 'Tell the client the result'); assert.equal(r.data.outcome, 'APPROVED');
+  await tool('pipeline_save', { field: 'informed', value: 'yes' });
+  await tool('pipeline_next', {});
+  assert.equal((await run()).status, 'DONE');
 });
 
 test('manager guardrails (unit) and eval runner', async () => {

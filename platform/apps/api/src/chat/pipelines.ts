@@ -7,7 +7,7 @@ import { config } from '../common/config';
 
 export type Marketplace = 'AMAZON' | 'FLIPKART';
 export type FieldKind = 'text' | 'secret' | 'otp' | 'confirm' | 'document';
-export interface PipeField { key: string; label: string; kind: FieldKind; required?: boolean; pattern?: RegExp; hint?: string; generate?: 'password'; prefill?: string }
+export interface PipeField { key: string; label: string; kind: FieldKind; required?: boolean; pattern?: RegExp; hint?: string; generate?: 'password'; prefill?: string; /** document: files the client must upload during this run */ minDocs?: number }
 export interface PipeStep {
   key: string; title: string;
   /** Who completes the step: the client (through the manager) or the SOLLUNA team / bot. */
@@ -68,7 +68,7 @@ const registration = (mp: Marketplace): PipeStep[] => [
       { key: 'account_holder', label: 'Account holder name', kind: 'text', required: true },
       { key: 'pickup_address', label: 'Pickup address', kind: 'text', required: true, prefill: 'org.address' },
       { key: 'pickup_pincode', label: 'Pickup PIN code', kind: 'text', required: true, pattern: PIN, prefill: 'org.pincode' },
-      { key: 'documents', label: 'GST certificate + cancelled cheque uploaded', kind: 'document', required: true },
+      { key: 'documents', label: 'GST certificate + cancelled cheque uploaded', kind: 'document', required: true, minDocs: 2, hint: 'Ask the client to upload the GST certificate and a cancelled cheque here in chat first.' },
     ] },
   { key: 'account_creation', title: 'Team completes the business details and opens the account', by: 'team',
     instructions: 'The team is submitting the business details. If an OTP or verification is needed, ask the client to send it here right away. Tell the client you will update them as soon as the account is open.',
@@ -79,7 +79,44 @@ const registration = (mp: Marketplace): PipeStep[] => [
     fields: [{ key: 'password_changed', label: 'Password changed', kind: 'confirm', required: true }] },
 ];
 
+/** Brand approval document requirements (owner, 9 Nov 2026 — Flipkart's own wording). */
+export const BRAND_DOCS = {
+  TMC: 'Trademark Certificate (TMC): issued by the government; proves ownership of the brand. It must 1) include the application number and brand name, 2) include the TM class that fits the vertical they want to sell in, 3) include the proprietor / seller name and address exactly as in their Flipkart seller account, 4) have a TM status that is valid on the date of the request.',
+  BAL: 'Brand Authorization Letter (BAL): issued by the brand owner or their authorised company, allowing them to sell the products. It must 1) be on the granting company\'s letterhead with the brand name and issue date, 2) include their business name exactly as in their Flipkart seller account, 3) carry the signature and seal (if any) of the granting company. The brand\'s trademark (TM) number may also be needed on the letter.',
+  INVOICE: 'Purchase invoice: issued by their supplier (manufacturer or distributor) when they bought the products. It must 1) have an invoice number and a date not older than one year, 2) show their name, address and GSTIN exactly as in their Flipkart seller account, 3) show the supplier\'s name, address and GSTIN, 4) describe the products with brand name, model name, price and quantity, 5) optionally carry the supplier\'s signature and seal.',
+};
+const FSN = /^[A-Z0-9]{16}$/;
+
+const brandApprovalFlipkart: PipeStep[] = [
+  { key: 'brand_details', title: 'Brand, a product of that brand, and which document they have', by: 'client',
+    instructions: 'Ask which brand they want approval for and the FSN (or Flipkart link) of ANY product of that brand. Then explain the three documents Flipkart accepts — a Trademark Certificate (TMC), a Brand Authorization Letter (BAL) from the brand owner, or a purchase invoice from their supplier — and ask which one they have. Save doc_type as TMC, BAL or INVOICE.',
+    fields: [
+      { key: 'brand_name', label: 'Brand name', kind: 'text', required: true },
+      { key: 'fsn', label: 'FSN of a product of the brand', kind: 'text', required: true, pattern: FSN, hint: '16-character FSN or a Flipkart product link' },
+      { key: 'doc_type', label: 'Document type', kind: 'text', required: true, pattern: /^(TMC|BAL|INVOICE)$/, hint: 'TMC, BAL or INVOICE' },
+    ] },
+  { key: 'document', title: 'Client uploads the document; check it meets Flipkart\'s requirements', by: 'client',
+    instructions: `Ask the client to upload the chosen document here in chat. Then go through the requirements of THAT document type (doc_type) with them, one or two points at a time, and ask them to confirm each one. If a point is not met, explain what to fix or suggest another document type. Save requirements_ok = yes only when every point is confirmed. Requirements — ${BRAND_DOCS.TMC} ${BRAND_DOCS.BAL} ${BRAND_DOCS.INVOICE}`,
+    fields: [
+      { key: 'document', label: 'Document uploaded', kind: 'document', required: true, minDocs: 1, hint: 'Ask the client to upload the document here in chat first.' },
+      { key: 'requirements_ok', label: 'All requirements confirmed', kind: 'confirm', required: true },
+    ] },
+  { key: 'apply', title: 'SOLLUNA applies for brand approval on Flipkart', by: 'team',
+    instructions: 'The team is applying on Flipkart now. Tell the client it is being submitted and you will share the request number.',
+    fields: [{ key: 'request_id', label: 'Flipkart request ID', kind: 'text', required: true, hint: 'Seller Hub: Home → Listings → Add New Listings → search the FSN → Apply for Approval → choose the document type → upload → Apply' }] },
+  { key: 'decision', title: 'Flipkart reviews the request', by: 'team',
+    instructions: 'Flipkart is reviewing the request (request_id). Tell the client it is under review and you will update them as soon as Flipkart decides. Do not promise approval or a date.',
+    fields: [
+      { key: 'outcome', label: 'Flipkart decision', kind: 'text', required: true, pattern: /^(APPROVED|REJECTED)$/, hint: 'APPROVED or REJECTED' },
+      { key: 'rejection_reason', label: 'Rejection reason (if rejected)', kind: 'text' },
+    ] },
+  { key: 'result', title: 'Tell the client the result', by: 'client',
+    instructions: 'Tell the client Flipkart\'s decision (outcome). If APPROVED: they can now list this brand — offer to start the listing or mapping. If REJECTED: share rejection_reason in simple words and offer to apply again with another document (start_pipeline BRAND_APPROVAL again). Then save informed = yes.',
+    fields: [{ key: 'informed', label: 'Client informed', kind: 'confirm', required: true }] },
+];
+
 export const PIPELINES: Record<string, Pipeline> = {
+  BRAND_APPROVAL: { key: 'BRAND_APPROVAL', title: 'Brand approval', branches: { FLIPKART_BRAND: brandApprovalFlipkart } },
   SELLER_ACCOUNT_REGISTRATION: {
     key: 'SELLER_ACCOUNT_REGISTRATION', title: 'Seller account (registration or admin access)',
     branches: {
@@ -96,6 +133,7 @@ export function normalise(f: PipeField, v: string) {
   if (f.key === 'email') return t.toLowerCase();
   if (f.key === 'mobile') return t.replace(/\D/g, '').replace(/^91(?=\d{10}$)/, '');
   if (f.key.endsWith('pincode')) return t.replace(/\D/g, '');
+  if (f.key === 'fsn') return (/[?&]pid=([A-Z0-9]{16})/i.exec(t)?.[1] ?? t).replace(/\s+/g, '').toUpperCase();
   if (f.pattern) return t.replace(/\s+/g, '').toUpperCase();
   return t;
 }
