@@ -344,7 +344,7 @@ export function OpsReporting() {
 
 interface SkuProfitData {
   id: string; period: string; label: string; status: string; error: string | null; published: boolean;
-  completenessPct?: number; confidence?: 'VERIFIED' | 'ESTIMATED' | 'UNAVAILABLE'; reasons?: string[]; missingCost?: string[];
+  completenessPct?: number; final?: boolean; finalOn?: string; confidence?: 'VERIFIED' | 'ESTIMATED' | 'UNAVAILABLE'; reasons?: string[]; missingCost?: string[];
   total?: { netUnits: number; saleAmountPaise: number; purchaseAmountPaise: number; profitPaise: number };
   rows?: { sku: string; grossUnits: number; returnedUnits: number; netUnits: number; purchasePerUnitPaise: number | null; purchaseAmountPaise: number | null; salePerUnitPaise: number | null; saleAmountPaise: number; profitPaise: number | null }[];
 }
@@ -355,6 +355,11 @@ function SkuProfitTable({ d }: { d: SkuProfitData }) {
   if (!d.rows || !d.total) return null;
   return (
     <div className="space-y-2">
+      {d.completenessPct !== undefined && (
+        <p className={`rounded-lg px-3 py-2 text-sm ${d.final ? 'bg-emerald-50 text-emerald-900' : 'bg-amber-50 text-amber-900'}`} data-testid="pl-accuracy">
+          {d.final ? 'Final numbers: Flipkart data 100% complete.' : `Flipkart data ${d.completenessPct}% complete (returns and settlements still in progress). Final numbers will be updated after ${d.finalOn}.`}
+        </p>
+      )}
       <div className="flex flex-wrap items-center gap-2 text-xs">
         <Conf c={d.confidence ?? "ESTIMATED"} />
         {d.reasons?.map((r) => <span key={r} className="text-amber-800">{r}</span>)}

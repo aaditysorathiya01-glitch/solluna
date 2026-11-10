@@ -16,6 +16,9 @@ const periodDate = (period: string) => {
   if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(period)) throw new BadRequestException('Period must be YYYY-MM');
   return new Date(`${period}-01T00:00:00Z`);
 };
+/** Flipkart finishes returns and settlements for a month by the 15th of the next month (owner, 10 Nov 2026). */
+export const FINAL_DAY = Number(process.env.PL_FINAL_DAY ?? 15);
+export const finalOn = (period: string) => { const d = new Date(Date.UTC(Number(period.slice(0, 4)), Number(period.slice(5, 7)), FINAL_DAY)); return `${FINAL_DAY} ${MONTHS[d.getUTCMonth()].slice(0, 3)} ${d.getUTCFullYear()}`; };
 const endOfMonth = (d: Date) => new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth() + 1, 0, 23, 59, 59));
 
 /**
@@ -77,7 +80,15 @@ export class PlImportService implements OnModuleInit {
       const doc = await this.db.document.findUniqueOrThrow({ where: { id: row.documentId } });
       const pl = parseFlipkartPl(readXlsx(await this.storage.get(doc.fileKey)));
       if (pl.periodFrom && pl.periodFrom.slice(0, 7) !== period) throw new Error(`This report is for ${pl.periodFrom} to ${pl.periodTo}, not ${monthName(period)}.`);
-      await this.db.plImport.update({ where: { id }, data: { status: 'DONE', data: pl as unknown as Prisma.InputJsonValue, finishedAt: new Date() } });
+      // Re-import of a month the client already has (e.g. the final 100% report on the 15th): published straight away.
+      const earlier = await this.db.plImport.findFirst({ where: { organizationId: row.organizationId, periodMonth: row.periodMonth, publishedAt: { not: null }, id: { not: id } }, orderBy: { createdAt: 'desc' } });
+      await this.db.plImport.update({ where: { id }, data: { status: 'DONE', data: pl as unknown as Prisma.InputJsonValue, finishedAt: new Date(), ...(earlier ? { publishedAt: new Date(), publishedById: row.startedById } : {}) } });
+      if (earlier) {
+        const was = (earlier.data as unknown as FlipkartPl | null)?.completenessPct;
+        await this.audit.log({ action: 'report.pl_updated', entity: 'PlImport', entityId: id, organizationId: row.organizationId, after: { period, completenessPct: pl.completenessPct, was } });
+        await this.dispatch.emit({ type: 'report.published', organizationId: row.organizationId, title: `${monthName(period)} Flipkart profit report updated`, body: `Updated with Flipkart's ${pl.completenessPct >= 100 ? 'final (100% complete)' : `${pl.completenessPct}% complete`} data.`, data: { period } });
+        await this.agent.enqueue(row.organizationId, `The ${monthName(period)} Flipkart SKU profit report was updated with Flipkart's ${pl.completenessPct >= 100 ? 'final, 100% complete' : `${pl.completenessPct}% complete`} data (it was ${was ?? '?'}% before). Tell the client the numbers in Reports are now ${pl.completenessPct >= 100 ? 'final' : 'updated'}.`);
+      }
       const view = skuProfit(pl, await this.costLookup(row.organizationId, row.periodMonth));
       if (view.missingCost.length) {
         // The manager asks the client for the missing purchase prices (one message, the SKUs listed).
@@ -107,7 +118,7 @@ export class PlImportService implements OnModuleInit {
     if (row.status !== 'DONE' || !row.data) return base;
     const pl = row.data as unknown as FlipkartPl;
     const view = skuProfit(pl, await this.costLookup(orgId, periodMonth));
-    return { ...base, periodFrom: pl.periodFrom, periodTo: pl.periodTo, completenessPct: pl.completenessPct, summary: pl.summary, ...view };
+    return { ...base, periodFrom: pl.periodFrom, periodTo: pl.periodTo, completenessPct: pl.completenessPct, final: pl.completenessPct >= 100, finalOn: finalOn(period), summary: pl.summary, ...view };
   }
 
   async publish(user: AuthUser, orgId: string, period: string) {
@@ -118,7 +129,8 @@ export class PlImportService implements OnModuleInit {
     await this.db.plImport.update({ where: { id: row.id }, data: { publishedAt: new Date(), publishedById: user.id } });
     await this.audit.log({ actor: user, action: 'report.pl_published', entity: 'PlImport', entityId: row.id, organizationId: orgId, after: { period } });
     await this.dispatch.emit({ type: 'report.published', organizationId: orgId, title: `${monthName(period)} Flipkart profit report`, body: 'Your SKU-wise profit for the month is ready in Reports.', data: { period } });
-    await this.agent.enqueue(orgId, `The ${monthName(period)} Flipkart SKU profit report is published in Reports (sale = Flipkart's bank settlement, minus the purchase price). Tell the client briefly and offer to explain it.`);
+    const pct = (row.data as unknown as FlipkartPl | null)?.completenessPct ?? 100;
+    await this.agent.enqueue(orgId, `The ${monthName(period)} Flipkart SKU profit report is published in Reports (sale = Flipkart's bank settlement, minus the purchase price).${pct < 100 ? ` Flipkart's data is ${pct}% complete for now; SOLLUNA updates it with the final 100% numbers after ${finalOn(period)}.` : ''} Tell the client briefly and offer to explain it.`);
     return { published: true };
   }
 
@@ -130,7 +142,31 @@ export class PlImportService implements OnModuleInit {
     for (const x of v.rows) lines.push([`"${x.sku.replace(/"/g, '""')}"`, x.grossUnits, x.returnedUnits, x.netUnits, r(x.purchasePerUnitPaise), r(x.purchaseAmountPaise), r(x.salePerUnitPaise), r(x.saleAmountPaise), r(x.profitPaise), r(x.settledPaise), r(x.pendingPaise)].join(','));
     lines.push(['TOTAL', '', '', v.total.netUnits, '', r(v.total.purchaseAmountPaise), '', r(v.total.saleAmountPaise), r(v.total.profitPaise), '', ''].join(','));
     lines.push(`"Profit is ${v.confidence}. ${v.reasons.join(' ')}"`);
+    if ('final' in v) lines.push(`"${v.final ? 'Final numbers: Flipkart data 100% complete.' : `Flipkart data ${v.completenessPct}% complete; final numbers after ${v.finalOn}.`}"`);
     return { fileName: `flipkart-sku-profit-${period}.csv`, csv: lines.join('\n') };
+  }
+
+  /**
+   * On/after the 15th: every published month still below 100% gets one reminder to the team to download Flipkart's
+   * report again and import it (the update then reaches the client automatically).
+   */
+  async remindFinal(now = new Date()) {
+    const ist = new Date(now.getTime() + 330 * 60_000);
+    if (ist.getUTCDate() < FINAL_DAY) return 0;
+    const prevMonth = new Date(Date.UTC(ist.getUTCFullYear(), ist.getUTCMonth() - 1, 1));
+    const rows = await this.db.plImport.findMany({ where: { periodMonth: prevMonth, status: 'DONE', publishedAt: { not: null }, finalReminderAt: null }, orderBy: { createdAt: 'desc' } });
+    const seen = new Set<string>(); let n = 0;
+    for (const r of rows) {
+      if (seen.has(r.organizationId)) continue; seen.add(r.organizationId);
+      const latest = await this.db.plImport.findFirst({ where: { organizationId: r.organizationId, periodMonth: prevMonth, status: 'DONE' }, orderBy: { createdAt: 'desc' } });
+      if (!latest || latest.id !== r.id || ((r.data as unknown as FlipkartPl | null)?.completenessPct ?? 100) >= 100) continue;
+      const period = prevMonth.toISOString().slice(0, 7);
+      const org = await this.db.organization.findUnique({ where: { id: r.organizationId }, select: { legalName: true, brandName: true } });
+      await this.dispatch.notifyStaff({ roles: ['OPERATIONS_MANAGER', 'ACCOUNTS_EXECUTIVE'], organizationId: r.organizationId, type: 'report.pl_final', title: `Final Flipkart P&L due: ${org?.brandName ?? org?.legalName}`, body: `${monthName(period)} was ${(r.data as unknown as FlipkartPl).completenessPct}% complete. Download Flipkart's Profit and Loss Report again and upload it in Monthly reporting; the client's report updates automatically.` });
+      await this.db.plImport.update({ where: { id: r.id }, data: { finalReminderAt: new Date() } });
+      n++;
+    }
+    return n;
   }
 
   /** For the manager's facts: SKUs of the latest imported month still missing a purchase price. */

@@ -3,6 +3,7 @@ import { PrismaService } from '../common/prisma.service';
 import { OrchestratorService } from '../orchestrator/orchestrator.service';
 import { DispatcherService } from '../connectors/dispatcher.service';
 import { PipelineService } from '../chat/pipeline.service';
+import { PlImportService } from './pl-import.service';
 
 /**
  * Monthly report cycle (owner, 7 Nov 2026):
@@ -34,6 +35,7 @@ export class ReportCycleService implements OnModuleInit {
     private readonly orchestrator: OrchestratorService,
     private readonly dispatch: DispatcherService,
     private readonly pipelines: PipelineService,
+    private readonly pl: PlImportService,
   ) {}
 
   onModuleInit() {
@@ -44,8 +46,9 @@ export class ReportCycleService implements OnModuleInit {
 
   /** Opens last month's reporting request for every active client, once, on or after the marketplace report day. */
   async run(now = new Date()) {
+    const finalReminders = await this.pl.remindFinal(now);
     const today = istDate(now);
-    if (today.day < MARKETPLACE_REPORT_DAY) return { period: null, opened: 0 };
+    if (today.day < MARKETPLACE_REPORT_DAY) return { period: null, opened: 0, finalReminders };
     const prev = shift(today.y, today.m, -1);
     const period = key(prev.y, prev.m);
     const monthEnd = new Date(Date.UTC(today.y, today.m, 1) - 330 * 60_000); // 1st of this month, 00:00 IST
@@ -68,7 +71,7 @@ export class ReportCycleService implements OnModuleInit {
       opened++;
     }
     if (opened) this.log.log(`Opened ${opened} report request(s) for ${period}`);
-    return { period, opened };
+    return { period, opened, finalReminders };
   }
 
   /** Client view: this month and up to 3 closed months since the plan started, with where each report stands. */

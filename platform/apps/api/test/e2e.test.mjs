@@ -1804,6 +1804,22 @@ test('Flipkart P&L report → SKU profit: parsed in the background, purchase pri
   assert.match(csv, /^SKU,Gross units,.*Purchase per unit,Purchase amount,Sale per unit,Sale amount \(bank settlement\),Profit/);
   assert.match(csv, /"BIKE POLISH - 1",100,20,80,30.00,2400.00,90.00,7200.00,4800.00/); assert.match(csv, /Profit is ESTIMATED/);
   assert.ok(await db.notification.findFirst({ where: { organizationId: org.id, type: 'report.published' } }));
+  assert.equal(client.completenessPct, 98.2); assert.equal(client.final, false); assert.equal(client.finalOn, '15 Nov 2026');
+  assert.match(csv, /Flipkart data 98.2% complete; final numbers after 15 Nov 2026/);
+
+  // 15th: the team is reminded once to re-import; the final 100% file updates the client's report automatically.
+  const opsUser = await staff('OPERATIONS_MANAGER', S.admin);
+  assert.equal(ok(await call('POST', '/ops/reports/cycle/run', { token: opsUser.token, body: { date: '2026-11-14' } })).finalReminders, 0, 'not before the 15th');
+  const r15 = ok(await call('POST', '/ops/reports/cycle/run', { token: opsUser.token, body: { date: '2026-11-15' } }));
+  assert.ok(r15.finalReminders >= 1);
+  assert.ok(await db.notification.findFirst({ where: { organizationId: org.id, type: 'report.pl_final' } }), 'team reminded');
+  const again = ok(await call('POST', '/ops/reports/cycle/run', { token: opsUser.token, body: { date: '2026-11-16' } }));
+  assert.equal(await db.notification.count({ where: { organizationId: org.id, type: 'report.pl_final', userId: opsUser.id } }), 1, 'only once'); void again;
+  const final = await importFile(flipkartPl('2026-10', 100));
+  assert.equal(final.final, true); assert.equal(final.published, true, 're-import of a published month goes straight to the client');
+  const clientFinal = ok(await call('GET', '/reports/sku-profit?period=2026-10', { token: c }));
+  assert.equal(clientFinal.completenessPct, 100); assert.equal(clientFinal.final, true);
+  assert.ok(await db.notification.findFirst({ where: { organizationId: org.id, type: 'report.published', title: { contains: 'updated' } } }), 'client told');
   const other = await registerCustomer('Kabir'); await pay(other, 'RESELLER');
   assert.ok(!ok(await call('GET', '/reports/sku-profit?period=2026-10', { token: other })), 'isolated per client');
 });

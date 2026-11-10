@@ -12,6 +12,7 @@ description: Prepare monthly marketplace profit-and-loss reports for SOLLUNA cli
 3. **Purchase prices:** the manager asks the client for every SKU without a price and saves it (or the client enters it in Reports -> Product costs). SKU names match ignoring case and spacing.
 4. **Confidence (rule 7):** UNAVAILABLE with no prices; ESTIMATED while any price is missing or Flipkart marks the report below 100% complete; VERIFIED only when both are complete.
 5. **Team publishes** -> client sees the table in Reports with totals and an Excel (CSV) download; the manager tells the client.
+6. **Accuracy and the 15th:** Flipkart marks the report "NN% Completed" while returns and settlements are still open. The client sees that % and "final numbers after the 15th". On the 15th of the next month the team gets one reminder to download the report again and import it; a re-import of a published month reaches the client automatically and the manager tells them the numbers are final.
 
 ## 1. Role
 

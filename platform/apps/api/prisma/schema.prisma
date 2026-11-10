@@ -1186,6 +1186,7 @@ model PlImport {
   startedById    String
   publishedAt    DateTime?
   publishedById  String?
+  finalReminderAt DateTime? // the team was reminded on the 15th to re-import the final (100%) report
   finishedAt     DateTime?
   createdAt      DateTime  @default(now())
 
