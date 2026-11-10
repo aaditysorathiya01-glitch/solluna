@@ -32,6 +32,7 @@ const ADMIN = { email: 'admin@solluna.test', password: 'Admin-Passw0rd-123' };
 
 let api, base, db, rzpServer, sinkServer, claude;
 import { startClaudeMock, PRODUCT } from './claude-mock.mjs';
+import { flipkartPl } from './xlsx-fixture.mjs';
 const orders = [];      // orders received by the Razorpay mock
 const connectorEvents = []; // events received by the connector sink
 
@@ -1763,6 +1764,48 @@ test('manager pipeline: CA documents — opened on the 5th per marketplace, team
   assert.ok(pack.missing.some((m) => m.required === 'Amazon Merchant Tax Report (B2B)'), 'Amazon files still missing');
   ok(await call('POST', '/ops/reports/cycle/run', { token: ops.token, body: { date: '2026-10-06' } }));
   assert.equal((await runs()).length, 2, 'once per month');
+});
+
+test('Flipkart P&L report → SKU profit: parsed in the background, purchase price asked by the manager, ESTIMATED until complete, published, CSV', async () => {
+  const c = await registerCustomer('Mohan'); await pay(c, 'RESELLER');
+  const org = ok(await call('GET', '/auth/me', { token: c })).organization;
+  const waitFor = async (fn, what) => { for (let i = 0; i < 60; i++) { const v = await fn(); if (v) return v; await new Promise((x) => setTimeout(x, 250)); } throw new Error(`timed out: ${what}`); };
+  const ops = (path, opts = {}) => call(opts.method ?? 'GET', `/ops/reports/${org.id}/2026-10${path}`, { token: S.admin, body: opts.body });
+  const importFile = async (buf) => {
+    const doc = await upload(S.admin, 'Flipkart P&L.xlsx', buf, { organizationId: org.id, kind: 'FLIPKART_PL_REPORT', period: '2026-10' });
+    assert.equal(doc.status, 201, JSON.stringify(doc.body));
+    ok(await ops('/flipkart-pl', { method: 'POST', body: { documentId: doc.body.id } }));
+    return waitFor(async () => { const v = ok(await ops('/sku-profit')); return v && v.status !== 'QUEUED' && v.status !== 'RUNNING' ? v : null; }, 'import');
+  };
+
+  const wrong = await importFile(flipkartPl('2026-09'));
+  assert.equal(wrong.status, 'FAILED'); assert.match(wrong.error, /not October 2026/);
+  let v = await importFile(flipkartPl('2026-10', 98.2));
+  assert.equal(v.status, 'DONE'); assert.equal(v.rows.length, 2); assert.equal(v.completenessPct, 98.2);
+  assert.equal(v.confidence, 'UNAVAILABLE', 'no purchase prices yet → no profit shown'); assert.deepEqual(v.missingCost, ['BIKE POLISH - 1', 'RUBBING COMPOUND 100G - 1']);
+  assert.ok(!ok(await call('GET', '/reports/sku-profit?period=2026-10', { token: c })), 'client sees nothing before publish');
+
+  // The manager is told which purchase prices are missing; the client gives one in chat.
+  const agentCalls = () => claude.calls.filter((x) => String(x.body.system ?? '').includes('account manager at SOLLUNA') && JSON.stringify(x.body).includes(org.legalName));
+  await waitFor(async () => agentCalls().some((x) => JSON.stringify(x.body).includes('Purchase price per unit is missing for 2 SKU')), 'manager asked for costs');
+  ok(await call('POST', '/chat/messages', { token: c, body: { body: '[agent-test] tool:save_product_cost {"sku":"bike polish - 1","cost_inr":30,"includes_gst":true}' } }));
+  await waitFor(async () => db.productCost.findFirst({ where: { organizationId: org.id, sku: 'bike polish - 1' } }), 'cost saved');
+  v = ok(await ops('/sku-profit'));
+  const bike = v.rows.find((r) => r.sku === 'BIKE POLISH - 1');
+  assert.deepEqual([bike.purchasePerUnitPaise, bike.purchaseAmountPaise, bike.salePerUnitPaise, bike.saleAmountPaise, bike.profitPaise], [3000, 240000, 9000, 720000, 480000], 'SKU match ignores case; profit = settlement − cost × net units');
+  assert.equal(v.rows.find((r) => r.sku.startsWith('RUBBING')).profitPaise, null);
+  assert.equal(v.confidence, 'ESTIMATED'); assert.ok(v.reasons.some((x) => /98.2% complete/.test(x)) && v.reasons.some((x) => /missing for 1 SKU/.test(x)));
+  assert.deepEqual(v.total, { netUnits: 120, saleAmountPaise: 1250000, purchaseAmountPaise: 240000, profitPaise: 480000 });
+
+  ok(await ops('/sku-profit/publish', { method: 'POST' }));
+  const client = ok(await call('GET', '/reports/sku-profit?period=2026-10', { token: c }));
+  assert.equal(client.published, true); assert.equal(client.rows.length, 2);
+  const csv = await fetch(`${base}/reports/sku-profit.csv?period=2026-10`, { headers: { authorization: `Bearer ${c}` } }).then((r) => r.text());
+  assert.match(csv, /^SKU,Gross units,.*Purchase per unit,Purchase amount,Sale per unit,Sale amount \(bank settlement\),Profit/);
+  assert.match(csv, /"BIKE POLISH - 1",100,20,80,30.00,2400.00,90.00,7200.00,4800.00/); assert.match(csv, /Profit is ESTIMATED/);
+  assert.ok(await db.notification.findFirst({ where: { organizationId: org.id, type: 'report.published' } }));
+  const other = await registerCustomer('Kabir'); await pay(other, 'RESELLER');
+  assert.ok(!ok(await call('GET', '/reports/sku-profit?period=2026-10', { token: other })), 'isolated per client');
 });
 
 test('manager guardrails (unit) and eval runner', async () => {

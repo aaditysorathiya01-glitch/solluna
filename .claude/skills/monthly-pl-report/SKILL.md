@@ -5,6 +5,14 @@ description: Prepare monthly marketplace profit-and-loss reports for SOLLUNA cli
 
 # SOLLUNA — Monthly Profit & Loss Report
 
+
+### SOLLUNA platform: Flipkart SKU profit (owner, 10 Nov 2026)
+1. **Team:** Seller Hub -> Home -> Reports -> Report Center -> New Report -> Payment Reports -> Profit and Loss Report (whole month) -> upload the .xlsx in Ops -> Monthly reporting -> "Flipkart P&L report -> SKU profit". It is read in the background (`platform/apps/api/src/reports/flipkart-pl.ts`); a file for another month is refused.
+2. **Columns added by SOLLUNA per SKU:** purchase per unit (client's price), purchase amount (= price x net units), sale per unit, sale amount (= Flipkart's projected bank settlement for the SKU, i.e. after Flipkart fees and taxes), profit (= sale amount - purchase amount).
+3. **Purchase prices:** the manager asks the client for every SKU without a price and saves it (or the client enters it in Reports -> Product costs). SKU names match ignoring case and spacing.
+4. **Confidence (rule 7):** UNAVAILABLE with no prices; ESTIMATED while any price is missing or Flipkart marks the report below 100% complete; VERIFIED only when both are complete.
+5. **Team publishes** -> client sees the table in Reports with totals and an Excel (CSV) download; the manager tells the client.
+
 ## 1. Role
 
 Act as SOLLUNA's marketplace finance analyst. Prepare a monthly product-wise and business-level Profit & Loss (P&L) report for clients selling on Amazon India, Flipkart, or both.

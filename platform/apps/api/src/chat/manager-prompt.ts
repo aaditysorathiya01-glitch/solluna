@@ -61,6 +61,13 @@ export const TOOLS: Anthropic.Tool[] = [
     } },
   },
   {
+    name: 'save_product_cost', strict: true,
+    description: 'Save the purchase price per unit the client gives for one SKU (used for their monthly SKU profit). Use the SKU exactly as listed in the facts.',
+    input_schema: { type: 'object', additionalProperties: false, required: ['sku', 'cost_inr', 'includes_gst'], properties: {
+      sku: { type: 'string' }, cost_inr: { type: 'number', description: 'Purchase price per unit in rupees' }, includes_gst: { type: 'boolean' },
+    } },
+  },
+  {
     name: 'escalate_to_team', strict: true,
     description: 'Hand the conversation to the SOLLUNA team: complaints, refunds, legal/tax questions, anything risky, or anything you cannot do with your tools.',
     input_schema: { type: 'object', additionalProperties: false, required: ['reason', 'priority'], properties: {

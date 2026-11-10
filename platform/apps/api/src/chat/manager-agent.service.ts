@@ -45,6 +45,8 @@ type Bound = { orgId: string; runId: string };
 export class ManagerAgentService implements OnModuleInit {
   private readonly log = new Logger('ManagerAgent');
   private running = false;
+  /** Other services add short client facts (e.g. SKUs missing a purchase price) without a circular dependency. */
+  readonly factProviders: ((orgId: string) => Promise<string | null>)[] = [];
 
   constructor(
     private readonly db: PrismaService,
@@ -115,7 +117,8 @@ export class ManagerAgentService implements OnModuleInit {
       const started = Date.now();
       const bound: Bound = { orgId, runId };
       const pipelineText = await this.pipelines.contextFor(orgId);
-      const context = `${await this.clientFacts(orgId)}${pipelineText ? `\n\n${pipelineText}` : ''}`;
+      const extra = (await Promise.all(this.factProviders.map((p) => p(orgId).catch(() => null)))).filter(Boolean).join('\n');
+      const context = `${await this.clientFacts(orgId)}${extra ? `\n${extra}` : ''}${pipelineText ? `\n\n${pipelineText}` : ''}`;
       const secretStep = await this.secretStep(orgId);
       const { messages, flags } = await this.history(conv.id, context, secretStep.otp, secretStep.otp || secretStep.password, update);
       const client = new Anthropic();
@@ -348,6 +351,14 @@ export class ManagerAgentService implements OnModuleInit {
     if (name === 'pipeline_next') {
       const d = z.object({ pipeline: z.enum(PIPELINE_KEYS), marketplace: z.enum(['AMAZON', 'FLIPKART']) }).parse(input);
       return this.pipelines.next(b.orgId, d.pipeline, d.marketplace);
+    }
+    if (name === 'save_product_cost') {
+      const d = z.object({ sku: z.string().trim().min(1).max(200), cost_inr: z.number().positive().max(10_000_000), includes_gst: z.boolean() }).parse(input);
+      // Effective from the start of last month, so it applies to the report being prepared.
+      const from = new Date(Date.now() + 330 * 60_000); from.setUTCDate(1); from.setUTCMonth(from.getUTCMonth() - 1); from.setUTCHours(0, 0, 0, 0);
+      const row = await this.db.productCost.create({ data: { organizationId: b.orgId, sku: d.sku, costPaise: Math.round(d.cost_inr * 100), includesGst: d.includes_gst, effectiveFrom: from, clientConfirmed: true, enteredById: 'manager-chat' } });
+      await this.audit.log({ action: 'product_cost.add', entity: 'ProductCost', entityId: row.id, organizationId: b.orgId, after: { sku: d.sku, costPaise: row.costPaise, by: 'manager-chat (client said)' } });
+      return `Saved purchase price ₹${d.cost_inr} per unit for ${d.sku}.`;
     }
     if (name === 'escalate_to_team') {
       const d = z.object({ reason: z.string().trim().min(3).max(1000), priority: z.enum(['P1', 'P2', 'P3', 'P4']) }).parse(input);

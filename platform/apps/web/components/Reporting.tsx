@@ -65,6 +65,7 @@ export function ClientReporting() {
         <label className="label mb-0" htmlFor="period">Month</label>
         <input id="period" type="month" className="input w-auto" value={period} max={new Date().toISOString().slice(0, 7)} onChange={(e) => setPeriod(e.target.value)} />
       </div>
+      <ClientSkuProfit period={period} />
       <div className="grid gap-6 lg:grid-cols-2">
         <ProductCosts />
         <Expenses period={period} />
@@ -276,6 +277,7 @@ export function OpsReporting() {
       </div>
       <Msg ok={m.ok} err={m.err} />
       {!clients.length && <p className="card p-6 text-sm text-ink-3">No clients available for reporting.</p>}
+      {orgId && <OpsSkuProfit orgId={orgId} period={period} />}
       {wb && (
         <div className="grid gap-6 xl:grid-cols-[minmax(0,3fr)_minmax(0,2fr)]">
           <div className="space-y-6">
@@ -337,5 +339,107 @@ export function OpsReporting() {
         </div>
       )}
     </main>
+  );
+}
+
+interface SkuProfitData {
+  id: string; period: string; label: string; status: string; error: string | null; published: boolean;
+  completenessPct?: number; confidence?: 'VERIFIED' | 'ESTIMATED' | 'UNAVAILABLE'; reasons?: string[]; missingCost?: string[];
+  total?: { netUnits: number; saleAmountPaise: number; purchaseAmountPaise: number; profitPaise: number };
+  rows?: { sku: string; grossUnits: number; returnedUnits: number; netUnits: number; purchasePerUnitPaise: number | null; purchaseAmountPaise: number | null; salePerUnitPaise: number | null; saleAmountPaise: number; profitPaise: number | null }[];
+}
+const rsOrDash = (p: number | null | undefined) => (p === null || p === undefined ? '—' : rs(p));
+
+/** Owner's SKU profit table: purchase per unit, purchase amount, sale per unit, sale amount, profit. */
+function SkuProfitTable({ d }: { d: SkuProfitData }) {
+  if (!d.rows || !d.total) return null;
+  return (
+    <div className="space-y-2">
+      <div className="flex flex-wrap items-center gap-2 text-xs">
+        <Conf c={d.confidence ?? "ESTIMATED"} />
+        {d.reasons?.map((r) => <span key={r} className="text-amber-800">{r}</span>)}
+      </div>
+      <div className="overflow-x-auto">
+        <table className="w-full min-w-[820px] text-sm" aria-label="SKU profit">
+          <thead><tr className="border-b border-ink/10 text-left text-xs uppercase tracking-wider text-ink-3">
+            <th className="p-2">SKU</th><th className="text-right">Net units</th><th className="text-right">Purchase / unit</th><th className="text-right">Purchase amount</th><th className="text-right">Sale / unit</th><th className="text-right">Sale amount</th><th className="pr-2 text-right">Profit</th>
+          </tr></thead>
+          <tbody>
+            {d.rows.map((r) => (
+              <tr key={r.sku} className="border-t border-ink/5">
+                <td className="p-2">{r.sku}<span className="block text-[11px] text-ink-3">{r.grossUnits} ordered · {r.returnedUnits} returned / cancelled</span></td>
+                <td className="text-right">{r.netUnits}</td>
+                <td className="text-right">{r.purchasePerUnitPaise === null ? <span className="text-amber-800">{r.netUnits > 0 ? 'Cost needed' : '—'}</span> : rs(r.purchasePerUnitPaise)}</td>
+                <td className="text-right">{rsOrDash(r.purchaseAmountPaise)}</td>
+                <td className="text-right">{rsOrDash(r.salePerUnitPaise)}</td>
+                <td className="text-right">{rs(r.saleAmountPaise)}</td>
+                <td className={`pr-2 text-right font-medium ${r.profitPaise !== null && r.profitPaise < 0 ? 'text-red-700' : ''}`}>{rsOrDash(r.profitPaise)}</td>
+              </tr>
+            ))}
+            <tr className="border-t-2 border-ink/20 font-semibold" data-testid="sku-profit-total">
+              <td className="p-2">Total</td><td className="text-right">{d.total.netUnits}</td><td /><td className="text-right">{rs(d.total.purchaseAmountPaise)}</td><td /><td className="text-right">{rs(d.total.saleAmountPaise)}</td><td className="pr-2 text-right">{rs(d.total.profitPaise)}</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+      <p className="text-xs text-ink-3">Sale = Flipkart&rsquo;s bank settlement for the SKU (after Flipkart fees and taxes). Profit = sale − purchase amount (purchase price × net units).</p>
+    </div>
+  );
+}
+
+/** Client: the month's published SKU profit. */
+function ClientSkuProfit({ period }: { period: string }) {
+  const [d, setD] = useState<SkuProfitData | null>(null);
+  useEffect(() => { api<SkuProfitData | null>(`/reports/sku-profit?period=${period}`).then(setD).catch(() => setD(null)); }, [period]);
+  if (!d?.rows) return null;
+  return (
+    <section className="card space-y-3 p-5" aria-label="Flipkart SKU profit">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div><h2 className="font-semibold">Flipkart SKU profit · {d.label}</h2><p className="text-xs text-ink-3">From Flipkart&rsquo;s Profit and Loss Report and your purchase prices.</p></div>
+        <a className="btn-ghost py-1.5 text-xs" href={`/api/reports/sku-profit.csv?period=${period}`}>Download Excel (CSV)</a>
+      </div>
+      <SkuProfitTable d={d} />
+    </section>
+  );
+}
+
+/** Ops: upload Flipkart's P&L report → parsed in the background → review → publish. */
+function OpsSkuProfit({ orgId, period }: { orgId: string; period: string }) {
+  const [d, setD] = useState<SkuProfitData | null>(null);
+  const [m, setM] = useState<{ ok?: string; err?: string }>({});
+  const [busy, setBusy] = useState(false);
+  const load = useCallback(() => api<SkuProfitData | null>(`/ops/reports/${orgId}/${period}/sku-profit`).then(setD).catch(() => setD(null)), [orgId, period]);
+  useEffect(() => { setM({}); load(); }, [load]);
+  useEffect(() => { if (d && (d.status === 'QUEUED' || d.status === 'RUNNING')) { const t = setTimeout(load, 2000); return () => clearTimeout(t); } }, [d, load]);
+  async function onFile(file: File | undefined) {
+    if (!file) return;
+    setBusy(true); setM({});
+    try {
+      const doc = await uploadFile(file, { organizationId: orgId, kind: 'FLIPKART_PL_REPORT', period, title: `Flipkart P&L report ${period}` });
+      await api(`/ops/reports/${orgId}/${period}/flipkart-pl`, { method: 'POST', body: { documentId: doc.id } });
+      setM({ ok: 'Uploaded. Reading the report…' }); load();
+    } catch (e) { setM({ err: (e as Error).message }); }
+    setBusy(false);
+  }
+  async function publish() {
+    try { await api(`/ops/reports/${orgId}/${period}/sku-profit/publish`, { method: 'POST' }); setM({ ok: 'Published to the client.' }); load(); }
+    catch (e) { setM({ err: (e as Error).message }); }
+  }
+  return (
+    <section className="card space-y-3 p-5" aria-label="Flipkart P&L import">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div><h2 className="font-semibold">Flipkart P&amp;L report → SKU profit</h2><p className="text-xs text-ink-3">Seller Hub → Home → Reports → Report Center → New Report → Payment Reports → Profit and Loss Report (whole month) → upload the .xlsx here.</p></div>
+        <label className="btn-ghost cursor-pointer py-1.5 text-xs">{busy ? 'Uploading…' : 'Upload .xlsx'}<input type="file" accept=".xlsx" className="hidden" data-testid="pl-upload" onChange={(e) => { void onFile(e.target.files?.[0]); e.target.value = ''; }} /></label>
+      </div>
+      <Msg ok={m.ok} err={m.err} />
+      {d && d.status !== 'DONE' && <p className="text-sm">{d.status === 'FAILED' ? <span className="text-red-700">Could not read the file: {d.error}</span> : 'Reading the report…'}</p>}
+      {d?.rows && (
+        <>
+          <SkuProfitTable d={d} />
+          {!!d.missingCost?.length && <p className="text-xs text-amber-800">The manager has asked the client for {d.missingCost.length} purchase price(s); they also appear in the client&rsquo;s Reports → Product costs.</p>}
+          <button className="btn-primary" disabled={d.published} onClick={publish}>{d.published ? 'Published ✓' : 'Publish to client'}</button>
+        </>
+      )}
+    </section>
   );
 }

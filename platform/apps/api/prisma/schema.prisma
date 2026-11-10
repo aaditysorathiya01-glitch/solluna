@@ -1172,3 +1172,23 @@ model PipelineOtp {
   @@index([runId])
   @@index([expiresAt])
 }
+
+/// Flipkart Profit and Loss Report imported for one month (parsed in the background); clients see it once published.
+model PlImport {
+  id             String    @id @default(cuid())
+  organizationId String
+  periodMonth    DateTime
+  marketplace    String    @default("FLIPKART")
+  documentId     String
+  status         String    @default("QUEUED") // QUEUED | RUNNING | DONE | FAILED
+  data           Json?
+  error          String?
+  startedById    String
+  publishedAt    DateTime?
+  publishedById  String?
+  finishedAt     DateTime?
+  createdAt      DateTime  @default(now())
+
+  @@index([organizationId, periodMonth])
+  @@index([status])
+}
