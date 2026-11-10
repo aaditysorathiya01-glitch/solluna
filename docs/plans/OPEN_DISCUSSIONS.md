@@ -67,3 +67,11 @@ Admin panel review is pending. Plan: an internal "CEO" agent for the owner that 
 Model: Claude Haiku 5.5 (owner). No message limits for now; spend per client is in Admin → Manager cost. Still to do: per-client mail IDs (needs DNS catch-all), playbook learning with admin approval, product lookup through Seller Hub.
 One manager agent per client: SOLLUNA skills as its playbook, per-client memory, tenant-scoped tools (client never chosen by the model), human takeover, chat scope limited to SOLLUNA services, never says "AI" but never claims to be human if asked directly. Model: owner wants a basic, low-cost model (no heavy reasoning needed). Self-hosting on Google Colab rejected (sessions disconnect, no 24×7, Colab terms, client KYC data). Product lookup by FSN: Claude web search is NOT proven for raw FSNs (to be tested with a key); the reliable source is Seller Hub's own catalog search through the ops login.
 
+
+## 7. Plan B if the APIs are refused: SOLLUNA browser extension (owner idea, 10 Nov 2026) — PARKED
+Idea: a Chrome extension on the client's own computer, working inside the client's own logged-in Seller Central / Seller Hub session with the client's permission. No passwords or OTPs leave the client, and nothing depends on API approval.
+Assessment (to decide only if the Amazon / Flipkart API applications fail):
+- Scope if built: client-triggered "Sync" that downloads the monthly reports (P&L, MTR, GST, settlement, fee invoices) and uploads them to SOLLUNA. Read-only, no background actions, no price / listing / ads / bank / user-settings pages.
+- Risk: lower than a server-side bot (the client's real browser, IP and session, client present), but automated actions still break marketplace rules, so no bulk or write actions.
+- Limits: desktop Chrome only (many sellers work on mobile), the client's computer must be on, Chrome Web Store review, and it must be fixed whenever the portal pages change.
+- Effort: about 1–2 weeks (Manifest V3, unlisted listing, reuse the existing parsers).
