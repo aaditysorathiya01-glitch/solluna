@@ -403,7 +403,7 @@ test('monthly reporting: staff inputs → client costs & expenses → P&L publis
   await amazon.getByRole('button', { name: 'Save Amazon figures' }).click();
   await st.getByText('Amazon figures saved.').waitFor();
   await st.getByText('Product cost missing for: JR-01, JR-02', { exact: false }).count(); // detail lives in the preview gaps
-  assert.ok(await st.getByText(/data gap\(s\): .*product cost/i).isVisible(), 'preview says product cost is missing');
+  await st.getByText(/data gap\(s\): .*product cost/i).first().waitFor({ timeout: 15000 }); // preview says product cost is missing
 
   // Client provides costs + expenses, confirms.
   const c = S.customer;
@@ -533,6 +533,8 @@ test('client: onboarding checklist, marketplace details (no passwords), product 
   await c.getByText('We never need your password or OTP.').waitFor();
   const opsUser = (await c.getByTestId('ops-user').innerText()).replace(/\s+/g, ' ');
   for (const v of ['Role', 'Admin', 'Name', 'SOLLUNA Operations', 'Email Id', 'ops@solluna.co.in', 'Phone number']) assert.ok(opsUser.includes(v), `ops user shows ${v}: ${opsUser}`);
+  await c.getByRole('heading', { name: 'Connect Amazon with API' }).waitFor();
+  await c.getByRole('heading', { name: 'Connect Flipkart with API' }).waitFor();
   await c.fill('#AMAZON-store', 'Riya Lifestyle'); await c.fill('#AMAZON-sid', 'A2RIYA12345');
   await c.locator('form:has(#AMAZON-store) button:has-text("Save")').click();
   await c.getByText('Amazon details saved', { exact: false }).waitFor();

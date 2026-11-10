@@ -42,6 +42,10 @@ const spapiMock = createSpapiServer((req, res) => {
     spapiCalls.push({ url: req.url, headers: req.headers, body });
     const json = (o) => res.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify(o));
     if (req.url === '/auth/o2/token') return json({ access_token: 'Atza|test-access', token_type: 'bearer', expires_in: 3600 });
+    if (req.url.startsWith('/oauth-service/oauth/token')) {
+      const ok = req.headers.authorization === `Basic ${Buffer.from('fk-app-123:fk-secret-456').toString('base64')}`;
+      return ok ? json({ access_token: 'fk-token', expires_in: 3600 }) : res.writeHead(401, { 'content-type': 'application/json' }).end(JSON.stringify({ error: 'unauthorized', error_description: 'Bad credentials' }));
+    }
     if (req.url === '/sellers/v1/marketplaceParticipations') return json({ payload: [{ marketplace: { id: 'A21TJRUUN4KGV', name: 'Amazon.in', countryCode: 'IN', defaultCurrencyCode: 'INR' }, participation: { isParticipating: true, hasSuspendedListings: false } }] });
     res.writeHead(404).end('{}');
   });
@@ -86,7 +90,7 @@ before(async () => {
     env: {
       ...process.env, DATABASE_URL, PORT: String(port), JWT_SECRET: 'e2e-jwt-secret-e2e-jwt-secret-1234', COOKIE_SECURE: 'false',
       RAZORPAY_KEY_ID: KEY_ID, RAZORPAY_KEY_SECRET: KEY_SECRET, RAZORPAY_WEBHOOK_SECRET: WEBHOOK_SECRET, RAZORPAY_API_BASE: `http://127.0.0.1:${rzpPort}`,
-      CONNECTOR_WEBHOOK_URL: `http://127.0.0.1:${sinkPort}/hook`, CONNECTOR_WEBHOOK_SECRET: CONNECTOR_SECRET, RATE_LIMIT_PER_MIN: '10000', AUTH_RATE_LIMIT_PER_MIN: '40', MAX_UPLOAD_MB: '1', MANAGER_ASSIGN_DELAY_MIN: '0', MANAGER_MESSAGE_GAP_SEC: '0', ANTHROPIC_API_KEY: 'test-key', ANTHROPIC_BASE_URL: `http://127.0.0.1:${claude.port}`, LOOKUP_DAILY_LIMIT: '3', AGENT_REPLY_DELAY_SEC: '0', AGENT_HUMAN_QUIET_MIN: '30', AGENT_HISTORY: '6', AGENT_DIGEST_AFTER: '4', REPORT_CYCLE: 'off', SPAPI_CLIENT_ID: 'amzn1.application-oa2-client.test', SPAPI_CLIENT_SECRET: 'test-secret', SPAPI_TEST_REFRESH_TOKEN: 'Atzr|test-refresh', SPAPI_LWA_URL: `http://127.0.0.1:${spapiPort}/auth/o2/token`, SPAPI_ENDPOINT: `http://127.0.0.1:${spapiPort}`, EVAL_RESULTS_DIR: join(tmpdir(), 'solluna-evals'),
+      CONNECTOR_WEBHOOK_URL: `http://127.0.0.1:${sinkPort}/hook`, CONNECTOR_WEBHOOK_SECRET: CONNECTOR_SECRET, RATE_LIMIT_PER_MIN: '10000', AUTH_RATE_LIMIT_PER_MIN: '40', MAX_UPLOAD_MB: '1', MANAGER_ASSIGN_DELAY_MIN: '0', MANAGER_MESSAGE_GAP_SEC: '0', ANTHROPIC_API_KEY: 'test-key', ANTHROPIC_BASE_URL: `http://127.0.0.1:${claude.port}`, LOOKUP_DAILY_LIMIT: '3', AGENT_REPLY_DELAY_SEC: '0', AGENT_HUMAN_QUIET_MIN: '30', AGENT_HISTORY: '6', AGENT_DIGEST_AFTER: '4', REPORT_CYCLE: 'off', SPAPI_CLIENT_ID: 'amzn1.application-oa2-client.test', SPAPI_CLIENT_SECRET: 'test-secret', SPAPI_TEST_REFRESH_TOKEN: 'Atzr|test-refresh', SPAPI_LWA_URL: `http://127.0.0.1:${spapiPort}/auth/o2/token`, SPAPI_ENDPOINT: `http://127.0.0.1:${spapiPort}`, FLIPKART_TOKEN_URL: `http://127.0.0.1:${spapiPort}/oauth-service/oauth/token`, EVAL_RESULTS_DIR: join(tmpdir(), 'solluna-evals'),
       SUPPLIER_LEGAL_NAME: 'Aaditya Jitendrabhai Sorathia', SUPPLIER_TRADE_NAME: 'Solluna', SUPPLIER_GSTIN: SUPPLIER_GSTIN, SUPPLIER_ADDRESS: 'Survey No 135, Plot No 9, Shreeji Nagar, Meghpar Kumbhardi Sim, Anjar, Kachchh, Gujarat 370110', INVOICE_SAC: '998399',
     },
     stdio: ['ignore', 'pipe', 'pipe'],
@@ -1848,6 +1852,33 @@ test('Amazon SP-API: admin connection test uses LWA + marketplace participations
   const lwa = spapiCalls.find((x) => x.url === '/auth/o2/token');
   assert.match(lwa.body, /grant_type=refresh_token/); assert.match(lwa.body, /client_id=amzn1.application-oa2-client.test/);
   assert.equal(spapiCalls.find((x) => x.url === '/sellers/v1/marketplaceParticipations').headers['x-amz-access-token'], 'Atza|test-access');
+});
+
+test('client API keys on Seller accounts: encrypted, write-only, tested at once (pass → Connected), removable', async () => {
+  const c = await registerCustomer('Asha2'); await pay(c, 'RESELLER');
+  const org = ok(await call('GET', '/auth/me', { token: c })).organization;
+  const bad = await call('PUT', '/marketplaces/AMAZON/api-keys', { token: c, body: { clientId: 'nope', clientSecret: 'x', refreshToken: 'y' } });
+  assert.equal(bad.status, 400);
+  const keys = { clientId: 'amzn1.application-oa2-client.abc123', clientSecret: 'amzn1.oa2-cs.v1.client-secret-value-0001', refreshToken: 'Atzr|client-refresh-token-0001' };
+  const r = ok(await call('PUT', '/marketplaces/AMAZON/api-keys', { token: c, body: keys }));
+  assert.equal(r.ok, true, JSON.stringify(r)); assert.match(r.message, /Amazon API connected — marketplaces: Amazon.in/);
+  const rows = ok(await call('GET', '/marketplaces', { token: c }));
+  const amz = rows.find((m) => m.marketplace === 'AMAZON');
+  assert.equal(amz.status, 'CONNECTED', 'API test is marketplace evidence'); assert.equal(amz.api.connected, true);
+  const dump = JSON.stringify(rows) + JSON.stringify(await db.marketplaceCredential.findMany({ where: { marketplaceAccount: { organizationId: org.id } } }));
+  assert.ok(!dump.includes('client-secret-value-0001') && !dump.includes('client-refresh-token-0001') && !dump.includes('abc123'), 'never returned or stored in plain text');
+  assert.ok(spapiCalls.some((x) => x.url === '/auth/o2/token' && x.body.includes('client_id=amzn1.application-oa2-client.abc123')), "the client's own app keys are used");
+
+  const fkBad = ok(await call('PUT', '/marketplaces/FLIPKART/api-keys', { token: c, body: { clientId: 'fk-app-123', clientSecret: 'wrong-secret' } }));
+  assert.equal(fkBad.ok, false); assert.match(fkBad.message, /Flipkart refused the keys: Bad credentials/);
+  assert.notEqual(ok(await call('GET', '/marketplaces', { token: c })).find((m) => m.marketplace === 'FLIPKART').status, 'CONNECTED');
+  const fk = ok(await call('PUT', '/marketplaces/FLIPKART/api-keys', { token: c, body: { clientId: 'fk-app-123', clientSecret: 'fk-secret-456' } }));
+  assert.equal(fk.ok, true);
+  assert.equal((await call('PUT', '/marketplaces/AMAZON/api-keys', { token: S.admin, body: keys })).status, 403, 'clients only');
+
+  ok(await call('DELETE', '/marketplaces/AMAZON/api-keys', { token: c }));
+  const after = ok(await call('GET', '/marketplaces', { token: c })).find((m) => m.marketplace === 'AMAZON');
+  assert.equal(after.api, null); assert.equal(after.status, 'PENDING', 'connected only through the keys → not verified any more');
 });
 
 test('manager guardrails (unit) and eval runner', async () => {

@@ -91,8 +91,14 @@ export class CatalogService {
 
   async marketplaces(user: AuthUser, orgIdParam?: string) {
     const orgId = await this.orgFor(user, orgIdParam);
-    const rows = await this.db.marketplaceAccount.findMany({ where: { organizationId: orgId }, select: { marketplace: true, hasAccount: true, sellerId: true, storeName: true, contactEmail: true, status: true, verifiedNote: true, lastError: true, lastSyncAt: true, updatedAt: true } });
-    return (['AMAZON', 'FLIPKART'] as const).map((m) => rows.find((r) => r.marketplace === m) ?? { marketplace: m, hasAccount: null, sellerId: null, storeName: null, contactEmail: null, status: 'NOT_PROVIDED', verifiedNote: null, lastError: null, lastSyncAt: null, updatedAt: null });
+    const rows = await this.db.marketplaceAccount.findMany({ where: { organizationId: orgId }, select: { marketplace: true, hasAccount: true, sellerId: true, storeName: true, contactEmail: true, status: true, verifiedNote: true, lastError: true, lastSyncAt: true, updatedAt: true, credential: { select: { kind: true, lastTestAt: true, lastTestOk: true, lastTestMessage: true } } } });
+    // API keys are write-only: only whether they exist and the last test result are returned.
+    return (['AMAZON', 'FLIPKART'] as const).map((m) => {
+      const r = rows.find((x) => x.marketplace === m);
+      if (!r) return { marketplace: m, hasAccount: null, sellerId: null, storeName: null, contactEmail: null, status: 'NOT_PROVIDED', verifiedNote: null, lastError: null, lastSyncAt: null, updatedAt: null, api: null };
+      const { credential, ...rest } = r;
+      return { ...rest, api: credential ? { connected: Boolean(credential.lastTestOk), testedAt: credential.lastTestAt, message: credential.lastTestMessage } : null };
+    });
   }
 
   async saveMarketplace(user: AuthUser, marketplace: string, input: unknown) {

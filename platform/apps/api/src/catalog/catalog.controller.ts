@@ -1,13 +1,19 @@
-import { Body, Controller, Get, Param, Patch, Post, Put } from '@nestjs/common';
+import { Body, Controller, Delete, Get, HttpCode, Param, Patch, Post, Put } from '@nestjs/common';
 import { CurrentUser, CustomerOnly, StaffOnly } from '../auth/decorators';
 import type { AuthUser } from '../auth/auth.types';
 import { CatalogService } from './catalog.service';
 import { config } from '../common/config';
+import { MarketplaceApiService } from '../connectors/marketplace-api.service';
 
 @Controller()
 @CustomerOnly()
 export class CatalogController {
-  constructor(private readonly catalog: CatalogService) {}
+  constructor(private readonly catalog: CatalogService, private readonly apiKeys: MarketplaceApiService) {}
+
+  /** Client's own official API keys: save (tested at once), re-test, remove. Never returned. */
+  @Put('marketplaces/:mp/api-keys') saveApiKeys(@CurrentUser() u: AuthUser, @Param('mp') mp: string, @Body() body: unknown) { return this.apiKeys.save(u, mp, body); }
+  @Post('marketplaces/:mp/api-keys/test') @HttpCode(200) testApiKeys(@CurrentUser() u: AuthUser, @Param('mp') mp: string) { return this.apiKeys.test(u.organizationId!, (mp === 'AMAZON' ? 'AMAZON' : 'FLIPKART')); }
+  @Delete('marketplaces/:mp/api-keys') removeApiKeys(@CurrentUser() u: AuthUser, @Param('mp') mp: string) { return this.apiKeys.remove(u, mp); }
 
   @Get('onboarding') onboarding(@CurrentUser() u: AuthUser) { return this.catalog.onboarding(u); }
   /** The SOLLUNA user the client adds in Seller Central / Seller Hub. */

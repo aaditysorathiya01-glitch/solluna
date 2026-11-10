@@ -394,6 +394,13 @@ model MarketplaceCredential {
   encryptedAccessToken  String?
   accessTokenExpiresAt  DateTime?
   keyVersion            Int                @default(1)
+  /// SPAPI_SELF | FLIPKART_SELF: the seller's own API app keys (write-only, encrypted)
+  kind                  String             @default("OAUTH")
+  encryptedClientId     String?
+  encryptedClientSecret String?
+  lastTestAt            DateTime?
+  lastTestOk            Boolean?
+  lastTestMessage       String?
   updatedAt             DateTime           @updatedAt
 }
 
