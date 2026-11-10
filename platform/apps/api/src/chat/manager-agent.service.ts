@@ -57,6 +57,8 @@ export class ManagerAgentService implements OnModuleInit {
     // OTP / password capture runs first and always (even when automatic replies are off), then the reply is queued.
     chat.clientMessageListeners.push((orgId, body) => this.pipelines.capture(orgId, body));
     chat.clientMessageListeners.push((orgId) => this.enqueue(orgId));
+    // The team finished a step: the manager updates the client without waiting for them to write.
+    pipelines.clientTurnListeners.push((orgId, info) => this.enqueue(orgId, info));
   }
 
   get enabled() { return Boolean(process.env.ANTHROPIC_API_KEY) && process.env.MANAGER_AGENT !== 'off'; }
@@ -66,14 +68,16 @@ export class ManagerAgentService implements OnModuleInit {
   }
 
   /** A client wrote: queue one reply (several quick messages are answered together after a short pause). */
-  async enqueue(orgId: string) {
+  async enqueue(orgId: string, update?: string) {
     if (!this.enabled) return;
     const conv = await this.db.conversation.findUnique({ where: { organizationId: orgId }, select: { agentPaused: true } });
     if (conv?.agentPaused) return;
     const queued = await this.db.agentRun.findFirst({ where: { organizationId: orgId, status: 'QUEUED' } });
     const dueAt = new Date(Date.now() + REPLY_DELAY_SEC * 1000);
-    if (queued) await this.db.agentRun.update({ where: { id: queued.id }, data: { dueAt } });
-    else await this.db.agentRun.create({ data: { organizationId: orgId, dueAt } });
+    const note = update ? `update:${update}`.slice(0, 300) : undefined;
+    // The client's own message wins: a reply already queued for them sees the newest pipeline step in the facts anyway.
+    if (queued) await this.db.agentRun.update({ where: { id: queued.id }, data: update ? {} : { dueAt, note: null } });
+    else await this.db.agentRun.create({ data: { organizationId: orgId, dueAt, note } });
   }
 
   async tick() {
@@ -102,8 +106,10 @@ export class ManagerAgentService implements OnModuleInit {
       if (!assignment?.manager.isActive) return this.finish(runId, 'SKIPPED', 'no manager assigned yet');
       // A person from the team is talking to this client: stay quiet.
       const human = await this.db.message.findFirst({ where: { conversationId: conv.id, senderType: 'STAFF', byAgent: false, isInternalNote: false, createdAt: { gte: new Date(Date.now() - HUMAN_QUIET_MIN * 60_000) } }, orderBy: { createdAt: 'desc' } });
+      const runRow = await this.db.agentRun.findUnique({ where: { id: runId }, select: { note: true } });
+      const update = runRow?.note?.startsWith('update:') ? runRow.note.slice(7) : undefined;
       const lastClient = await this.db.message.findFirst({ where: { conversationId: conv.id, senderType: 'CUSTOMER' }, orderBy: { createdAt: 'desc' } });
-      if (!lastClient) return this.finish(runId, 'SKIPPED', 'no client message');
+      if (!lastClient && !update) return this.finish(runId, 'SKIPPED', 'no client message');
       if (human) return this.finish(runId, 'SKIPPED', 'team member active in chat');
 
       const started = Date.now();
@@ -111,7 +117,7 @@ export class ManagerAgentService implements OnModuleInit {
       const pipelineText = await this.pipelines.contextFor(orgId);
       const context = `${await this.clientFacts(orgId)}${pipelineText ? `\n\n${pipelineText}` : ''}`;
       const secretStep = await this.secretStep(orgId);
-      const { messages, flags } = await this.history(conv.id, context, secretStep.otp, secretStep.otp || secretStep.password);
+      const { messages, flags } = await this.history(conv.id, context, secretStep.otp, secretStep.otp || secretStep.password, update);
       const client = new Anthropic();
       const usage = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, tools: 0 };
       const toolNames: string[] = [];
@@ -201,7 +207,7 @@ export class ManagerAgentService implements OnModuleInit {
   }
 
   /** Recent chat as alternating turns: client = user, SOLLUNA = assistant. Internal notes are never included. */
-  private async history(conversationId: string, facts: string, otpStep = false, secretStep = false): Promise<{ messages: Anthropic.MessageParam[]; flags: InputFlag[] }> {
+  private async history(conversationId: string, facts: string, otpStep = false, secretStep = false, update?: string): Promise<{ messages: Anthropic.MessageParam[]; flags: InputFlag[] }> {
     const rows = (await this.db.message.findMany({
       where: { conversationId, isInternalNote: false }, orderBy: { createdAt: 'desc' }, take: HISTORY,
       select: { body: true, senderType: true, attachments: { where: { deletedAt: null }, select: { fileName: true } } },
@@ -218,6 +224,11 @@ export class ManagerAgentService implements OnModuleInit {
       const text = [checked.text, ...r.attachments.map((a) => `[attached file: ${a.fileName}]`)].filter(Boolean).join('\n');
       const last = turns[turns.length - 1];
       if (last && last.role === role) last.text += `\n\n${text}`; else turns.push({ role, text });
+    }
+    if (update) {
+      // Proactive update: keep the whole chat and add the team's news as the last (system) turn.
+      const note = `(SOLLUNA system update, not from the client) ${update} Message the client now about it, following the current pipeline step.`;
+      if (turns[turns.length - 1]?.role === 'user') turns[turns.length - 1].text += `\n\n${note}`; else turns.push({ role: 'user', text: note });
     }
     // Bubbles of the previous reply can land after the newest client message: the chat must end on the client.
     while (turns.length && turns[turns.length - 1].role === 'assistant') turns.pop();

@@ -227,7 +227,7 @@ export function DocumentsPanel({ orgId, staff = false, myId }: { orgId?: string;
   );
 }
 
-interface PipelineRow { id: string; pipeline: string; title: string; branch: string; status: string; step: { index: number; total: number; title: string; by: 'client' | 'team'; fields: { key: string; label: string; required: boolean; hint: string | null }[] } | null; data: Record<string, string>; secretFields: string[]; otpWaiting: number; forms?: { title: string; ref: string | null; sku: string | null }[] }
+interface PipelineRow { id: string; pipeline: string; title: string; branch: string; status: string; step: { index: number; total: number; title: string; by: 'client' | 'team'; fields: { key: string; label: string; required: boolean; hint: string | null }[]; files?: { kind: string; label: string; hint: string | null; uploaded: boolean }[] } | null; data: Record<string, string>; secretFields: string[]; otpWaiting: number; forms?: { title: string; ref: string | null; sku: string | null }[] }
 
 /** Staff only: the client's seller-account pipelines, with the team's actions (one-time OTP view, secrets, step done). */
 function PipelinesCard({ orgId }: { orgId: string }) {
@@ -262,6 +262,21 @@ function PipelinesCard({ orgId }: { orgId: string }) {
                   : <input className="input w-40 py-1 text-xs" value={inputs[`${r.id}.${f.key}`] ?? ''} placeholder={f.hint ?? ''} onChange={(e) => setInputs({ ...inputs, [`${r.id}.${f.key}`]: e.target.value })} data-testid={`team-${f.key}`} />}
               </label>
             ))}
+            {r.step?.by === 'team' && !!r.step.files?.length && (
+              <div className="w-full space-y-1" title={r.step.files[0].hint ?? ''}>
+                <p className="text-ink-3">{r.step.files[0].hint}</p>
+                {r.step.files.map((f) => (
+                  <label key={f.kind} className="flex items-center gap-2">
+                    <span className={f.uploaded ? 'text-emerald-700' : ''}>{f.uploaded ? '✓' : '○'} {f.label} ({r.data.period})</span>
+                    <input type="file" className="text-xs" data-testid={`upload-${f.kind}`} onChange={async (e) => {
+                      const file = e.target.files?.[0]; if (!file) return;
+                      try { await uploadFile(file, { organizationId: orgId, kind: f.kind, period: r.data.period, title: `${f.label} ${r.data.period}` }); load(); }
+                      catch (err) { setErr((err as Error).message); }
+                    }} />
+                  </label>
+                ))}
+              </div>
+            )}
             {r.step?.by === 'team' && <button className="btn-primary py-1 text-xs" onClick={() => act(`${r.id}/advance`, (x) => x.result, { fields: Object.fromEntries((r.step?.fields ?? []).map((f) => [f.key, inputs[`${r.id}.${f.key}`] ?? ''])) })}>Mark this step done</button>}
           </div>
         </div>

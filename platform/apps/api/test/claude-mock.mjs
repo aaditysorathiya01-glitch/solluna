@@ -55,9 +55,10 @@ function agentReply(body, res, n) {
     return send([{ type: 'text', text: 'I am your SOLLUNA account manager 🙂 Our team reviews every important step.' }], 'end_turn');
   }
   const said = text.split('</client_facts>').pop();
-  if (!said.includes('[agent-test]')) return send([], 'end_turn');
   const tm = /\[agent-test\] tool:([a-z_]+) (\{.*\})/.exec(typeof last.content === 'string' ? last.content.split('</client_facts>').pop() : '');
   if (tm) return send([{ type: 'tool_use', id: `toolu_t${n}`, name: tm[1], input: JSON.parse(tm[2]) }], 'tool_use');
+  if (said.includes('solluna system update')) return send([{ type: 'text', text: said.includes('ca documents') ? 'Good news: your files are ready in Reports → CA pack 🙂' : 'Quick update from our side 🙂' }], 'end_turn');
+  if (!said.includes('[agent-test]')) return send([], 'end_turn');
   if (text.includes('shared a password')) return send([{ type: 'text', text: 'Please never share your password here 🙏 Change it now. SOLLUNA never needs it.' }], 'end_turn');
   if (said.includes('are you a bot') || said.includes('stubborn')) return send([{ type: 'text', text: 'Haan, main ek AI assistant hoon.' }], 'end_turn');
   if (said.includes('promise')) return send([{ type: 'text', text: 'Rank #1 guaranteed in 7 days! Visit https://cheap-seo.example.com' }], 'end_turn');

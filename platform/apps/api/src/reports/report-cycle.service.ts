@@ -2,6 +2,7 @@ import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { PrismaService } from '../common/prisma.service';
 import { OrchestratorService } from '../orchestrator/orchestrator.service';
 import { DispatcherService } from '../connectors/dispatcher.service';
+import { PipelineService } from '../chat/pipeline.service';
 
 /**
  * Monthly report cycle (owner, 7 Nov 2026):
@@ -32,6 +33,7 @@ export class ReportCycleService implements OnModuleInit {
     private readonly db: PrismaService,
     private readonly orchestrator: OrchestratorService,
     private readonly dispatch: DispatcherService,
+    private readonly pipelines: PipelineService,
   ) {}
 
   onModuleInit() {
@@ -59,6 +61,9 @@ export class ReportCycleService implements OnModuleInit {
       await this.orchestrator.systemIntake(organizationId, 'MONTHLY_PERFORMANCE_REPORT', `${name} report — Amazon & Flipkart monthly reports`, {
         period, source: 'monthly-cycle', note: `Use the ${name} reports Amazon and Flipkart published on the ${MARKETPLACE_REPORT_DAY}th; edit where needed, then publish by the ${REPORT_READY_DAY}th.`,
       });
+      // CA files for the month (owner, 10 Nov 2026): one pipeline per marketplace the client sells on.
+      const accounts = await this.db.marketplaceAccount.findMany({ where: { organizationId, hasAccount: true }, select: { marketplace: true } });
+      for (const a of accounts) await this.pipelines.start(organizationId, 'CA_DOCUMENTATION', a.marketplace, null, { period });
       await this.dispatch.emit({ type: 'report.preparing', organizationId, title: `${name} report in progress`, body: `Amazon and Flipkart have published your ${name} reports. Your manager is preparing your report — ready by ${dateLabel(today.y, today.m, REPORT_READY_DAY)}.`, data: { period } });
       opened++;
     }

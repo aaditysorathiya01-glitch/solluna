@@ -7,8 +7,8 @@ import { config } from '../common/config';
 
 export type Marketplace = 'AMAZON' | 'FLIPKART';
 /** form = the client submitted a Listings & Mapping form (checked on the server). */
-export type FieldKind = 'text' | 'secret' | 'otp' | 'confirm' | 'document' | 'form';
-export interface PipeField { key: string; label: string; kind: FieldKind; required?: boolean; pattern?: RegExp; hint?: string; generate?: 'password'; prefill?: string; /** document: files the client must upload during this run */ minDocs?: number; /** form: which Listings & Mapping form counts (default MAPPING) */ formKind?: 'MAPPING' | 'NEW_LISTING' }
+export type FieldKind = 'text' | 'secret' | 'otp' | 'confirm' | 'document' | 'form' | 'teamdocs';
+export interface PipeField { key: string; label: string; kind: FieldKind; required?: boolean; pattern?: RegExp; hint?: string; generate?: 'password'; prefill?: string; /** document: files the client must upload during this run */ minDocs?: number; /** form: which Listings & Mapping form counts (default MAPPING) */ formKind?: 'MAPPING' | 'NEW_LISTING'; /** teamdocs: files the team must upload for the run's period, by document kind */ docKinds?: { kind: string; label: string }[] }
 export interface PipeStep {
   key: string; title: string;
   /** Who completes the step: the client (through the manager) or the SOLLUNA team / bot. */
@@ -233,7 +233,26 @@ const marketplaceSupport = (mp: Marketplace): PipeStep[] => [
     loop: { field: 'outcome', equals: 'NEEDS_INFO', step: 'review', clear: ['outcome', 'marketplace_reply', 'informed'] } },
 ];
 
+/** CA documentation (owner, 10 Nov 2026): every month SOLLUNA downloads the previous month's tax files for the CA pack. */
+const CA_FILES: Record<Marketplace, { kind: string; label: string }[]> = {
+  FLIPKART: [{ kind: 'FLIPKART_GSTR_REPORT', label: 'GSTR return report' }, { kind: 'FLIPKART_SALES_REPORT', label: 'Sales report' }, { kind: 'FLIPKART_TDS', label: 'TDS report' }],
+  AMAZON: [{ kind: 'AMAZON_MTR_B2B', label: 'Merchant Tax Report (MTR) B2B' }, { kind: 'AMAZON_MTR_B2C', label: 'Merchant Tax Report (MTR) B2C' }, { kind: 'AMAZON_FEE_INVOICE', label: 'Seller fee invoices (all of the month)' }],
+};
+const CA_PATH: Record<Marketplace, string> = {
+  FLIPKART: 'Seller Hub → Home → Reports → Report Center → New Report → Tax Reports → request GSTR return report, Sales Report and TDS for the whole previous month (check the dates: 1st to last day) → download when ready → upload each here',
+  AMAZON: 'Seller Central → Home → Finance → Manage taxes → GST Monthly Reports → Merchant Tax Report (MTR) B2B and B2C for the previous month; then Finance reports → Tax document library → Seller Fee Invoices → every invoice of the previous month → upload each here',
+};
+const caDocumentation = (mp: Marketplace): PipeStep[] => [
+  { key: 'download', title: `SOLLUNA downloads the ${mp === 'AMAZON' ? 'Amazon' : 'Flipkart'} tax files for the month`, by: 'team',
+    instructions: 'The team is collecting this month\'s marketplace tax files for the CA pack. If the client asks, tell them the files are being prepared.',
+    fields: [{ key: 'files', label: 'Tax files uploaded', kind: 'teamdocs', required: true, docKinds: CA_FILES[mp], hint: CA_PATH[mp] }] },
+  { key: 'deliver', title: 'Tell the client the CA files are ready', by: 'client',
+    instructions: 'Tell the client the marketplace tax files for the period are ready in Reports → CA pack (and in Documents). Offer to send the pack to their CA: they can use "Request CA pack" in Reports with the CA\'s email. Then save informed = yes.',
+    fields: [{ key: 'informed', label: 'Client informed', kind: 'confirm', required: true }] },
+];
+
 export const PIPELINES: Record<string, Pipeline> = {
+  CA_DOCUMENTATION: { key: 'CA_DOCUMENTATION', title: 'CA documents for the month', branches: { FLIPKART_CA: caDocumentation('FLIPKART'), AMAZON_CA: caDocumentation('AMAZON') } },
   MARKETPLACE_SUPPORT: { key: 'MARKETPLACE_SUPPORT', title: 'Marketplace support ticket', branches: { FLIPKART_SUPPORT: marketplaceSupport('FLIPKART'), AMAZON_SUPPORT: marketplaceSupport('AMAZON') } },
   NEW_LISTING: { key: 'NEW_LISTING', title: 'New listing', branches: { FLIPKART_LISTING: newListing('FLIPKART'), AMAZON_LISTING: newListing('AMAZON') } },
   CATALOG_MAPPING: { key: 'CATALOG_MAPPING', title: 'Catalog mapping', branches: { FLIPKART_MAPPING: catalogMapping('FLIPKART'), AMAZON_MAPPING: catalogMapping('AMAZON') } },
@@ -269,7 +288,7 @@ export function validate(f: PipeField, value: string): string | null {
   return null;
 }
 
-export const PIPELINE_KEYS = ['SELLER_ACCOUNT_REGISTRATION', 'BRAND_APPROVAL', 'CATALOG_MAPPING', 'NEW_LISTING', 'MARKETPLACE_SUPPORT'] as const;
+export const PIPELINE_KEYS = ['SELLER_ACCOUNT_REGISTRATION', 'BRAND_APPROVAL', 'CATALOG_MAPPING', 'NEW_LISTING', 'MARKETPLACE_SUPPORT', 'CA_DOCUMENTATION'] as const;
 
 /** Keywords pasted from keywordtool.io: one per line or comma-separated → de-duplicated, top 100 kept, in order. */
 export function keywordList(raw: string) {

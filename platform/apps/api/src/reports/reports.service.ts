@@ -55,11 +55,14 @@ const endOfMonth = (d: Date) => new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMo
 /** ca-documentation-support §3/§8: documents expected in a monthly CA pack. */
 const CA_REQUIRED: { key: string; label: string; kinds: string[]; marketplace?: Marketplace; category: string }[] = [
   { key: 'AMAZON_SETTLEMENT', label: 'Amazon settlement report', kinds: ['AMAZON_SETTLEMENT'], marketplace: 'AMAZON', category: 'Marketplace settlement' },
-  { key: 'AMAZON_FEE_INVOICE', label: 'Amazon fee / tax invoices', kinds: ['AMAZON_FEE_INVOICE'], marketplace: 'AMAZON', category: 'Marketplace fee / service invoice' },
-  { key: 'AMAZON_TCS', label: 'Amazon TCS statement', kinds: ['AMAZON_TCS'], marketplace: 'AMAZON', category: 'TCS / TDS / tax statement' },
   { key: 'FLIPKART_SETTLEMENT', label: 'Flipkart settlement / payment report', kinds: ['FLIPKART_SETTLEMENT'], marketplace: 'FLIPKART', category: 'Marketplace settlement' },
-  { key: 'FLIPKART_FEE_INVOICE', label: 'Flipkart fee invoices, debit & credit notes', kinds: ['FLIPKART_FEE_INVOICE'], marketplace: 'FLIPKART', category: 'Marketplace fee / service invoice' },
-  { key: 'FLIPKART_TCS', label: 'Flipkart TCS statement', kinds: ['FLIPKART_TCS'], marketplace: 'FLIPKART', category: 'TCS / TDS / tax statement' },
+  // Owner's monthly marketplace files (10 Nov 2026), downloaded by SOLLUNA from the seller panels.
+  { key: 'FLIPKART_GSTR_REPORT', label: 'Flipkart GSTR return report', kinds: ['FLIPKART_GSTR_REPORT'], marketplace: 'FLIPKART', category: 'TCS / TDS / tax statement' },
+  { key: 'FLIPKART_SALES_REPORT', label: 'Flipkart sales report', kinds: ['FLIPKART_SALES_REPORT'], marketplace: 'FLIPKART', category: 'Marketplace sales' },
+  { key: 'FLIPKART_TDS', label: 'Flipkart TDS report', kinds: ['FLIPKART_TDS'], marketplace: 'FLIPKART', category: 'TCS / TDS / tax statement' },
+  { key: 'AMAZON_MTR_B2B', label: 'Amazon Merchant Tax Report (B2B)', kinds: ['AMAZON_MTR_B2B'], marketplace: 'AMAZON', category: 'TCS / TDS / tax statement' },
+  { key: 'AMAZON_MTR_B2C', label: 'Amazon Merchant Tax Report (B2C)', kinds: ['AMAZON_MTR_B2C'], marketplace: 'AMAZON', category: 'TCS / TDS / tax statement' },
+  { key: 'AMAZON_FEE_INVOICE', label: 'Amazon seller fee invoices', kinds: ['AMAZON_FEE_INVOICE'], marketplace: 'AMAZON', category: 'Marketplace fee / service invoice' },
   { key: 'PURCHASE_INVOICE', label: 'Purchase invoices', kinds: ['PURCHASE_INVOICE', 'INVOICE'], category: 'Purchase / inward supply' },
   { key: 'EXPENSE_INVOICE', label: 'Expense invoices', kinds: ['EXPENSE_INVOICE'], category: 'Expense' },
   { key: 'BANK_STATEMENT', label: 'Bank statement / payment credits', kinds: ['BANK_STATEMENT'], category: 'Bank / payment evidence' },

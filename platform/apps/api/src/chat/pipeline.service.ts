@@ -13,7 +13,7 @@ const PASSWORD_CAPTURE = /\b(?:password|passwd|pwd)\b\s*(?:is|:|=|hai|h)?\s*(\S{
 const OTP_CAPTURE = /(?<![\d])(\d{4,8})(?![\d])/;
 
 type Run = { id: string; organizationId: string; pipeline: string; branch: string; stepIndex: number; data: Prisma.JsonValue; secrets: Prisma.JsonValue; status: string; createdAt: Date };
-const branchFor = (pipeline: string, mp: Marketplace, hasAccount: boolean | null) => (pipeline === 'BRAND_APPROVAL' ? `${mp}_BRAND` : pipeline === 'CATALOG_MAPPING' ? `${mp}_MAPPING` : pipeline === 'NEW_LISTING' ? `${mp}_LISTING` : pipeline === 'MARKETPLACE_SUPPORT' ? `${mp}_SUPPORT` : `${mp}_${hasAccount ? 'HAS_ACCOUNT' : 'NEW'}`);
+const branchFor = (pipeline: string, mp: Marketplace, hasAccount: boolean | null) => (pipeline === 'BRAND_APPROVAL' ? `${mp}_BRAND` : pipeline === 'CATALOG_MAPPING' ? `${mp}_MAPPING` : pipeline === 'NEW_LISTING' ? `${mp}_LISTING` : pipeline === 'MARKETPLACE_SUPPORT' ? `${mp}_SUPPORT` : pipeline === 'CA_DOCUMENTATION' ? `${mp}_CA` : `${mp}_${hasAccount ? 'HAS_ACCOUNT' : 'NEW'}`);
 const mpOf = (branch: string) => branch.split('_')[0] as Marketplace;
 /** {{date-180}} → the date 180 days ago (Amazon invoice rule), e.g. 13-May-2026. */
 const withDates = (t: string) => t.replace(/\{\{date-(\d+)\}\}/g, (_, d) => new Date(Date.now() - Number(d) * 86_400_000).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric', timeZone: 'Asia/Kolkata' }).replace(/ /g, '-'));
@@ -25,6 +25,8 @@ const withDates = (t: string) => t.replace(/\{\{date-(\d+)\}\}/g, (_, d) => new 
  */
 @Injectable()
 export class PipelineService {
+  /** Called when the team finishes a step and the next one is with the client (the manager then messages the client). */
+  readonly clientTurnListeners: ((orgId: string, info: string) => Promise<unknown>)[] = [];
   constructor(private readonly db: PrismaService, private readonly audit: AuditService, private readonly dispatch: DispatcherService) {}
 
   active(orgId: string) {
@@ -38,12 +40,12 @@ export class PipelineService {
   }
 
   /** Starts (or returns) a pipeline for one marketplace; known facts are filled in, not asked again. */
-  async start(orgId: string, pipeline: string, marketplace: Marketplace, hasAccount: boolean | null) {
+  async start(orgId: string, pipeline: string, marketplace: Marketplace, hasAccount: boolean | null, initial: Record<string, string> = {}) {
     const branch = branchFor(pipeline, marketplace, hasAccount);
     if (!stepsOf(pipeline, branch).length) throw new BadRequestException(`The ${pipeline} pipeline for ${marketplace} is not set up yet. Escalate to the team.`);
     const existing = await this.db.pipelineRun.findFirst({ where: { organizationId: orgId, pipeline, branch: { startsWith: `${marketplace}_` }, status: 'ACTIVE' } });
     if (existing) {
-      if (existing.branch === branch) return existing;
+      if (existing.branch === branch && (!initial.period || (existing.data as Record<string, string>).period === initial.period)) return existing;
       await this.db.pipelineRun.update({ where: { id: existing.id }, data: { status: 'CANCELLED', secrets: Prisma.DbNull } });
     }
     const org = await this.db.organization.findUniqueOrThrow({ where: { id: orgId }, select: { legalName: true, brandName: true, gstin: true, address: true, pincode: true, contactPhone: true } });
@@ -53,7 +55,12 @@ export class PipelineService {
       // Prefilled values are normalised and checked like client answers; a value that fails is simply asked again.
       if (src && org[src] && !validate(f, String(org[src]))) prefill[f.key] = normalise(f, String(org[src]));
     }
-    const run = await this.db.pipelineRun.create({ data: { organizationId: orgId, pipeline, branch, data: prefill } });
+    // Monthly pipelines work on one accounting month (default: last month, India time).
+    if (pipeline === 'CA_DOCUMENTATION' && !initial.period) {
+      const d = new Date(Date.now() + 330 * 60_000); d.setUTCDate(1); d.setUTCMonth(d.getUTCMonth() - 1);
+      initial.period = d.toISOString().slice(0, 7);
+    }
+    const run = await this.db.pipelineRun.create({ data: { organizationId: orgId, pipeline, branch, data: { ...prefill, ...initial } } });
     await this.audit.log({ action: 'pipeline.start', entity: 'PipelineRun', entityId: run.id, organizationId: orgId, after: { branch } });
     return run;
   }
@@ -193,11 +200,15 @@ export class PipelineService {
     // Mapping runs: the forms the client submitted since the run started (what the team maps).
     const forms = await this.db.catalogForm.findMany({ where: { organizationId: orgId }, orderBy: { createdAt: 'desc' }, take: 50, select: { marketplace: true, kind: true, title: true, data: true, createdAt: true } });
     const otps = await this.db.pipelineOtp.groupBy({ by: ['runId'], where: { organizationId: orgId, expiresAt: { gt: new Date() } }, _count: { _all: true } });
+    const periods = [...new Set(runs.map((r) => (r.data as Record<string, string>).period).filter(Boolean))];
+    const periodDocs = periods.length ? await this.db.document.findMany({ where: { organizationId: orgId, deletedAt: null, periodMonth: { in: periods.map((p) => new Date(`${p}-01T00:00:00Z`)) } }, select: { kind: true, periodMonth: true } }) : [];
+    const uploaded = (period: string | undefined, kind: string) => Boolean(period) && periodDocs.some((d) => d.kind === kind && d.periodMonth?.toISOString().slice(0, 7) === period);
     return runs.map((r) => {
       const steps = stepsOf(r.pipeline, r.branch);
       const st = steps[r.stepIndex];
       return { id: r.id, pipeline: r.pipeline, title: PIPELINES[r.pipeline]?.title ?? r.pipeline, branch: r.branch, status: r.status,
-        step: st ? { index: r.stepIndex, total: steps.length, title: st.title, by: st.by, fields: st.by === 'team' ? st.fields.filter((f) => f.kind === 'text').map((f) => ({ key: f.key, label: f.label, required: Boolean(f.required), hint: f.hint ?? null })) : [] } : null,
+        step: st ? { index: r.stepIndex, total: steps.length, title: st.title, by: st.by, fields: st.by === 'team' ? st.fields.filter((f) => f.kind === 'text').map((f) => ({ key: f.key, label: f.label, required: Boolean(f.required), hint: f.hint ?? null })) : [],
+          files: st.by === 'team' ? st.fields.filter((f) => f.kind === 'teamdocs').flatMap((f) => (f.docKinds ?? []).map((k) => ({ ...k, hint: f.hint ?? null, uploaded: uploaded((r.data as Record<string, string>).period, k.kind) }))) : [] } : null,
         forms: ['CATALOG_MAPPING', 'NEW_LISTING'].includes(r.pipeline) ? forms.filter((f) => f.marketplace === mpOf(r.branch) && f.kind === (r.pipeline === 'NEW_LISTING' ? 'NEW_LISTING' : 'MAPPING') && f.createdAt >= r.createdAt).map((f) => ({ title: f.title, ref: (f.data as Record<string, string>).productRef ?? (f.data as Record<string, string>).productLink ?? (f.data as Record<string, string>).modelName ?? (f.data as Record<string, string>).modelNumber ?? null, sku: (f.data as Record<string, string>).sellerSku })) : [],
         data: r.data, secretFields: Object.keys((r.secrets as object) ?? {}), otpWaiting: otps.find((o) => o.runId === r.id)?._count._all ?? 0, createdAt: r.createdAt };
     });
@@ -225,12 +236,26 @@ export class PipelineService {
     }
     // Amazon new listing: the keywords also become search terms that fit Amazon's limit.
     if (run.pipeline === 'NEW_LISTING' && mpOf(run.branch) === 'AMAZON' && data.keywords) data.search_terms = amazonSearchTerms(data.keywords.split(', '));
+    // Team files for the run's month (e.g. the CA tax files): every required kind must be uploaded for that period.
+    for (const f of step.fields.filter((x) => x.kind === 'teamdocs')) {
+      const period = data.period;
+      const docs = period ? await this.db.document.findMany({ where: { organizationId: orgId, deletedAt: null, periodMonth: new Date(`${period}-01T00:00:00Z`), kind: { in: (f.docKinds ?? []).map((k) => k.kind) } }, select: { kind: true } }) : [];
+      const missing = (f.docKinds ?? []).filter((k) => !docs.some((d) => d.kind === k.kind)).map((k) => k.label);
+      if (missing.length) throw new BadRequestException(`Upload for ${period}: ${missing.join(', ')}`);
+      data[f.key] = 'yes';
+    }
     run = await this.db.pipelineRun.update({ where: { id: run.id }, data: { data } });
     if (step.key === 'verify_access') {
       const acct = await this.db.marketplaceAccount.findUnique({ where: { organizationId_marketplace: { organizationId: orgId, marketplace: mpOf(run.branch) } } });
       if (acct?.status !== 'CONNECTED') throw new BadRequestException('Mark the marketplace account Connected (with evidence) first, then finish this step.');
     }
-    return { result: await this.advanceRun(run, user) };
+    const result = await this.advanceRun(run, user);
+    const after = await this.db.pipelineRun.findUniqueOrThrow({ where: { id: run.id } });
+    const nextStep = this.step(after);
+    if (after.status === 'ACTIVE' && nextStep?.by === 'client') {
+      for (const l of this.clientTurnListeners) await l(orgId, `${PIPELINES[after.pipeline].title} (${mpOf(after.branch)}): the team finished "${step.title}". Now: ${nextStep.title}.`).catch(() => undefined);
+    }
+    return { result };
   }
 
   /** One-time OTP read for the team member filling the page; the OTP is deleted as soon as it is shown. */

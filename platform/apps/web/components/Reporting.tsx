@@ -155,6 +155,8 @@ function Expenses({ period }: { period: string }) {
 }
 
 const CA_KINDS: [string, string][] = [
+  ['FLIPKART_GSTR_REPORT', 'Flipkart GSTR return report'], ['FLIPKART_SALES_REPORT', 'Flipkart sales report'], ['FLIPKART_TDS', 'Flipkart TDS report'],
+  ['AMAZON_MTR_B2B', 'Amazon MTR (B2B)'], ['AMAZON_MTR_B2C', 'Amazon MTR (B2C)'],
   ['AMAZON_SETTLEMENT', 'Amazon settlement report'], ['AMAZON_FEE_INVOICE', 'Amazon fee / tax invoice'], ['AMAZON_TCS', 'Amazon TCS statement'],
   ['FLIPKART_SETTLEMENT', 'Flipkart settlement report'], ['FLIPKART_FEE_INVOICE', 'Flipkart fee invoice / note'], ['FLIPKART_TCS', 'Flipkart TCS statement'],
   ['PURCHASE_INVOICE', 'Purchase invoice'], ['EXPENSE_INVOICE', 'Expense invoice'], ['BANK_STATEMENT', 'Bank statement'],

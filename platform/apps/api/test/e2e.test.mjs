@@ -832,7 +832,7 @@ test('CA pack: index from the client\'s documents, missing tracker, CA review fl
 
   pack = ok(await call('GET', '/ca-pack?period=2026-10', { token: S.b }));
   const rows = pack.index.filter((i) => i.category !== 'Reconciliation schedules');
-  assert.deepEqual(rows.map((i) => [i.source, i.status]), [['Amazon settlement report', 'Received'], ['Amazon fee / tax invoices', 'CA review required']]);
+  assert.deepEqual(rows.map((i) => [i.source, i.status]), [['Amazon settlement report', 'Received'], ['Amazon seller fee invoices', 'CA review required']]);
   assert.equal(pack.caQuestions.length, 1);
   assert.ok(!pack.missing.some((m) => m.required === 'Amazon settlement report'));
   assert.ok(pack.missing.some((m) => m.required === 'Bank statement / payment credits'));
@@ -1492,7 +1492,7 @@ test('manager pipeline: seller-account registration step by step; OTP/password c
   const org = ok(await call('GET', '/auth/me', { token: c })).organization;
   const waitFor = async (fn, what) => { for (let i = 0; i < 60; i++) { const v = await fn(); if (v) return v; await new Promise((x) => setTimeout(x, 250)); } throw new Error(`timed out: ${what}`); };
   const say = async (body) => ok(await call('POST', '/chat/messages', { token: c, body: { body } }));
-  const doneRuns = () => db.agentRun.count({ where: { organizationId: org.id, status: { in: ['DONE', 'SKIPPED', 'FAILED'] }, OR: [{ note: null }, { note: { not: 'chat summary' } }] } });
+  const doneRuns = () => db.agentRun.count({ where: { organizationId: org.id, status: { in: ['DONE', 'SKIPPED', 'FAILED'] }, OR: [{ note: null }, { AND: [{ note: { not: 'chat summary' } }, { NOT: { note: { startsWith: 'update:' } } }] }] } });
   // One command at a time: wait until the manager finished the previous one (quick messages are answered together).
   const tool = async (name, input) => { const before = await doneRuns(); await say(`[agent-test] tool:${name} ${JSON.stringify(input)}`); await waitFor(async () => (await doneRuns()) > before, `${name} processed`); };
   const lastResult = async () => { const r = await db.agentRun.findFirst({ where: { organizationId: org.id, note: null, status: 'DONE' }, orderBy: { createdAt: 'desc' } }); return r; };
@@ -1576,7 +1576,7 @@ test('manager pipeline: Flipkart brand approval — brand + FSN + document type,
   const c = await registerCustomer('Kiran'); await pay(c, 'RESELLER');
   const org = ok(await call('GET', '/auth/me', { token: c })).organization;
   const waitFor = async (fn, what) => { for (let i = 0; i < 60; i++) { const v = await fn(); if (v) return v; await new Promise((x) => setTimeout(x, 250)); } throw new Error(`timed out: ${what}`); };
-  const doneRuns = () => db.agentRun.count({ where: { organizationId: org.id, status: { in: ['DONE', 'SKIPPED', 'FAILED'] }, OR: [{ note: null }, { note: { not: 'chat summary' } }] } });
+  const doneRuns = () => db.agentRun.count({ where: { organizationId: org.id, status: { in: ['DONE', 'SKIPPED', 'FAILED'] }, OR: [{ note: null }, { AND: [{ note: { not: 'chat summary' } }, { NOT: { note: { startsWith: 'update:' } } }] }] } });
   const tool = async (name, input) => { const before = await doneRuns(); ok(await call('POST', '/chat/messages', { token: c, body: { body: `[agent-test] tool:${name} ${JSON.stringify({ pipeline: 'BRAND_APPROVAL', marketplace: 'FLIPKART', ...input })}` } })); await waitFor(async () => (await doneRuns()) > before, `${name}`); };
   const lastToolResult = () => JSON.stringify(claude.calls.filter((x) => JSON.stringify(x.body).includes(org.legalName)).at(-1).body.messages.at(-1));
   const run = async () => (ok(await call('GET', `/ops/chats/${org.id}/pipelines`, { token: S.admin }))).find((r) => r.pipeline === 'BRAND_APPROVAL');
@@ -1635,7 +1635,7 @@ test('manager pipeline: catalog mapping — client fills the Mapping form (serve
   const c = await registerCustomer('Neel'); await pay(c, 'RESELLER');
   const org = ok(await call('GET', '/auth/me', { token: c })).organization;
   const waitFor = async (fn, what) => { for (let i = 0; i < 60; i++) { const v = await fn(); if (v) return v; await new Promise((x) => setTimeout(x, 250)); } throw new Error(`timed out: ${what}`); };
-  const doneRuns = () => db.agentRun.count({ where: { organizationId: org.id, status: { in: ['DONE', 'SKIPPED', 'FAILED'] }, OR: [{ note: null }, { note: { not: 'chat summary' } }] } });
+  const doneRuns = () => db.agentRun.count({ where: { organizationId: org.id, status: { in: ['DONE', 'SKIPPED', 'FAILED'] }, OR: [{ note: null }, { AND: [{ note: { not: 'chat summary' } }, { NOT: { note: { startsWith: 'update:' } } }] }] } });
   const tool = async (name, input) => { const before = await doneRuns(); ok(await call('POST', '/chat/messages', { token: c, body: { body: `[agent-test] tool:${name} ${JSON.stringify({ pipeline: 'CATALOG_MAPPING', marketplace: 'FLIPKART', ...input })}` } })); await waitFor(async () => (await doneRuns()) > before, name); };
   const lastToolResult = () => JSON.stringify(claude.calls.filter((x) => JSON.stringify(x.body).includes(org.legalName)).at(-1).body.messages.at(-1));
   const run = async () => (ok(await call('GET', `/ops/chats/${org.id}/pipelines`, { token: S.admin }))).find((r) => r.pipeline === 'CATALOG_MAPPING');
@@ -1666,7 +1666,7 @@ test('manager pipeline: new listing — form server-checked, team pastes top-100
   const c = await registerCustomer('Isha'); await pay(c, 'RESELLER');
   const org = ok(await call('GET', '/auth/me', { token: c })).organization;
   const waitFor = async (fn, what) => { for (let i = 0; i < 60; i++) { const v = await fn(); if (v) return v; await new Promise((x) => setTimeout(x, 250)); } throw new Error(`timed out: ${what}`); };
-  const doneRuns = () => db.agentRun.count({ where: { organizationId: org.id, status: { in: ['DONE', 'SKIPPED', 'FAILED'] }, OR: [{ note: null }, { note: { not: 'chat summary' } }] } });
+  const doneRuns = () => db.agentRun.count({ where: { organizationId: org.id, status: { in: ['DONE', 'SKIPPED', 'FAILED'] }, OR: [{ note: null }, { AND: [{ note: { not: 'chat summary' } }, { NOT: { note: { startsWith: 'update:' } } }] }] } });
   const tool = async (name, input) => { const before = await doneRuns(); ok(await call('POST', '/chat/messages', { token: c, body: { body: `[agent-test] tool:${name} ${JSON.stringify({ pipeline: 'NEW_LISTING', marketplace: 'AMAZON', ...input })}` } })); await waitFor(async () => (await doneRuns()) > before, name); };
   const lastToolResult = () => JSON.stringify(claude.calls.filter((x) => JSON.stringify(x.body).includes(org.legalName)).at(-1).body.messages.at(-1));
   const run = async () => (ok(await call('GET', `/ops/chats/${org.id}/pipelines`, { token: S.admin }))).find((r) => r.pipeline === 'NEW_LISTING');
@@ -1702,7 +1702,7 @@ test('manager pipeline: marketplace support — issue, team raises ticket, NEEDS
   const c = await registerCustomer('Om'); await pay(c, 'RESELLER');
   const org = ok(await call('GET', '/auth/me', { token: c })).organization;
   const waitFor = async (fn, what) => { for (let i = 0; i < 60; i++) { const v = await fn(); if (v) return v; await new Promise((x) => setTimeout(x, 250)); } throw new Error(`timed out: ${what}`); };
-  const doneRuns = () => db.agentRun.count({ where: { organizationId: org.id, status: { in: ['DONE', 'SKIPPED', 'FAILED'] }, OR: [{ note: null }, { note: { not: 'chat summary' } }] } });
+  const doneRuns = () => db.agentRun.count({ where: { organizationId: org.id, status: { in: ['DONE', 'SKIPPED', 'FAILED'] }, OR: [{ note: null }, { AND: [{ note: { not: 'chat summary' } }, { NOT: { note: { startsWith: 'update:' } } }] }] } });
   const tool = async (name, input) => { const before = await doneRuns(); ok(await call('POST', '/chat/messages', { token: c, body: { body: `[agent-test] tool:${name} ${JSON.stringify({ pipeline: 'MARKETPLACE_SUPPORT', marketplace: 'FLIPKART', ...input })}` } })); await waitFor(async () => (await doneRuns()) > before, name); };
   const lastToolResult = () => JSON.stringify(claude.calls.filter((x) => JSON.stringify(x.body).includes(org.legalName)).at(-1).body.messages.at(-1));
   const run = async () => (ok(await call('GET', `/ops/chats/${org.id}/pipelines`, { token: S.admin }))).find((r) => r.pipeline === 'MARKETPLACE_SUPPORT');
@@ -1732,6 +1732,37 @@ test('manager pipeline: marketplace support — issue, team raises ticket, NEEDS
   await tool('pipeline_save', { field: 'informed', value: 'yes' });
   await tool('pipeline_next', {});
   assert.equal((await run()).status, 'DONE');
+});
+
+test('manager pipeline: CA documents — opened on the 5th per marketplace, team uploads the owner\'s tax files, manager tells the client unprompted, CA pack lists them', async () => {
+  const c = await registerCustomer('Ravi'); await pay(c, 'RESELLER');
+  const org = ok(await call('GET', '/auth/me', { token: c })).organization;
+  await db.subscription.updateMany({ where: { organizationId: org.id, status: 'ACTIVE' }, data: { currentPeriodStart: new Date('2026-09-10T00:00:00Z') } });
+  for (const marketplace of ['FLIPKART', 'AMAZON']) await db.marketplaceAccount.create({ data: { organizationId: org.id, marketplace, hasAccount: true, storeName: 'Ravi Store', status: 'CONNECTED' } });
+  const waitFor = async (fn, what) => { for (let i = 0; i < 60; i++) { const v = await fn(); if (v) return v; await new Promise((x) => setTimeout(x, 250)); } throw new Error(`timed out: ${what}`); };
+  const ops = await staff('OPERATIONS_MANAGER', S.admin);
+  ok(await call('POST', '/ops/reports/cycle/run', { token: ops.token, body: { date: '2026-10-05' } }));
+  const runs = async () => (ok(await call('GET', `/ops/chats/${org.id}/pipelines`, { token: S.admin }))).filter((r) => r.pipeline === 'CA_DOCUMENTATION');
+  let rs = await runs();
+  assert.deepEqual(rs.map((r) => r.branch).sort(), ['AMAZON_CA', 'FLIPKART_CA']); assert.ok(rs.every((r) => r.data.period === '2026-09'));
+  const fk = rs.find((r) => r.branch === 'FLIPKART_CA');
+  assert.deepEqual(fk.step.files.map((f) => f.label), ['GSTR return report', 'Sales report', 'TDS report']);
+  assert.match(fk.step.files[0].hint, /Report Center → New Report → Tax Reports/);
+  assert.deepEqual(rs.find((r) => r.branch === 'AMAZON_CA').step.files.map((f) => f.kind), ['AMAZON_MTR_B2B', 'AMAZON_MTR_B2C', 'AMAZON_FEE_INVOICE']);
+  const adv = await call('POST', `/ops/chats/${org.id}/pipelines/${fk.id}/advance`, { token: S.admin, body: {} });
+  assert.equal(adv.status, 400); assert.match(adv.body.message, /Upload for 2026-09: GSTR return report, Sales report, TDS report/);
+  for (const kind of ['FLIPKART_GSTR_REPORT', 'FLIPKART_SALES_REPORT', 'FLIPKART_TDS']) assert.equal((await upload(S.admin, `${kind}.pdf`, PDF, { organizationId: org.id, kind, period: '2026-09' })).status, 201);
+  assert.ok((await runs()).find((r) => r.id === fk.id).step.files.every((f) => f.uploaded), 'uploaded files are ticked');
+  const before = (ok(await call('GET', '/chat', { token: c })).messages).length;
+  ok(await call('POST', `/ops/chats/${org.id}/pipelines/${fk.id}/advance`, { token: S.admin, body: {} }));
+  assert.equal((await runs()).find((r) => r.id === fk.id).step.title, 'Tell the client the CA files are ready');
+  const msgs = await waitFor(async () => { const m = ok(await call('GET', '/chat', { token: c })).messages; return m.length > before ? m : null; }, 'proactive message');
+  assert.match(msgs.at(-1).body, /files are ready in Reports → CA pack/, 'manager messages the client without being asked');
+  const pack = ok(await call('GET', '/ca-pack?period=2026-09', { token: c }));
+  assert.ok(['Flipkart GSTR return report', 'Flipkart sales report', 'Flipkart TDS report'].every((l) => pack.index.some((i) => i.source === l)), JSON.stringify(pack.index));
+  assert.ok(pack.missing.some((m) => m.required === 'Amazon Merchant Tax Report (B2B)'), 'Amazon files still missing');
+  ok(await call('POST', '/ops/reports/cycle/run', { token: ops.token, body: { date: '2026-10-06' } }));
+  assert.equal((await runs()).length, 2, 'once per month');
 });
 
 test('manager guardrails (unit) and eval runner', async () => {
