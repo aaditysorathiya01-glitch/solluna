@@ -8,6 +8,7 @@ import { ChatService, type ChatEvent } from './chat.service';
 import { ManagerAgentService } from './manager-agent.service';
 import { AgentEvalsService } from './agent-evals.service';
 import { PipelineService } from './pipeline.service';
+import { SpApiService } from '../connectors/spapi.service';
 
 const HEARTBEAT_MS = 25_000;
 const heartbeat = () => interval(HEARTBEAT_MS).pipe(map((): MessageEvent => ({ type: 'ping', data: {} })));
@@ -78,7 +79,10 @@ export class OpsChatController {
 @Controller('admin')
 @StaffOnly('SUPER_ADMIN', 'OPERATIONS_MANAGER')
 export class AdminClientsController {
-  constructor(private readonly chat: ChatService, private readonly agent: ManagerAgentService, private readonly evals: AgentEvalsService) {}
+  constructor(private readonly chat: ChatService, private readonly agent: ManagerAgentService, private readonly evals: AgentEvalsService, private readonly spapi: SpApiService) {}
+
+  /** Amazon SP-API connection check with the test seller (super admin). */
+  @Post('amazon/test') @HttpCode(200) @StaffOnly('SUPER_ADMIN') amazonTest() { return this.spapi.testConnection(); }
 
   /** Manager quality check (eval set) on the server's own API key. Super admin only. */
   @Post('agent-evals') @StaffOnly('SUPER_ADMIN') startEvals(@CurrentUser() u: AuthUser) { return this.evals.start(u); }

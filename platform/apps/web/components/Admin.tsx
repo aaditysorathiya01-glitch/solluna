@@ -58,6 +58,7 @@ function OverviewPanel() {
         <Kpi label="Active staff" value={x.staff} />
       </div>
       <button className="btn-ghost py-1.5 text-xs" onClick={o.reload}>Refresh</button>
+      <AmazonCheck />
     </div>
   );
 }
@@ -424,6 +425,22 @@ function QualityCheck() {
           {!open.results.some((x) => !x.pass) && <p className="text-xs">All checks passed.</p>}
         </div>
       )}
+    </section>
+  );
+}
+
+/** Amazon SP-API: checks the server's keys against the test seller account. */
+function AmazonCheck() {
+  const [r, setR] = useState<{ ok: boolean; message?: string; amazonIn?: boolean; marketplaces?: { id: string; name: string; participating: boolean }[] } | null>(null);
+  const [busy, setBusy] = useState(false);
+  async function run() { setBusy(true); try { setR(await api('/admin/amazon/test', { method: 'POST' })); } catch (e) { setR({ ok: false, message: errText(e) }); } setBusy(false); }
+  return (
+    <section className="card space-y-2 p-5" aria-label="Amazon SP-API">
+      <div className="flex items-center justify-between gap-2"><div><h2 className="font-semibold">Amazon SP-API</h2><p className="text-xs text-ink-3">Official Amazon connection (keys are kept in the server environment).</p></div>
+        <button className="btn-primary py-1.5 text-xs" disabled={busy} onClick={run}>{busy ? 'Checking…' : 'Test Amazon connection'}</button></div>
+      {r && (r.ok
+        ? <p className="text-sm text-emerald-800" data-testid="amazon-ok">Connected ✓ {r.amazonIn ? 'Amazon.in is active.' : 'Amazon.in not active on this account.'} Marketplaces: {r.marketplaces?.map((m) => m.name).join(', ')}</p>
+        : <p className="text-sm text-red-700" role="alert">{r.message}</p>)}
     </section>
   );
 }
