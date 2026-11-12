@@ -36,7 +36,7 @@ export function MarketplaceAccounts({ onFlash }: { onFlash: (m: FlashMsg) => voi
         <ol className="list-decimal space-y-1 pl-5 text-sm text-ink-2">
           <li><strong>Flipkart Seller Hub:</strong> Profile → Manage Users → Add a new user.</li>
           <li><strong>Amazon Seller Central:</strong> Settings → User Permissions → Add new user.</li>
-          <li>Fill in exactly these details and send the invite. Then add your store details below.</li>
+          <li>Fill in exactly these details and send the invite. Your manager collects your store details in chat.</li>
         </ol>
         {ops.data && (
           <dl className="grid gap-2 rounded-xl bg-ivory p-4 text-sm sm:grid-cols-2" data-testid="ops-user">
@@ -49,54 +49,28 @@ export function MarketplaceAccounts({ onFlash }: { onFlash: (m: FlashMsg) => voi
         <p className="text-xs text-ink-3">SOLLUNA never changes your bank details, payment settings or users. Price, ads budget, offers and major listing changes happen only after your approval. Status turns <em>Connected</em> only after we confirm access in Seller Central / Seller Hub.</p>
       </section>
       <div className="grid gap-4 md:grid-cols-2">
-        {rows.data?.map((m) => <MarketplaceCard key={m.marketplace} m={m} onSaved={(msg) => { onFlash(msg); rows.reload(); }} />)}
+        {rows.data?.map((m) => <MarketplaceCard key={m.marketplace} m={m} />)}
       </div>
       {rows.error && <Empty>{rows.error}</Empty>}
     </div>
   );
 }
 
-function MarketplaceCard({ m, onSaved }: { m: MarketplaceRow; onSaved: (msg: FlashMsg) => void }) {
-  const [editing, setEditing] = useState(m.status === 'NOT_PROVIDED');
-  const [has, setHas] = useState(m.hasAccount ?? true);
-  const [error, setError] = useState<string | null>(null);
-  async function save(e: React.FormEvent<HTMLFormElement>) {
-    e.preventDefault(); setError(null);
-    const b = formBody(e.currentTarget);
-    try {
-      await api(`/marketplaces/${m.marketplace}`, { method: 'PUT', body: has ? { hasAccount: true, storeName: b.storeName, sellerId: b.sellerId, contactEmail: b.contactEmail ?? '' } : { hasAccount: false } });
-      setEditing(false); onSaved({ kind: 'ok', text: `${mpName(m.marketplace)} details saved. Your manager will confirm access.` });
-    } catch (err) { setError(errText(err)); }
-  }
+/** Read-only: the manager adds and updates seller-account details from chat (owner, 12 Nov 2026). */
+function MarketplaceCard({ m }: { m: MarketplaceRow }) {
   return (
     <div className="card p-6">
       <div className="flex items-center justify-between"><h2 className="font-display text-xl">{mpName(m.marketplace)}</h2><Status s={m.status} label={m.status === 'NOT_PROVIDED' ? 'Not added' : m.status === 'PENDING' ? 'Awaiting verification' : undefined} /></div>
-      {!editing ? (
-        <div className="mt-3 space-y-1 text-sm">
-          {m.hasAccount === false ? <p>No seller account yet — ask for <strong>Seller Account Registration</strong> in Services.</p> : (<>
-            <p><span className="text-ink-3">Store:</span> {m.storeName ?? '—'}</p>
-            <p><span className="text-ink-3">Seller ID:</span> {m.sellerId ?? '—'}</p>
-            {m.contactEmail && <p><span className="text-ink-3">Seller login email:</span> {m.contactEmail}</p>}
-          </>)}
-          {m.status === 'CONNECTED' && m.verifiedNote && <p className="text-xs text-emerald-800">Verified: {m.verifiedNote}</p>}
-          {m.lastError && m.status === 'ERROR' && <p className="text-xs text-red-800">{m.lastError}</p>}
-          <button className="btn-ghost mt-3 py-1.5 text-xs" onClick={() => setEditing(true)}>Edit</button>
-        </div>
-      ) : (
-        <form className="mt-4 space-y-3" onSubmit={save}>
-          <div className="flex gap-4 text-sm">
-            <label className="flex items-center gap-2"><input type="radio" checked={has} onChange={() => setHas(true)} /> I have a seller account</label>
-            <label className="flex items-center gap-2"><input type="radio" checked={!has} onChange={() => setHas(false)} /> Not yet</label>
-          </div>
-          {has && (<>
-            <div><label className="label" htmlFor={`${m.marketplace}-store`}>Store / display name</label><input id={`${m.marketplace}-store`} name="storeName" className="input" defaultValue={m.storeName ?? ''} /></div>
-            <div><label className="label" htmlFor={`${m.marketplace}-sid`}>Seller ID / Merchant token</label><input id={`${m.marketplace}-sid`} name="sellerId" className="input" defaultValue={m.sellerId ?? ''} /></div>
-            <div><label className="label" htmlFor={`${m.marketplace}-email`}>Seller login email (optional)</label><input id={`${m.marketplace}-email`} name="contactEmail" type="email" className="input" defaultValue={m.contactEmail ?? ''} /></div>
-          </>)}
-          {error && <p role="alert" className="rounded-xl bg-red-50 px-3 py-2 text-sm text-red-800">{error}</p>}
-          <div className="flex gap-2"><button className="btn-primary">Save</button>{m.status !== 'NOT_PROVIDED' && <button type="button" className="btn-ghost" onClick={() => setEditing(false)}>Cancel</button>}</div>
-        </form>
-      )}
+      <div className="mt-3 space-y-1 text-sm">
+        {m.status === 'NOT_PROVIDED' ? <p className="text-ink-3">Your manager will add your {mpName(m.marketplace)} details from chat.</p>
+          : m.hasAccount === false ? <p>No seller account yet. Your manager will guide you through <strong>Seller Account Registration</strong> in chat.</p> : (<>
+          <p><span className="text-ink-3">Store:</span> {m.storeName ?? '—'}</p>
+          <p><span className="text-ink-3">Seller ID:</span> {m.sellerId ?? '—'}</p>
+          {m.contactEmail && <p><span className="text-ink-3">Seller login email:</span> {m.contactEmail}</p>}
+        </>)}
+        {m.status === 'CONNECTED' && m.verifiedNote && <p className="text-xs text-emerald-800">Verified: {m.verifiedNote}</p>}
+        {m.lastError && m.status === 'ERROR' && <p className="text-xs text-red-800">{m.lastError}</p>}
+      </div>
     </div>
   );
 }

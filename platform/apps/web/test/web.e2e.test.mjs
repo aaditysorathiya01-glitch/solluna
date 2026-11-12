@@ -534,10 +534,14 @@ test('client: onboarding checklist, marketplace details (no passwords), product 
   const opsUser = (await c.getByTestId('ops-user').innerText()).replace(/\s+/g, ' ');
   for (const v of ['Role', 'Admin', 'Name', 'SOLLUNA Operations', 'Email Id', 'ops@solluna.co.in', 'Phone number']) assert.ok(opsUser.includes(v), `ops user shows ${v}: ${opsUser}`);
   assert.equal(await c.getByText('with API', { exact: false }).count(), 0, 'API keys option is hidden (owner, 12 Nov 2026)');
-  await c.fill('#AMAZON-store', 'Riya Lifestyle'); await c.fill('#AMAZON-sid', 'A2RIYA12345');
-  await c.locator('form:has(#AMAZON-store) button:has-text("Save")').click();
-  await c.getByText('Amazon details saved', { exact: false }).waitFor();
+  // Read-only cards: the manager fills seller details from chat (owner, 12 Nov 2026).
+  await c.getByText('Your manager will add your Amazon details from chat.').waitFor();
+  assert.equal(await c.locator('#AMAZON-store').count(), 0, 'no seller-details form on the client page');
+  // What the manager's set_seller_account step stores (same API the chat uses).
+  await c.evaluate(() => fetch('/api/marketplaces/AMAZON', { method: 'PUT', headers: { 'content-type': 'application/json' }, credentials: 'same-origin', body: JSON.stringify({ hasAccount: true, storeName: 'Riya Lifestyle', sellerId: 'A2RIYA12345' }) }).then((r) => { if (!r.ok) throw new Error(String(r.status)); }));
+  await c.goto(`${webBase}/dashboard`); await accountMenu(c, 'Seller accounts');
   await c.getByText('Awaiting verification').first().waitFor();
+  await c.getByText('A2RIYA12345').waitFor();
 
   // Listings & Mapping: marketplace → Mapping / New listing → form; templates prefill the next one.
   await c.click('nav[aria-label="Dashboard"] >> text=Listings & Mapping');
