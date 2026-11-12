@@ -37,6 +37,8 @@ import { ReportCycleService } from './reports/report-cycle.service';
 import { PlImportService } from './reports/pl-import.service';
 import { SpApiService } from './connectors/spapi.service';
 import { MarketplaceApiService } from './connectors/marketplace-api.service';
+import { OpsMailService } from './ops-mail/ops-mail.service';
+import { OpsMailController, OpsMailInboundController } from './ops-mail/ops-mail.controller';
 import { ManagerAgentService } from './chat/manager-agent.service';
 import { AgentEvalsService } from './chat/agent-evals.service';
 import { PipelineService } from './chat/pipeline.service';
@@ -53,9 +55,9 @@ import { LabelCropsService } from './labels/label-crops.service';
     JwtModule.register({ global: true, secret: config.jwtSecret, signOptions: { expiresIn: config.jwtTtl as never } }),
     ThrottlerModule.forRoot([{ ttl: 60_000, limit: Number(process.env.RATE_LIMIT_PER_MIN ?? 120) }]),
   ],
-  controllers: [HealthController, AuthController, AccountController, AdminUsersController, PublicController, AdminController, AdminPaymentsController, TicketsController, OpsTicketsController, CatalogController, OpsCatalogController, FulfilmentController, OpsFulfilmentController, BillingController, FeaturesController, NotificationsController, RequestsController, ApprovalsController, OpsController, DocumentsController, ChatController, OpsChatController, AdminClientsController, ClientReportsController, OpsReportsController, OpsDocumentsCaController, LabelCropsController, CatalogFormsController],
+  controllers: [HealthController, AuthController, AccountController, AdminUsersController, PublicController, AdminController, AdminPaymentsController, TicketsController, OpsTicketsController, CatalogController, OpsCatalogController, FulfilmentController, OpsFulfilmentController, BillingController, FeaturesController, NotificationsController, RequestsController, ApprovalsController, OpsController, DocumentsController, ChatController, OpsChatController, AdminClientsController, ClientReportsController, OpsReportsController, OpsDocumentsCaController, LabelCropsController, CatalogFormsController, OpsMailInboundController, OpsMailController],
   providers: [
-    PrismaService, AuditService, AuthService, RazorpayClient, BillingService, SkillsService, EntitlementsService, DispatcherService, OrchestratorService, AccessService, StorageService, DocumentsService, ChatService, ManagerAgentService, AgentEvalsService, PipelineService, ReportsService, ReportCycleService, PlImportService, SpApiService, MarketplaceApiService, TicketsService, CatalogService, FulfilmentService, AdminService, LabelCropsService, CatalogFormsService, ProductLookupService,
+    PrismaService, AuditService, AuthService, RazorpayClient, BillingService, SkillsService, EntitlementsService, DispatcherService, OrchestratorService, AccessService, StorageService, DocumentsService, ChatService, ManagerAgentService, AgentEvalsService, PipelineService, ReportsService, ReportCycleService, PlImportService, SpApiService, MarketplaceApiService, OpsMailService, TicketsService, CatalogService, FulfilmentService, AdminService, LabelCropsService, CatalogFormsService, ProductLookupService,
     { provide: APP_GUARD, useClass: ThrottlerGuard },
     { provide: APP_GUARD, useClass: AuthGuard },
   ],

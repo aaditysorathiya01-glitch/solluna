@@ -1200,3 +1200,20 @@ model PlImport {
   @@index([organizationId, periodMonth])
   @@index([status])
 }
+
+/// SOLLUNA ops mailbox (ops@solluna.co.in) via the Cloudflare Email Worker. Internal, not tenant data. OTPs encrypted, 10 min, deleted on read.
+model OpsMail {
+  id           String    @id @default(cuid())
+  receivedAt   DateTime  @default(now())
+  fromAddr     String
+  toAddr       String
+  subject      String
+  /// OTP | INVITE | OTHER
+  kind         String
+  marketplace  String?
+  bodyCipher   String
+  otpCipher    String?
+  otpExpiresAt DateTime?
+
+  @@index([receivedAt])
+}

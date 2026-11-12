@@ -35,3 +35,6 @@ Move each job to the official API as soon as it is approved; then remove portal 
 ## Decision 12 Nov 2026 (owner)
 Not waiting for API approvals. Main path = **AI browser on SOLLUNA's server** with the ops login: fixed Playwright steps for known flows, Claude Haiku 5.5 (computer use) only when a page changes or a step gets stuck. Phase 1 = read-only report downloads (Flipkart P&L + CA files, Amazon MTR B2B/B2C + fee invoices), piloted on the owner's own accounts. Browser extension (OPEN_DISCUSSIONS §7) = backup for clients whose server login gets blocked. Client API-keys card removed from the Seller accounts page.
 Inputs needed to start the pilot: ops@solluna.co.in mailbox with IMAP app password in the server env (`OPS_MAIL_PASSWORD`), mail provider name, ops user added on the owner's Flipkart and Amazon accounts.
+
+## Ops mailbox (12 Nov 2026)
+Google does not offer app passwords on the new solluna.ops@gmail.com, so the bot does not read Gmail. Cloudflare Email Routing sends ops@solluna.co.in to a Worker (`platform/deploy/cloudflare/ops-mail-worker.js`) that forwards a copy to Gmail and posts the mail to SOLLUNA (`/api/ops-mail/inbound`, secret header). OTPs are stored encrypted for 10 minutes and shown once (Admin → Ops mailbox); the AI browser will read them through the same service. `OPS_MAIL_USER` / `OPS_MAIL_PASSWORD` are no longer needed.

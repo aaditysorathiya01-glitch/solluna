@@ -16,7 +16,7 @@ const ROLES = ['SUPER_ADMIN', 'OPERATIONS_MANAGER', 'LISTING_EXECUTIVE', 'ADS_MA
 
 export function AdminConsole({ role }: { role: string }) {
   const superAdmin = role === 'SUPER_ADMIN';
-  const tabs = [['overview', 'Overview'], ['clients', 'Clients'], ['team', 'Team'], ['plans', 'Plans'], ['payments', 'Payments'], ['manager-cost', 'Manager cost'], ['inquiries', 'Enquiries'], ['announce', 'Announcements'], ...(superAdmin ? [['audit', 'Audit log'] as const] : [])] as const;
+  const tabs = [['overview', 'Overview'], ['clients', 'Clients'], ['team', 'Team'], ['plans', 'Plans'], ['payments', 'Payments'], ['manager-cost', 'Manager cost'], ['ops-mail', 'Ops mailbox'], ['inquiries', 'Enquiries'], ['announce', 'Announcements'], ...(superAdmin ? [['audit', 'Audit log'] as const] : [])] as const;
   const [tab, setTab] = useState<string>('overview');
   const [flash, setFlash] = useState<FlashMsg>(null);
   return (
@@ -30,6 +30,7 @@ export function AdminConsole({ role }: { role: string }) {
       {tab === 'plans' && <PlansPanel superAdmin={superAdmin} onFlash={setFlash} />}
       {tab === 'payments' && <PaymentsPanel />}
       {tab === 'manager-cost' && <ManagerCostPanel />}
+      {tab === 'ops-mail' && <OpsMailPanel />}
       {tab === 'inquiries' && <InquiriesPanel onFlash={setFlash} />}
       {tab === 'announce' && <AnnouncePanel onFlash={setFlash} />}
       {tab === 'audit' && superAdmin && <AuditPanel />}
@@ -441,6 +442,44 @@ function AmazonCheck() {
       {r && (r.ok
         ? <p className="text-sm text-emerald-800" data-testid="amazon-ok">Connected ✓ {r.amazonIn ? 'Amazon.in is active.' : 'Amazon.in not active on this account.'} Marketplaces: {r.marketplaces?.map((m) => m.name).join(', ')}</p>
         : <p className="text-sm text-red-700" role="alert">{r.message}</p>)}
+    </section>
+  );
+}
+
+interface OpsMailRow { id: string; receivedAt: string; from: string; subject: string; kind: string; marketplace: string | null; otpWaiting: boolean }
+/** ops@solluna.co.in: OTPs show once (then deleted), invites open for operations managers. */
+function OpsMailPanel() {
+  const rows = useApi<OpsMailRow[]>('/ops/ops-mail');
+  const [otp, setOtp] = useState<Record<string, string>>({});
+  const [open, setOpen] = useState<{ subject: string; text: string } | null>(null);
+  const [err, setErr] = useState<string | null>(null);
+  async function take(id: string) { setErr(null); try { const r = await api<{ otp: string }>(`/ops/ops-mail/${id}/otp`, { method: 'POST' }); setOtp((o) => ({ ...o, [id]: r.otp })); rows.reload(); } catch (e) { setErr(errText(e)); } }
+  async function read(id: string) { setErr(null); try { setOpen(await api(`/ops/ops-mail/${id}`)); } catch (e) { setErr(errText(e)); } }
+  return (
+    <section className="space-y-3" aria-label="Ops mailbox">
+      <div className="flex items-center justify-between"><div><h2 className="font-semibold">Ops mailbox · ops@solluna.co.in</h2><p className="text-xs text-ink-3">OTPs are shown once and deleted; they expire after 10 minutes. Every view is logged.</p></div><button className="btn-ghost py-1.5 text-xs" onClick={rows.reload}>Refresh</button></div>
+      {err && <p role="alert" className="rounded-xl bg-red-50 px-3 py-2 text-sm text-red-800">{err}</p>}
+      <div className="card overflow-x-auto">
+        <table className="w-full min-w-[640px] text-sm">
+          <thead><tr className="border-b border-ink/10 text-left text-xs uppercase tracking-wider text-ink-3"><th className="p-3">Received</th><th>From</th><th>Subject</th><th>Type</th><th /></tr></thead>
+          <tbody>
+            {rows.data?.map((m) => (
+              <tr key={m.id} className="border-t border-ink/5">
+                <td className="p-3 whitespace-nowrap">{dt(m.receivedAt)}</td>
+                <td className="max-w-[180px] truncate">{m.from}</td>
+                <td className="max-w-[260px] truncate">{m.subject}</td>
+                <td><span className="chip">{m.marketplace ? `${human(m.marketplace)} · ` : ''}{human(m.kind)}</span></td>
+                <td className="space-x-2 whitespace-nowrap p-3 text-right">
+                  {otp[m.id] ? <span className="font-mono text-lg" data-testid="ops-otp">{otp[m.id]}</span> : m.otpWaiting && <button className="btn-primary py-1 text-xs" onClick={() => take(m.id)}>Show OTP</button>}
+                  <button className="text-xs underline" onClick={() => read(m.id)}>Open</button>
+                </td>
+              </tr>
+            ))}
+            {rows.data && !rows.data.length && <tr><td className="p-4 text-ink-3" colSpan={5}>No mail yet.</td></tr>}
+          </tbody>
+        </table>
+      </div>
+      {open && <Modal title={open.subject} onClose={() => setOpen(null)}><pre className="max-h-[60vh] overflow-auto whitespace-pre-wrap text-sm">{open.text}</pre></Modal>}
     </section>
   );
 }
