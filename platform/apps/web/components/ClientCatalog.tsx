@@ -49,7 +49,7 @@ export function MarketplaceAccounts({ onFlash }: { onFlash: (m: FlashMsg) => voi
         <p className="text-xs text-ink-3">SOLLUNA never changes your bank details, payment settings or users. Price, ads budget, offers and major listing changes happen only after your approval. Status turns <em>Connected</em> only after we confirm access in Seller Central / Seller Hub.</p>
       </section>
       <div className="grid gap-4 md:grid-cols-2">
-        {rows.data?.map((m) => <div key={m.marketplace} className="space-y-4"><MarketplaceCard m={m} onSaved={(msg) => { onFlash(msg); rows.reload(); }} /><ApiKeysCard m={m} onDone={() => rows.reload()} /></div>)}
+        {rows.data?.map((m) => <MarketplaceCard key={m.marketplace} m={m} onSaved={(msg) => { onFlash(msg); rows.reload(); }} />)}
       </div>
       {rows.error && <Empty>{rows.error}</Empty>}
     </div>
@@ -261,70 +261,6 @@ function MappingPanel({ onFlash }: { onFlash: (m: FlashMsg) => void }) {
         </table>
       </div>
       <p className="text-xs text-ink-3">High-confidence matches are checked by a SOLLUNA reviewer before anything is uploaded to your account.</p>
-    </div>
-  );
-}
-
-const API_FIELDS: Record<string, { key: string; label: string; placeholder: string }[]> = {
-  AMAZON: [
-    { key: 'clientId', label: 'Client identifier', placeholder: 'amzn1.application-oa2-client…' },
-    { key: 'clientSecret', label: 'Client secret', placeholder: '••••••••' },
-    { key: 'refreshToken', label: 'Refresh token', placeholder: 'Atzr|…' },
-  ],
-  FLIPKART: [
-    { key: 'clientId', label: 'Application ID', placeholder: 'Application ID' },
-    { key: 'clientSecret', label: 'Application secret', placeholder: '••••••••' },
-  ],
-};
-const API_HELP: Record<string, string> = {
-  AMAZON: 'Seller Central → Apps and Services → Develop Apps → your app: copy the Client identifier and Client secret (View → LWA credentials), then Authorize to get the Refresh token.',
-  FLIPKART: 'Flipkart Seller API: create a self-access application for your seller account and copy its Application ID and secret.',
-};
-
-/** Client's own official API keys: write-only (never shown again), tested at once with the marketplace. */
-function ApiKeysCard({ m, onDone }: { m: MarketplaceRow; onDone: () => void }) {
-  const [open, setOpen] = useState(false);
-  const [busy, setBusy] = useState(false);
-  const [msg, setMsg] = useState<{ ok?: string; err?: string }>({});
-  const name = mpName(m.marketplace);
-  async function save(e: React.FormEvent<HTMLFormElement>) {
-    e.preventDefault(); setBusy(true); setMsg({});
-    const b = formBody(e.currentTarget);
-    try {
-      const r = await api<{ ok: boolean; message: string }>(`/marketplaces/${m.marketplace}/api-keys`, { method: 'PUT', body: b });
-      (e.target as HTMLFormElement).reset();
-      setMsg(r.ok ? { ok: r.message } : { err: r.message }); if (r.ok) setOpen(false); onDone();
-    } catch (err) { setMsg({ err: errText(err) }); }
-    setBusy(false);
-  }
-  async function remove() {
-    try { await api(`/marketplaces/${m.marketplace}/api-keys`, { method: 'DELETE' }); setMsg({ ok: 'API keys removed.' }); onDone(); } catch (err) { setMsg({ err: errText(err) }); }
-  }
-  return (
-    <div className="card space-y-3 p-6" aria-label={`${name} API`}>
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <div><h3 className="font-semibold">Connect {name} with API <span className="text-xs font-normal text-ink-3">(optional)</span></h3>
-          <p className="text-xs text-ink-3">Official {name} API keys of your own app. Stored encrypted and never shown again.</p></div>
-        {m.api ? <span className={`chip ${m.api.connected ? 'bg-emerald-50 text-emerald-800' : 'bg-red-50 text-red-800'}`} data-testid={`api-status-${m.marketplace}`}>{m.api.connected ? 'API connected ✓' : 'API test failed'}</span> : null}
-      </div>
-      {m.api?.message && <p className="text-xs text-ink-3">{m.api.message}{m.api.testedAt ? ` · tested ${new Date(m.api.testedAt).toLocaleString('en-IN')}` : ''}</p>}
-      {msg.ok && <p className="text-xs text-emerald-800" role="status">{msg.ok}</p>}
-      {msg.err && <p className="rounded-xl bg-red-50 px-3 py-2 text-sm text-red-800" role="alert">{msg.err}</p>}
-      {!open ? (
-        <div className="flex gap-2">
-          <button className="btn-ghost py-1.5 text-xs" onClick={() => setOpen(true)}>{m.api ? 'Replace API keys' : 'Add API keys'}</button>
-          {m.api && <button className="py-1.5 text-xs underline" onClick={remove}>Remove</button>}
-        </div>
-      ) : (
-        <form className="space-y-3" onSubmit={save} autoComplete="off">
-          <p className="text-xs text-ink-2">{API_HELP[m.marketplace]}</p>
-          {API_FIELDS[m.marketplace].map((f) => (
-            <div key={f.key}><label className="label" htmlFor={`${m.marketplace}-api-${f.key}`}>{f.label}</label>
-              <input id={`${m.marketplace}-api-${f.key}`} name={f.key} type="password" autoComplete="new-password" className="input font-mono" placeholder={f.placeholder} required /></div>
-          ))}
-          <div className="flex gap-2"><button className="btn-primary" disabled={busy}>{busy ? 'Testing…' : 'Save & test'}</button><button type="button" className="btn-ghost" onClick={() => setOpen(false)}>Cancel</button></div>
-        </form>
-      )}
     </div>
   );
 }

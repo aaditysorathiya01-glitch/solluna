@@ -31,3 +31,7 @@ Owner decision, 7 Nov 2026: option B — automated work in Amazon Seller Central
 
 ## Exit
 Move each job to the official API as soon as it is approved; then remove portal automation for that job.
+
+## Decision 12 Nov 2026 (owner)
+Not waiting for API approvals. Main path = **AI browser on SOLLUNA's server** with the ops login: fixed Playwright steps for known flows, Claude Haiku 5.5 (computer use) only when a page changes or a step gets stuck. Phase 1 = read-only report downloads (Flipkart P&L + CA files, Amazon MTR B2B/B2C + fee invoices), piloted on the owner's own accounts. Browser extension (OPEN_DISCUSSIONS §7) = backup for clients whose server login gets blocked. Client API-keys card removed from the Seller accounts page.
+Inputs needed to start the pilot: ops@solluna.co.in mailbox with IMAP app password in the server env (`OPS_MAIL_PASSWORD`), mail provider name, ops user added on the owner's Flipkart and Amazon accounts.
