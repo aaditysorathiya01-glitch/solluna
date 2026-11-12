@@ -17,6 +17,7 @@ const KEEP_DAYS = 30;
 @Injectable()
 export class OpsMailService implements OnModuleInit, OnModuleDestroy {
   private timer?: NodeJS.Timeout;
+  private readonly log = new Logger('OpsMail');
   constructor(private readonly db: PrismaService, private readonly audit: AuditService) {}
 
   onModuleInit() { this.timer = setInterval(() => this.sweep().catch((e) => Logger.error(e, 'OpsMail')), 60_000); this.timer.unref(); }
@@ -24,15 +25,19 @@ export class OpsMailService implements OnModuleInit, OnModuleDestroy {
 
   private checkSecret(given: string | undefined) {
     const want = process.env.OPS_MAIL_INBOUND_SECRET;
-    if (!want || want.length < 24) throw new UnauthorizedException('Ops mail inbound is not configured');
+    if (!want || want.length < 24) { this.log.warn('ops-mail inbound rejected: OPS_MAIL_INBOUND_SECRET not set'); throw new UnauthorizedException('Ops mail inbound is not configured'); }
     const a = createHash('sha256').update(given ?? '').digest(); const b = createHash('sha256').update(want).digest();
-    if (!timingSafeEqual(a, b)) throw new UnauthorizedException('Bad secret');
+    if (!timingSafeEqual(a, b)) {
+      // Diagnostics without the secret: header present? length? surrounding whitespace?
+      this.log.warn(`ops-mail inbound rejected: ${given ? `secret mismatch (got ${given.length} chars${given !== given.trim() ? ', has spaces' : ''}, expected ${want.length})` : 'no x-ops-mail-secret header'}`);
+      throw new UnauthorizedException('Bad secret');
+    }
   }
 
   async inbound(secret: string | undefined, body: unknown) {
     this.checkSecret(secret);
     const raw = typeof (body as { raw?: unknown })?.raw === 'string' ? (body as { raw: string }).raw : '';
-    if (!raw) return { stored: false };
+    if (!raw) { this.log.warn('ops-mail inbound: empty body'); return { stored: false }; }
     const m = parseMail(raw.slice(0, 2_000_000));
     const c = classify(m);
     const otp = c.kind === 'OTP' ? findOtp(m.subject, m.text) : null;
@@ -42,6 +47,7 @@ export class OpsMailService implements OnModuleInit, OnModuleDestroy {
         bodyCipher: encrypt(m.text), otpCipher: otp ? encrypt(otp) : null, otpExpiresAt: otp ? new Date(Date.now() + OTP_TTL_MS) : null,
       },
     });
+    this.log.log(`ops-mail stored ${row.id} kind=${c.kind} marketplace=${c.marketplace ?? '-'}`);
     return { stored: true, id: row.id, kind: c.kind };
   }
 
