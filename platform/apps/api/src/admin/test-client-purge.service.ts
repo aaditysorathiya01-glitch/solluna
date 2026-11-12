@@ -27,6 +27,12 @@ export class TestClientPurgeService {
     const client = this.db as unknown as Record<string, { deleteMany: (a: unknown) => Promise<{ count: number }> }>;
     const lc = (n: string) => n.charAt(0).toLowerCase() + n.slice(1);
     const steps: { model: string; where: unknown }[] = [];
+    // Child rows that reach the tenant only through a parent (no organizationId column of their own).
+    steps.push({ model: 'message', where: { conversation: { organizationId: orgId } } });
+    steps.push({ model: 'message', where: { senderId: { in: users } } });
+    steps.push({ model: 'ticketComment', where: { ticket: { organizationId: orgId } } });
+    steps.push({ model: 'marketplaceCredential', where: { marketplaceAccount: { organizationId: orgId } } });
+    steps.push({ model: 'adChangeLog', where: { campaign: { organizationId: orgId } } });
     for (const m of Prisma.dmmf.datamodel.models) {
       const fields = m.fields.map((f) => f.name);
       if (m.name === 'Organization' || m.name === 'User') continue;
