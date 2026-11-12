@@ -32,7 +32,7 @@ before(async () => {
   base = `http://127.0.0.1:${port}/api`;
   api = spawn('node', ['dist/apps/api/src/main.js'], {
     cwd: apiDir, stdio: ['ignore', 'pipe', 'pipe'],
-    env: { ...process.env, DATABASE_URL, PORT: String(port), JWT_SECRET: 'otp-e2e-secret-otp-e2e-secret-123', COOKIE_SECURE: 'false', RESEND_API_KEY: 're_test_key', RESEND_API_URL: `http://127.0.0.1:${resend.address().port}`, LOGIN_EMAIL_OTP: 'staff', REPORT_CYCLE: 'off', RATE_LIMIT_PER_MIN: '10000', AUTH_RATE_LIMIT_PER_MIN: '100', MANAGER_ASSIGN_DELAY_MIN: '0' },
+    env: { ...process.env, DATABASE_URL, PORT: String(port), JWT_SECRET: 'otp-e2e-secret-otp-e2e-secret-123', COOKIE_SECURE: 'false', RESEND_API_KEY: 're_test_key', RESEND_API_URL: `http://127.0.0.1:${resend.address().port}`, LOGIN_EMAIL_OTP: 'staff', PREVIEW_MODE: 'true', REPORT_CYCLE: 'off', RATE_LIMIT_PER_MIN: '10000', AUTH_RATE_LIMIT_PER_MIN: '100', MANAGER_ASSIGN_DELAY_MIN: '0' },
   });
   let log = ''; api.stdout.on('data', (d) => (log += d)); api.stderr.on('data', (d) => (log += d));
   for (let i = 0; i < 80; i++) {
@@ -83,4 +83,16 @@ test('staff sign in with an emailed code: sent once a minute, hashed, 5 tries, o
   const reg = await call('POST', '/auth/register', { name: 'Otp Client', email: 'otp.client@seller.test', phone: '9876501234', password: 'Client-Passw0rd-1', legalName: 'Otp Client Pvt Ltd', brandName: 'Otp' });
   assert.equal(reg.status, 201, JSON.stringify(reg.body));
   assert.equal((await call('POST', '/auth/login', { email: 'otp.client@seller.test', password: 'Client-Passw0rd-1' })).status, 200);
+
+  // Preview only: super admin deletes a test client and all of its data (email typed twice).
+  mails.length = 0;
+  await new Promise((r) => setTimeout(r, 61_000)); // one sign-in email per minute
+  assert.equal((await call('POST', '/auth/login', ADMIN)).status, 401);
+  const tok = (await call('POST', '/auth/login', { ...ADMIN, code: codeOf(mails[0]) })).body.token;
+  assert.equal((await call('POST', '/admin/test-clients/delete', { email: 'otp.client@seller.test', confirm: 'other@seller.test' }, tok)).status, 400);
+  const del = await call('POST', '/admin/test-clients/delete', { email: 'otp.client@seller.test', confirm: 'OTP.client@seller.test' }, tok);
+  assert.equal(del.status, 200, JSON.stringify(del.body)); assert.ok(del.body.rows > 0);
+  assert.equal((await call('POST', '/auth/login', { email: 'otp.client@seller.test', password: 'Client-Passw0rd-1' })).status, 401);
+  const again = await call('POST', '/auth/register', { name: 'Otp Client', email: 'otp.client@seller.test', phone: '9876501234', password: 'Client-Passw0rd-1', legalName: 'Otp Client Pvt Ltd' });
+  assert.equal(again.status, 201, 'email and phone are free again');
 });

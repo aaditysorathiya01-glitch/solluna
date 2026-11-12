@@ -1,3 +1,4 @@
+import { TestClientPurgeService } from '../admin/test-client-purge.service';
 import { Body, Controller, Get, HttpCode, MessageEvent, Param, Patch, Post, Query, Sse } from '@nestjs/common';
 import { SkipThrottle } from '@nestjs/throttler';
 import { filter, from, interval, map, merge, Observable, switchMap } from 'rxjs';
@@ -79,7 +80,7 @@ export class OpsChatController {
 @Controller('admin')
 @StaffOnly('SUPER_ADMIN', 'OPERATIONS_MANAGER')
 export class AdminClientsController {
-  constructor(private readonly chat: ChatService, private readonly agent: ManagerAgentService, private readonly evals: AgentEvalsService, private readonly spapi: SpApiService) {}
+  constructor(private readonly chat: ChatService, private readonly agent: ManagerAgentService, private readonly evals: AgentEvalsService, private readonly spapi: SpApiService, private readonly purge: TestClientPurgeService) {}
 
   /** Amazon SP-API connection check with the test seller (super admin). */
   @Post('amazon/test') @HttpCode(200) @StaffOnly('SUPER_ADMIN') amazonTest() { return this.spapi.testConnection(); }
@@ -94,5 +95,8 @@ export class AdminClientsController {
 
   @Get('clients') clients() { return this.chat.clients(); }
   @Get('staff') staff() { return this.chat.staff(); }
+
+  /** Preview only: delete a test client and all its data (type the email twice). */
+  @Post('test-clients/delete') @HttpCode(200) @StaffOnly('SUPER_ADMIN') deleteTestClient(@CurrentUser() u: AuthUser, @Body() body: unknown) { return this.purge.purge(u, body); }
   @Post('clients/:orgId/managers') assign(@CurrentUser() u: AuthUser, @Param('orgId') orgId: string, @Body() body: unknown) { return this.chat.assignManager(u, orgId, body); }
 }

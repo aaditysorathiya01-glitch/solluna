@@ -1959,6 +1959,10 @@ test('ops mailbox: Cloudflare Worker posts mail; OTP encrypted, one read, masked
   assert.ok(await db.auditLog.count({ where: { action: 'ops_mail.otp_read', entityId: stored.id } }) === 1);
 });
 
+test('test-client delete is refused outside preview', async () => {
+  assert.equal((await call('POST', '/admin/test-clients/delete', { token: S.admin, body: { email: 'asha@seller.test', confirm: 'asha@seller.test' } })).status, 403);
+});
+
 test('security: login brute force is rate limited per IP', async () => {
   let limited = false;
   for (let i = 0; i < 45 && !limited; i++) {
