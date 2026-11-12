@@ -54,4 +54,16 @@ export const config = {
   requireAdmin2fa: process.env.REQUIRE_ADMIN_2FA !== 'false',
   /** DEV/PREVIEW ONLY: return emailed links in API responses when no email connector is configured. */
   exposeAuthLinks: process.env.EXPOSE_AUTH_LINKS === 'true',
+  /** Direct email (Resend). Without a key, email goes to the connector webhook (Zapier) as before. */
+  resendApiKey: opt('RESEND_API_KEY'),
+  resendApiUrl: (process.env.RESEND_API_URL ?? 'https://api.resend.com').replace(/\/$/, ''),
+  mailFrom: process.env.MAIL_FROM ?? 'SOLLUNA <no-reply@solluna.co.in>',
+  /** Sign-in code by email (owner, 12 Nov 2026): off | staff | all. Active only when direct email (Resend) is configured. */
+  loginEmailOtp: (process.env.LOGIN_EMAIL_OTP ?? 'staff') as 'off' | 'staff' | 'all',
 };
+
+/** True when this user signs in with an emailed 6-digit code (needs direct email, so nobody is locked out without it). */
+export function emailOtpFor(type: string) {
+  if (!config.resendApiKey || config.loginEmailOtp === 'off') return false;
+  return config.loginEmailOtp === 'all' || type === 'STAFF';
+}

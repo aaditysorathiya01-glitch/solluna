@@ -13,6 +13,7 @@ export function AuthForm({ mode, plan }: { mode: 'login' | 'register'; plan?: st
   const [issues, setIssues] = useState<Record<string, string>>({});
   const [busy, setBusy] = useState(false);
   const [needCode, setNeedCode] = useState(false);
+  const [codeHelp, setCodeHelp] = useState<{ byEmail: boolean; text: string }>({ byEmail: false, text: '' });
 
   const fields: Field[] = mode === 'login'
     ? [{ name: 'email', label: 'Email', type: 'email', required: true, autoComplete: 'email' }, { name: 'password', label: 'Password', type: 'password', required: true, autoComplete: 'current-password' }]
@@ -41,8 +42,12 @@ export function AuthForm({ mode, plan }: { mode: 'login' | 'register'; plan?: st
     } catch (err) {
       const a = err as ApiError;
       if (a.status === 401 && /authenticator|code/i.test(a.message) && mode === 'login') {
-        setNeedCode(true);
-        setError(needCode ? a.message : null);
+        const byEmail = a.body?.method === 'email';
+        setCodeHelp({ byEmail, text: byEmail ? a.message : 'Two-factor authentication is on for this account. Enter the 6-digit code from your authenticator app.' });
+        const fresh = byEmail && /emailed/i.test(a.message);
+        setError(needCode && !fresh ? a.message : null);
+        // Expired code: the next "Sign in" sends a fresh one.
+        setNeedCode(!(byEmail && /expired/i.test(a.message)));
         setBusy(false);
         return;
       }
@@ -68,9 +73,9 @@ export function AuthForm({ mode, plan }: { mode: 'login' | 'register'; plan?: st
           ))}
           {needCode && (
             <div>
-              <label className="label" htmlFor="code">Authenticator code</label>
+              <label className="label" htmlFor="code">{codeHelp.byEmail ? 'Code from your email' : 'Authenticator code'}</label>
               <input className="input tracking-[0.4em]" id="code" name="code" inputMode="numeric" autoComplete="one-time-code" maxLength={6} placeholder="123456" autoFocus required />
-              <p className="mt-1 text-xs text-ink-3">Two-factor authentication is on for this account. Enter the 6-digit code from your authenticator app.</p>
+              <p className="mt-1 text-xs text-ink-3" data-testid="code-help">{codeHelp.text}</p>
             </div>
           )}
           {mode === 'register' && (

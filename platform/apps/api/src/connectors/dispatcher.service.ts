@@ -10,7 +10,7 @@ export type EventType =
   | 'labels.ready' | 'stock.alert' | 'thank_you.review' | 'thank_you.decided' | 'marketplace.status_changed' | 'announcement' | 'account.suspended' | 'manager.pending';
 
 /** Events addressed to one person by email (no organization), e.g. password reset links. */
-export interface DirectEvent { type: 'auth.password_reset' | 'auth.verify_email' | 'auth.password_changed'; to: string; name: string; title: string; body: string; link?: string }
+export interface DirectEvent { type: 'auth.password_reset' | 'auth.verify_email' | 'auth.password_changed' | 'auth.login_code'; to: string; name: string; title: string; body: string; link?: string }
 
 export interface PlatformEvent {
   type: EventType;
@@ -43,7 +43,24 @@ export class DispatcherService {
 
   /** Email-only delivery through the connector webhook. Returns whether a connector accepted it. */
   async direct(e: DirectEvent): Promise<'sent' | 'failed' | 'not_configured'> {
+    if (config.resendApiKey) return this.resend(e);
     return this.post({ ...e, sentAt: new Date().toISOString() }, e.type);
+  }
+
+  /** Direct transactional email through Resend (sender domain verified in Cloudflare DNS). */
+  private async resend(e: DirectEvent): Promise<'sent' | 'failed'> {
+    try {
+      const r = await fetch(`${config.resendApiUrl}/emails`, {
+        method: 'POST', signal: AbortSignal.timeout(10_000),
+        headers: { authorization: `Bearer ${config.resendApiKey}`, 'content-type': 'application/json' },
+        body: JSON.stringify({ from: config.mailFrom, to: [e.to], subject: e.title, text: `Hi ${e.name},\n\n${e.body}\n\n— SOLLUNA` }),
+      });
+      if (!r.ok) throw new Error(`HTTP ${r.status} ${(await r.text()).slice(0, 200)}`);
+      return 'sent';
+    } catch (err) {
+      this.log.warn(`Email delivery failed for ${e.type}: ${(err as Error).message}`);
+      return 'failed';
+    }
   }
 
   /** In-app notifications for SOLLUNA staff (admin alerts, new tickets, new registrations, inquiries). */

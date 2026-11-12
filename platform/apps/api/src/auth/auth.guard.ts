@@ -3,7 +3,7 @@ import { Reflector } from '@nestjs/core';
 import { JwtService } from '@nestjs/jwt';
 import { PrismaService } from '../common/prisma.service';
 import { ACCESS, ALLOW_PENDING_2FA, Access, IS_PUBLIC } from './decorators';
-import { config } from '../common/config';
+import { config, emailOtpFor } from '../common/config';
 import type { AuthUser } from './auth.types';
 
 export const SESSION_COOKIE = 'solluna_session';
@@ -44,7 +44,7 @@ export class AuthGuard implements CanActivate {
     if (!user || !user.isActive) throw new UnauthorizedException('Account disabled');
     // A password change/reset ends every session issued before it.
     if (user.passwordChangedAt && iat < Math.floor(user.passwordChangedAt.getTime() / 1000)) throw new UnauthorizedException('Your password was changed. Please sign in again.');
-    if (user.staffRole === 'SUPER_ADMIN' && config.requireAdmin2fa && !user.twoFactorEnabledAt
+    if (user.staffRole === 'SUPER_ADMIN' && config.requireAdmin2fa && !user.twoFactorEnabledAt && !emailOtpFor(user.type)
       && !this.reflector.getAllAndOverride<boolean>(ALLOW_PENDING_2FA, targets)) {
       throw new ForbiddenException({ message: 'Set up two-factor authentication to use the admin console', twoFactorSetupRequired: true });
     }

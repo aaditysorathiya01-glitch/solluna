@@ -1217,3 +1217,16 @@ model OpsMail {
 
   @@index([receivedAt])
 }
+
+/// Emailed sign-in codes (hash only): 10 minutes, 5 tries, one live code per user.
+model LoginCode {
+  id        String    @id @default(cuid())
+  userId    String
+  codeHash  String
+  attempts  Int       @default(0)
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime  @default(now())
+
+  @@index([userId, createdAt])
+}

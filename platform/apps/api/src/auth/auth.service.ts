@@ -1,11 +1,12 @@
-import { BadRequestException, ConflictException, ForbiddenException, Injectable, Logger, NotFoundException, UnauthorizedException } from '@nestjs/common';
+import { BadRequestException, ConflictException, ForbiddenException, Injectable, Logger, NotFoundException, ServiceUnavailableException, UnauthorizedException } from '@nestjs/common';
+import { randomInt, timingSafeEqual } from 'crypto';
 import { JwtService } from '@nestjs/jwt';
 import * as bcrypt from 'bcryptjs';
 import { z } from 'zod';
 import { PrismaService } from '../common/prisma.service';
 import { AuditService } from '../common/audit.service';
 import { parse } from '../common/zod';
-import { config } from '../common/config';
+import { config, emailOtpFor } from '../common/config';
 import { decrypt, encrypt, newTotpSecret, randomToken, sha256, verifyTotp } from '../common/crypto';
 import { DispatcherService } from '../connectors/dispatcher.service';
 import type { AuthUser } from './auth.types';
@@ -38,7 +39,7 @@ const normalizePhone = (p: string) => (p.startsWith('+91') ? p : `+91${p}`);
 
 /** Thrown when the password is right but a 2FA code is still needed. */
 export class TwoFactorRequired extends UnauthorizedException {
-  constructor(message = 'Enter the 6-digit code from your authenticator app') { super({ message, twoFactorRequired: true }); }
+  constructor(message = 'Enter the 6-digit code from your authenticator app', method: 'totp' | 'email' = 'totp') { super({ message, twoFactorRequired: true, method }); }
 }
 
 @Injectable()
@@ -81,7 +82,11 @@ export class AuthService {
       await this.audit.log({ actor: null, action: 'auth.login_failed', entity: 'User', entityId: user?.id, ip });
       throw new UnauthorizedException('Invalid email or password');
     }
-    if (user.twoFactorEnabledAt && user.twoFactorSecret) {
+    if (emailOtpFor(user.type)) {
+      // Emailed 6-digit code (owner, 12 Nov 2026). An authenticator code still works for accounts that set one up.
+      const totpOk = Boolean(d.code && user.twoFactorEnabledAt && user.twoFactorSecret && verifyTotp(decrypt(user.twoFactorSecret), d.code));
+      if (!totpOk) await this.emailCode(user, d.code, ip);
+    } else if (user.twoFactorEnabledAt && user.twoFactorSecret) {
       if (!d.code) throw new TwoFactorRequired();
       if (!verifyTotp(decrypt(user.twoFactorSecret), d.code)) {
         await this.audit.log({ actor: null, action: 'auth.2fa_failed', entity: 'User', entityId: user.id, ip });
@@ -91,6 +96,31 @@ export class AuthService {
     await this.db.user.update({ where: { id: user.id }, data: { lastLoginAt: new Date() } });
     await this.audit.log({ actor: null, action: 'auth.login', entity: 'User', entityId: user.id, organizationId: user.organizationId, ip });
     return this.issue(user.id);
+  }
+
+  /** Sends (or checks) the sign-in code: 6 digits, 10 minutes, 5 tries, one resend per minute. Stored as a hash only. */
+  private async emailCode(user: { id: string; email: string; name: string }, code: string | undefined, ip?: string) {
+    const hash = (c: string) => sha256(`${user.id}:${c}`);
+    const live = await this.db.loginCode.findFirst({ where: { userId: user.id, usedAt: null, expiresAt: { gt: new Date() } }, orderBy: { createdAt: 'desc' } });
+    const [name, domain] = user.email.split('@');
+    const masked = `${name.slice(0, 2)}${'•'.repeat(Math.max(1, name.length - 2))}@${domain}`;
+    if (!code) {
+      if (live && Date.now() - live.createdAt.getTime() < 60_000) throw new TwoFactorRequired(`We emailed a 6-digit code to ${masked}. Enter it below (valid for 10 minutes).`, 'email');
+      const fresh = String(randomInt(0, 1_000_000)).padStart(6, '0');
+      await this.db.loginCode.updateMany({ where: { userId: user.id, usedAt: null }, data: { usedAt: new Date() } });
+      await this.db.loginCode.create({ data: { userId: user.id, codeHash: hash(fresh), expiresAt: new Date(Date.now() + 10 * 60_000) } });
+      const delivery = await this.dispatch.direct({ type: 'auth.login_code', to: user.email, name: user.name, title: `${fresh} is your SOLLUNA sign-in code`, body: `Your SOLLUNA sign-in code is ${fresh}. It is valid for 10 minutes.\nIf you did not try to sign in, change your password.` });
+      if (delivery !== 'sent') throw new ServiceUnavailableException('We could not send your sign-in code. Please try again in a minute.');
+      throw new TwoFactorRequired(`We emailed a 6-digit code to ${masked}. Enter it below (valid for 10 minutes).`, 'email');
+    }
+    if (!live || live.attempts >= 5) throw new TwoFactorRequired('That code has expired. Sign in again to get a new one.', 'email');
+    const a = Buffer.from(live.codeHash); const b = Buffer.from(hash(code));
+    if (a.length !== b.length || !timingSafeEqual(a, b)) {
+      await this.db.loginCode.update({ where: { id: live.id }, data: { attempts: { increment: 1 } } });
+      await this.audit.log({ actor: null, action: 'auth.2fa_failed', entity: 'User', entityId: user.id, ip });
+      throw new TwoFactorRequired('That code did not match. Check the latest email and try again.', 'email');
+    }
+    await this.db.loginCode.update({ where: { id: live.id }, data: { usedAt: new Date() } });
   }
 
   // ───────── Password recovery & email verification ─────────
@@ -307,7 +337,7 @@ export class AuthService {
       user.organizationId ? this.db.organization.findUnique({ where: { id: user.organizationId } }) : null,
     ]);
     return {
-      user: { ...user, phone: u.phone, emailVerified: Boolean(u.emailVerified), twoFactorEnabled: Boolean(u.twoFactorEnabledAt), twoFactorRequired: u.staffRole === 'SUPER_ADMIN' && config.requireAdmin2fa && !u.twoFactorEnabledAt },
+      user: { ...user, phone: u.phone, emailVerified: Boolean(u.emailVerified), twoFactorEnabled: Boolean(u.twoFactorEnabledAt), twoFactorRequired: u.staffRole === 'SUPER_ADMIN' && config.requireAdmin2fa && !u.twoFactorEnabledAt && !emailOtpFor(u.type), loginCodeByEmail: emailOtpFor(u.type) },
       organization: org && { id: org.id, legalName: org.legalName, brandName: org.brandName, gstin: org.gstin, pan: org.pan, category: org.category, contactEmail: org.contactEmail, contactPhone: org.contactPhone, onboardedAt: org.onboardedAt },
     };
   }
