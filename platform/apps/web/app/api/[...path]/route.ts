@@ -7,7 +7,7 @@ import type { NextRequest } from 'next/server';
  */
 export const dynamic = 'force-dynamic';
 
-const FORWARD_REQ = ['content-type', 'cookie', 'authorization', 'x-razorpay-signature', 'user-agent'];
+const FORWARD_REQ = ['content-type', 'cookie', 'authorization', 'x-razorpay-signature', 'x-ops-mail-secret', 'user-agent'];
 // No content-length: fetch() transparently decompresses gzip/br upstream bodies, so the upstream length would truncate them.
 const FORWARD_RES = ['content-type', 'content-disposition', 'cache-control', 'content-security-policy', 'x-content-type-options', 'set-cookie', 'retry-after', 'x-ratelimit-limit', 'x-ratelimit-remaining'];
 
