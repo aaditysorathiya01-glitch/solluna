@@ -19,8 +19,10 @@ export class TestClientPurgeService {
     const { email, confirm } = parse(z.object({ email: z.string().trim().toLowerCase().email(), confirm: z.string().trim().toLowerCase() }), input);
     if (email !== confirm) throw new BadRequestException('Type the same email in both boxes to confirm');
     const user = await this.db.user.findUnique({ where: { email } });
-    if (!user || user.type !== 'CUSTOMER' || !user.organizationId) throw new NotFoundException('No client account with this email');
-    const orgId = user.organizationId;
+    if (user && user.type !== 'CUSTOMER') throw new ForbiddenException('Staff accounts cannot be deleted here');
+    // A half-deleted test client (no users left) is found by its contact email.
+    const orgId = user?.organizationId ?? (await this.db.organization.findFirst({ where: { contactEmail: email, users: { none: {} } }, select: { id: true } }))?.id;
+    if (!orgId) throw new NotFoundException('No client account with this email');
     const users = (await this.db.user.findMany({ where: { organizationId: orgId }, select: { id: true } })).map((u) => u.id);
 
     // Every model with an organizationId column, plus user-owned rows; FK order is resolved by retrying in passes.
