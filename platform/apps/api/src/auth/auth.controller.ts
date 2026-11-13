@@ -22,6 +22,7 @@ export class AuthController {
   @Public() @Post('register') @Throttle(LIMIT)
   async register(@Body() body: unknown, @Req() req: Request, @Res({ passthrough: true }) res: Response) {
     const r = await this.auth.register(body, req.ip);
+    if ('codeRequired' in r) { res.status(202); return r; } // email code sent; account not created yet
     setSession(res, r.token);
     return r;
   }

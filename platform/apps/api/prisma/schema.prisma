@@ -1230,3 +1230,16 @@ model LoginCode {
 
   @@index([userId, createdAt])
 }
+
+/// Sign-up email check: 6-digit code (hash only) sent before the account is created. 10 minutes, 5 tries.
+model SignupCode {
+  id        String    @id @default(cuid())
+  email     String
+  codeHash  String
+  attempts  Int       @default(0)
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime  @default(now())
+
+  @@index([email, createdAt])
+}

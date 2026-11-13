@@ -193,10 +193,15 @@ test('register → billing details → GST total → Razorpay checkout → verif
   await page.getByText('You chose the').waitFor();
   // Validation from the API surfaces on the form.
   await page.fill('#name', 'Riya Shah'); await page.fill('#email', 'riya@brand.test'); await page.fill('#phone', '12345');
-  await page.fill('#legalName', 'Riya Lifestyle Pvt Ltd'); await page.fill('#password', 'Riya-Strong-Pass1');
+  // Sign-up asks only name, email, mobile and password (+ confirm); business name comes with billing details.
+  for (const gone of ['#legalName', '#brandName', '#gstin']) assert.equal(await page.locator(gone).count(), 0, `${gone} not on sign-up`);
+  await page.fill('#password', 'Riya-Strong-Pass1'); await page.fill('#confirmPassword', 'Riya-Strong-Pass2');
   await page.click('button:has-text("Create account")');
   await page.getByText('Please accept the Terms').waitFor(); // consent is required before anything is sent
   await page.check('input[name="terms"]');
+  await page.click('button:has-text("Create account")');
+  await page.getByText('Passwords do not match').first().waitFor();
+  await page.fill('#confirmPassword', 'Riya-Strong-Pass1');
   await page.click('button:has-text("Create account")');
   await page.getByText('Enter a valid Indian mobile number').waitFor();
   await page.fill('#phone', '9812345678');
@@ -214,6 +219,8 @@ test('register → billing details → GST total → Razorpay checkout → verif
   assert.deepEqual(firstStates, ['01 · Jammu and Kashmir', '02 · Himachal Pradesh'], 'states listed in GST code order');
 
   assert.ok(await page.locator('button:has-text("Pay & activate Growth")').isDisabled(), 'checkout needs billing details first');
+  assert.equal(await page.inputValue('#legalName'), 'Riya Shah', 'business name defaults to the person');
+  await page.fill('#legalName', 'Riya Lifestyle Pvt Ltd');
   await page.fill('#gstin', '24ABCDE1234F1Z5');
   await page.fill('#address', '7 Linking Road, Bandra West'); await page.fill('#city', 'Mumbai'); await page.fill('#pincode', '400050');
   await page.click('button:has-text("Save billing details")');

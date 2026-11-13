@@ -6,7 +6,7 @@ import { z } from 'zod';
 import { PrismaService } from '../common/prisma.service';
 import { AuditService } from '../common/audit.service';
 import { parse } from '../common/zod';
-import { config, emailOtpFor } from '../common/config';
+import { config, emailOtpFor, signupEmailOtp } from '../common/config';
 import { decrypt, encrypt, newTotpSecret, randomToken, sha256, verifyTotp } from '../common/crypto';
 import { DispatcherService } from '../connectors/dispatcher.service';
 import type { AuthUser } from './auth.types';
@@ -24,7 +24,9 @@ export const RegisterSchema = z.object({
   email: z.string().trim().toLowerCase().email(),
   phone: z.string().trim().regex(INDIAN_MOBILE, 'Enter a valid Indian mobile number'),
   password: PASSWORD,
-  legalName: z.string().trim().min(2).max(200),
+  /** Business name: optional at sign-up (owner, 13 Nov 2026); asked with billing details. Defaults to the person's name. */
+  legalName: z.string().trim().min(2).max(200).optional(),
+  code: z.string().trim().regex(/^\d{6}$/, 'Enter the 6-digit code').optional(),
   brandName: z.string().trim().max(200).optional(),
   gstin: z.string().trim().toUpperCase().regex(GSTIN, 'Invalid GSTIN').refine(isValidGstin, 'Invalid GSTIN check digit').optional(),
   category: z.string().trim().max(100).optional(),
@@ -56,21 +58,51 @@ export class AuthService {
     const phone = normalizePhone(d.phone);
     const exists = await this.db.user.findFirst({ where: { OR: [{ email: d.email }, { phone }] } });
     if (exists) throw new ConflictException('An account with this email or mobile already exists');
+    // Email check before the account exists (owner, 13 Nov 2026).
+    const verified = signupEmailOtp();
+    if (verified) {
+      const pending = await this.signupCode(d.email, d.name, d.code);
+      if (pending) return pending;
+    }
 
     const passwordHash = await bcrypt.hash(d.password, 12);
     const user = await this.db.$transaction(async (tx) => {
       const org = await tx.organization.create({
-        data: { legalName: d.legalName, brandName: d.brandName, gstin: d.gstin, stateCode: d.gstin?.slice(0, 2), category: d.category, contactEmail: d.email, contactPhone: phone },
+        data: { legalName: d.legalName ?? d.name, brandName: d.brandName, gstin: d.gstin, stateCode: d.gstin?.slice(0, 2), category: d.category, contactEmail: d.email, contactPhone: phone },
       });
       await tx.conversation.create({ data: { organizationId: org.id } });
-      const u = await tx.user.create({ data: { type: 'CUSTOMER', email: d.email, phone, name: d.name, passwordHash, organizationId: org.id, lastLoginAt: new Date() } });
+      const u = await tx.user.create({ data: { type: 'CUSTOMER', email: d.email, phone, name: d.name, passwordHash, organizationId: org.id, lastLoginAt: new Date(), ...(verified ? { emailVerified: new Date() } : {}) } });
       await this.audit.log({ actor: null, action: 'customer.register', entity: 'User', entityId: u.id, organizationId: org.id, ip }, tx);
       return u;
     });
     await this.onRegistered?.(user.organizationId!);
-    await this.dispatch.notifyStaff({ roles: ['SUPER_ADMIN', 'OPERATIONS_MANAGER'], type: 'admin.new_registration', organizationId: user.organizationId!, title: `New client registered: ${d.brandName || d.legalName}`, body: `${d.name} (${d.email}) created an account. Plan not yet paid.` });
-    const verify = await this.sendVerification(user.id);
+    await this.dispatch.notifyStaff({ roles: ['SUPER_ADMIN', 'OPERATIONS_MANAGER'], type: 'admin.new_registration', organizationId: user.organizationId!, title: `New client registered: ${d.brandName || d.legalName || d.name}`, body: `${d.name} (${d.email}) created an account. Plan not yet paid.` });
+    const verify = verified ? undefined : await this.sendVerification(user.id);
     return { ...(await this.issue(user.id)), ...(verify ? { devLink: verify } : {}) };
+  }
+
+  /** Sends the sign-up code (no code yet) or checks it. Returns a "code sent" answer, or null when the code is right. */
+  private async signupCode(email: string, name: string, code: string | undefined) {
+    const hash = (c: string) => sha256(`signup:${email}:${c}`);
+    const live = await this.db.signupCode.findFirst({ where: { email, usedAt: null, expiresAt: { gt: new Date() } }, orderBy: { createdAt: 'desc' } });
+    const sent = { codeRequired: true as const, message: `We emailed a 6-digit code to ${email}. Enter it below to create your account (valid for 10 minutes).` };
+    if (!code) {
+      if (live && Date.now() - live.createdAt.getTime() < 60_000) return sent;
+      const fresh = String(randomInt(0, 1_000_000)).padStart(6, '0');
+      await this.db.signupCode.updateMany({ where: { email, usedAt: null }, data: { usedAt: new Date() } });
+      await this.db.signupCode.create({ data: { email, codeHash: hash(fresh), expiresAt: new Date(Date.now() + 10 * 60_000) } });
+      const delivery = await this.dispatch.direct({ type: 'auth.signup_code', to: email, name, title: `${fresh} is your SOLLUNA verification code`, body: `Your SOLLUNA verification code is ${fresh}. It is valid for 10 minutes.\nIf you did not try to create an account, ignore this email.` });
+      if (delivery !== 'sent') throw new ServiceUnavailableException('We could not send the verification code. Please try again in a minute.');
+      return sent;
+    }
+    if (!live || live.attempts >= 5) throw new BadRequestException('That code has expired. Click "Send a new code".');
+    const a = Buffer.from(live.codeHash); const b = Buffer.from(hash(code));
+    if (a.length !== b.length || !timingSafeEqual(a, b)) {
+      await this.db.signupCode.update({ where: { id: live.id }, data: { attempts: { increment: 1 } } });
+      throw new BadRequestException('That code did not match. Check the latest email and try again.');
+    }
+    await this.db.signupCode.update({ where: { id: live.id }, data: { usedAt: new Date() } });
+    return null;
   }
 
   async login(input: unknown, ip?: string) {

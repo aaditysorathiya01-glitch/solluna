@@ -79,9 +79,21 @@ test('staff sign in with an emailed code: sent once a minute, hashed, 5 tries, o
   const burnt = await call('POST', '/auth/login', { ...ADMIN, code: code2 });
   assert.equal(burnt.status, 401); assert.match(burnt.body.message, /expired/);
 
+  // Sign-up: a 6-digit code to the email first; the account exists only after the right code.
+  mails.length = 0;
+  const SIGNUP = { name: 'Otp Client', email: 'otp.client@seller.test', phone: '9876501234', password: 'Client-Passw0rd-1' };
+  const start = await call('POST', '/auth/register', SIGNUP);
+  assert.equal(start.status, 202, JSON.stringify(start.body)); assert.equal(start.body.codeRequired, true); assert.ok(!start.body.token);
+  const scode = mails[0].subject.match(/^(\d{6}) is your SOLLUNA verification code$/)[1];
+  assert.equal((await call('POST', '/auth/login', { email: SIGNUP.email, password: SIGNUP.password })).status, 401, 'no account before the code');
+  assert.equal((await call('POST', '/auth/register', { ...SIGNUP, code: scode === '999999' ? '888888' : '999999' })).status, 400);
+  const reg = await call('POST', '/auth/register', { ...SIGNUP, code: scode });
+  assert.equal(reg.status, 201, JSON.stringify(reg.body)); assert.ok(reg.body.token);
+  const cme = await call('GET', '/auth/me', null, reg.body.token);
+  assert.equal(cme.body.user.emailVerified, true, 'email proven by the code');
+  assert.equal(cme.body.organization?.legalName ?? 'Otp Client', 'Otp Client', 'business name defaults to the person');
+  assert.equal(mails.length, 1, 'no separate verification-link email');
   // Clients (LOGIN_EMAIL_OTP=staff) sign in with the password only.
-  const reg = await call('POST', '/auth/register', { name: 'Otp Client', email: 'otp.client@seller.test', phone: '9876501234', password: 'Client-Passw0rd-1', legalName: 'Otp Client Pvt Ltd', brandName: 'Otp' });
-  assert.equal(reg.status, 201, JSON.stringify(reg.body));
   assert.equal((await call('POST', '/auth/login', { email: 'otp.client@seller.test', password: 'Client-Passw0rd-1' })).status, 200);
 
   // Preview only: super admin deletes a test client and all of its data (email typed twice).
@@ -93,6 +105,6 @@ test('staff sign in with an emailed code: sent once a minute, hashed, 5 tries, o
   const del = await call('POST', '/admin/test-clients/delete', { email: 'otp.client@seller.test', confirm: 'OTP.client@seller.test' }, tok);
   assert.equal(del.status, 200, JSON.stringify(del.body)); assert.ok(del.body.rows > 0);
   assert.equal((await call('POST', '/auth/login', { email: 'otp.client@seller.test', password: 'Client-Passw0rd-1' })).status, 401);
-  const again = await call('POST', '/auth/register', { name: 'Otp Client', email: 'otp.client@seller.test', phone: '9876501234', password: 'Client-Passw0rd-1', legalName: 'Otp Client Pvt Ltd' });
-  assert.equal(again.status, 201, 'email and phone are free again');
+  const again = await call('POST', '/auth/register', { name: 'Otp Client', email: 'otp.client@seller.test', phone: '9876501234', password: 'Client-Passw0rd-1' });
+  assert.equal(again.status, 202, 'email and phone are free again (a new sign-up code is sent)');
 });

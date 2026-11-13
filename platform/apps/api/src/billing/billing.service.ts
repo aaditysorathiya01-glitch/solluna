@@ -15,6 +15,8 @@ const addDays = (d: Date, n: number) => new Date(d.getTime() + n * 86_400_000);
 const formatInr = (paise: number) => `₹${(paise / 100).toLocaleString('en-IN', { minimumFractionDigits: paise % 100 ? 2 : 0, maximumFractionDigits: 2 })}`;
 
 const ProfileSchema = z.object({
+  /** Business name printed on the GST invoice (moved here from sign-up, 13 Nov 2026). */
+  legalName: z.string().trim().min(2, 'Enter your business name').max(200).optional(),
   gstin: z.string().trim().toUpperCase().refine(isValidGstin, 'Invalid GSTIN (format or check digit)').optional().or(z.literal('').transform(() => undefined)),
   stateCode: z.string().refine((c) => c in STATES, 'Select your state').optional(),
   address: z.string().trim().min(5).max(300),
@@ -241,7 +243,7 @@ export class BillingService {
     const before = await this.db.organization.findUniqueOrThrow({ where: { id: user.organizationId! } });
     const org = await this.db.organization.update({
       where: { id: user.organizationId! },
-      data: { gstin: d.gstin ?? null, stateCode, address: d.address, city: d.city, pincode: d.pincode },
+      data: { ...(d.legalName ? { legalName: d.legalName } : {}), gstin: d.gstin ?? null, stateCode, address: d.address, city: d.city, pincode: d.pincode },
     });
     await this.audit.log({ actor: user, action: 'billing.profile_update', entity: 'Organization', entityId: org.id, before: { gstin: before.gstin, stateCode: before.stateCode }, after: { gstin: org.gstin, stateCode } });
     return { gstin: org.gstin, stateCode, stateName: STATES[stateCode], address: org.address, city: org.city, pincode: org.pincode };

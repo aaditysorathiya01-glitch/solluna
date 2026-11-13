@@ -60,6 +60,8 @@ export const config = {
   mailFrom: process.env.MAIL_FROM ?? 'SOLLUNA <no-reply@solluna.co.in>',
   /** Sign-in code by email (owner, 12 Nov 2026): off | staff | all. Active only when direct email (Resend) is configured. */
   loginEmailOtp: (process.env.LOGIN_EMAIL_OTP ?? 'staff') as 'off' | 'staff' | 'all',
+  /** Sign-up email check (owner, 13 Nov 2026): a 6-digit code to the email before the account is created. Needs direct email. */
+  signupEmailOtp: process.env.SIGNUP_EMAIL_OTP !== 'off',
 };
 
 /** True when this user signs in with an emailed 6-digit code (needs direct email, so nobody is locked out without it). */
@@ -67,3 +69,5 @@ export function emailOtpFor(type: string) {
   if (!config.resendApiKey || config.loginEmailOtp === 'off') return false;
   return config.loginEmailOtp === 'all' || type === 'STAFF';
 }
+
+export const signupEmailOtp = () => Boolean(config.resendApiKey && config.signupEmailOtp);

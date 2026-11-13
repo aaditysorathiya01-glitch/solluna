@@ -563,6 +563,7 @@ function BillingProfileForm({ billing, onSaved }: { billing: Billing; onSaved: (
     <form onSubmit={save} className="card space-y-4 p-6" aria-label="Billing details">
       <div><h2 className="font-semibold">Billing details for your GST invoice</h2><p className="text-xs text-ink-3">Add your GSTIN to claim input tax credit. Without a GSTIN, select your state; it decides CGST + SGST or IGST.</p></div>
       <div className="grid gap-3 sm:grid-cols-2">
+        <div className="sm:col-span-2"><label className="label" htmlFor="legalName">Business name (printed on your GST invoice)</label><input id="legalName" name="legalName" className="input" required defaultValue={p.legalName ?? ''} placeholder="As on your GST certificate, or your name" /></div>
         <div><label className="label" htmlFor="gstin">GSTIN (optional)</label><input id="gstin" name="gstin" className="input uppercase" defaultValue={p.gstin ?? ''} placeholder="24ABCDE1234F1Z6" /></div>
         <div><label className="label" htmlFor="stateCode">State</label>
           <select id="stateCode" name="stateCode" className="input" defaultValue={p.stateCode ?? ''}>

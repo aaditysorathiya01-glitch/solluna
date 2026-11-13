@@ -10,7 +10,7 @@ export type EventType =
   | 'labels.ready' | 'stock.alert' | 'thank_you.review' | 'thank_you.decided' | 'marketplace.status_changed' | 'announcement' | 'account.suspended' | 'manager.pending';
 
 /** Events addressed to one person by email (no organization), e.g. password reset links. */
-export interface DirectEvent { type: 'auth.password_reset' | 'auth.verify_email' | 'auth.password_changed' | 'auth.login_code'; to: string; name: string; title: string; body: string; link?: string }
+export interface DirectEvent { type: 'auth.password_reset' | 'auth.verify_email' | 'auth.password_changed' | 'auth.login_code' | 'auth.signup_code'; to: string; name: string; title: string; body: string; link?: string }
 
 export interface PlatformEvent {
   type: EventType;

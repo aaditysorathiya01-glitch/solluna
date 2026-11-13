@@ -21,10 +21,8 @@ export function AuthForm({ mode, plan }: { mode: 'login' | 'register'; plan?: st
         { name: 'name', label: 'Your name', required: true, autoComplete: 'name' },
         { name: 'email', label: 'Work email', type: 'email', required: true, autoComplete: 'email' },
         { name: 'phone', label: 'Mobile', type: 'tel', required: true, placeholder: '98XXXXXXXX', autoComplete: 'tel' },
-        { name: 'legalName', label: 'Registered business name', required: true },
-        { name: 'brandName', label: 'Brand name (optional)' },
-        { name: 'gstin', label: 'GSTIN (optional)', placeholder: '24ABCDE1234F1Z5' },
         { name: 'password', label: 'Password (10+ characters)', type: 'password', required: true, autoComplete: 'new-password' },
+        { name: 'confirmPassword', label: 'Confirm password', type: 'password', required: true, autoComplete: 'new-password' },
       ];
 
   async function submit(e: React.FormEvent<HTMLFormElement>) {
@@ -33,14 +31,22 @@ export function AuthForm({ mode, plan }: { mode: 'login' | 'register'; plan?: st
     const body: Record<string, unknown> = Object.fromEntries([...new FormData(e.currentTarget).entries()].filter(([, v]) => String(v).trim() !== ''));
     if (mode === 'register') {
       if (body.terms !== 'on') { setError('Please accept the Terms & Conditions and Privacy Policy'); setBusy(false); return; }
-      delete body.terms;
+      if (body.password !== body.confirmPassword) { setIssues({ confirmPassword: 'Passwords do not match' }); setError('Passwords do not match'); setBusy(false); return; }
+      delete body.terms; delete body.confirmPassword;
     }
     try {
-      await api(`/auth/${mode}`, { method: 'POST', body });
+      const r = await api<{ codeRequired?: boolean; message?: string }>(`/auth/${mode}`, { method: 'POST', body });
+      if (mode === 'register' && r?.codeRequired) {
+        // Email check before the account is created (owner, 13 Nov 2026).
+        setCodeHelp({ byEmail: true, text: r.message ?? 'Enter the 6-digit code we emailed you.' });
+        setNeedCode(true); setBusy(false);
+        return;
+      }
       const me = await api<{ user: { type: string } }>('/auth/me');
       router.push(me.user.type === 'STAFF' ? '/ops' : plan ? `/dashboard?plan=${plan}` : '/dashboard');
     } catch (err) {
       const a = err as ApiError;
+      if (mode === 'register' && needCode && /expired/i.test(a.message)) setNeedCode(false); // next submit sends a new code
       if (a.status === 401 && /authenticator|code/i.test(a.message) && mode === 'login') {
         const byEmail = a.body?.method === 'email';
         setCodeHelp({ byEmail, text: byEmail ? a.message : 'Two-factor authentication is on for this account. Enter the 6-digit code from your authenticator app.' });
@@ -76,6 +82,7 @@ export function AuthForm({ mode, plan }: { mode: 'login' | 'register'; plan?: st
               <label className="label" htmlFor="code">{codeHelp.byEmail ? 'Code from your email' : 'Authenticator code'}</label>
               <input className="input tracking-[0.4em]" id="code" name="code" inputMode="numeric" autoComplete="one-time-code" maxLength={6} placeholder="123456" autoFocus required />
               <p className="mt-1 text-xs text-ink-3" data-testid="code-help">{codeHelp.text}</p>
+              {mode === 'register' && <button type="button" className="mt-1 text-xs underline" onClick={(e) => { setNeedCode(false); setError(null); const f = e.currentTarget.form; setTimeout(() => f?.requestSubmit(), 0); }}>Send a new code</button>}
             </div>
           )}
           {mode === 'register' && (
@@ -85,7 +92,7 @@ export function AuthForm({ mode, plan }: { mode: 'login' | 'register'; plan?: st
             </label>
           )}
           {error && <p role="alert" className="rounded-xl bg-red-50 px-3 py-2 text-sm text-red-800">{error}</p>}
-          <button className="btn-primary w-full" disabled={busy}>{busy ? 'Please wait…' : mode === 'login' ? 'Sign in' : 'Create account'}</button>
+          <button className="btn-primary w-full" disabled={busy}>{busy ? 'Please wait…' : mode === 'login' ? 'Sign in' : needCode ? 'Verify & create account' : 'Create account'}</button>
           {mode === 'login' && <p className="text-center text-sm"><Link className="text-ink-3 underline hover:text-ink" href="/forgot-password">Forgot password?</Link></p>}
           <p className="text-center text-sm text-ink-3">
             {mode === 'login' ? <>New to SOLLUNA? <Link className="font-semibold text-ink underline" href="/register">Create an account</Link></> : <>Already registered? <Link className="font-semibold text-ink underline" href="/login">Sign in</Link></>}
