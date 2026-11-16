@@ -32,7 +32,15 @@ const ProfileSchema = z.object({
  */
 export interface ActivationInfo { planCode: string; planName: string; kind: 'new' | 'change' | 'renewal'; previousPlanCode: string | null; preview?: boolean }
 
-const PurchaseSchema = z.object({ planCode: z.enum(['RESELLER', 'GROWTH', 'PREMIUM']), acceptTerms: z.boolean().optional() });
+const PurchaseSchema = z.object({ planCode: z.enum(['RESELLER', 'GROWTH', 'PREMIUM']), acceptTerms: z.boolean().optional(), promoCode: z.string().trim().toUpperCase().max(40).optional().or(z.literal('').transform(() => undefined)) });
+const PromoSchema = z.object({
+  code: z.string().trim().toUpperCase().regex(/^[A-Z0-9-]{4,40}$/, 'Use 4–40 letters, digits or dashes'),
+  percentOff: z.number().int().min(1).max(100),
+  planCodes: z.array(z.enum(['RESELLER', 'GROWTH', 'PREMIUM'])).default([]),
+  maxUses: z.number().int().min(1).max(100000).optional(),
+  expiresAt: z.coerce.date().optional(),
+  note: z.string().trim().max(200).optional(),
+}).strict();
 const accepted = () => ({ termsVersion: TERMS_VERSION, termsAcceptedAt: new Date() });
 
 @Injectable()
@@ -52,11 +60,14 @@ export class BillingService {
   ) {}
 
   async checkout(user: AuthUser, input: unknown) {
-    const { planCode, acceptTerms } = parse(PurchaseSchema, input);
+    const { planCode, acceptTerms, promoCode } = parse(PurchaseSchema, input);
     if (acceptTerms !== true) throw new BadRequestException('Please accept the Terms & Conditions to continue');
     const orgId = user.organizationId!;
     const plan = await this.db.plan.findUnique({ where: { code: planCode } });
     if (!plan || !plan.isActive) throw new NotFoundException('Plan not available');
+    const promo = promoCode ? await this.validPromo(orgId, promoCode, plan.code) : null;
+    const discountPaise = promo ? Math.round((plan.pricePaise * promo.percentOff) / 100) : 0;
+    if (promo && plan.pricePaise - discountPaise <= 0) return this.activateFree(user, plan, promo, discountPaise);
     // Refuse before writing anything: no PENDING_PAYMENT subscription or INITIATED payment without a gateway.
     if (!this.rzp.configured) throw new ServiceUnavailableException('Online payments are not configured yet. Please contact SOLLUNA to activate your plan.');
 
@@ -75,17 +86,17 @@ export class BillingService {
     const org = await this.db.organization.findUniqueOrThrow({ where: { id: orgId } });
     const pos = org.gstin ? stateOfGstin(org.gstin) : org.stateCode;
     if (!pos || !org.address || !org.pincode) throw new BadRequestException('Add your billing address and state (or GSTIN) before paying — it is required on your GST invoice');
-    const tax = computeGst(plan.pricePaise, supplierState, pos, config.gstRateBps);
+    const tax = computeGst(plan.pricePaise - discountPaise, supplierState, pos, config.gstRateBps);
 
     const payment = await this.db.payment.create({
-      data: { organizationId: orgId, subscriptionId: subscription.id, amountPaise: tax.totalPaise, taxablePaise: tax.taxablePaise, taxPaise: tax.taxPaise, placeOfSupply: pos },
+      data: { organizationId: orgId, subscriptionId: subscription.id, amountPaise: tax.totalPaise, taxablePaise: tax.taxablePaise, taxPaise: tax.taxPaise, placeOfSupply: pos, promoCodeId: promo?.id ?? null },
     });
     const order = await this.rzp.createOrder(tax.totalPaise, payment.id, { organizationId: orgId, planCode, paymentId: payment.id });
     if (order.amount !== tax.totalPaise || order.currency !== 'INR') throw new BadRequestException('Gateway returned an unexpected amount');
     await this.db.payment.update({ where: { id: payment.id }, data: { razorpayOrderId: order.id } });
     await this.audit.log({ actor: user, action: 'payment.initiated', entity: 'Payment', entityId: payment.id, after: { planCode, ...tax, orderId: order.id } });
 
-    return { paymentId: payment.id, orderId: order.id, amount: order.amount, currency: order.currency, keyId: this.rzp.keyId, plan: { code: plan.code, name: plan.name }, tax };
+    return { paymentId: payment.id, orderId: order.id, amount: order.amount, currency: order.currency, keyId: this.rzp.keyId, plan: { code: plan.code, name: plan.name }, tax, discountPaise };
   }
 
   /** Called with the fields Razorpay Checkout returns to the browser. */
@@ -154,6 +165,13 @@ export class BillingService {
         data: { status: 'ACTIVE', currentPeriodStart: renewing ? sub.currentPeriodStart : start, currentPeriodEnd: end, graceUntil: null, cancelAtPeriodEnd: false },
       });
       await this.issueInvoice(tx, payment, sub.plan, start, end, now);
+      if (payment.promoCodeId) {
+        await tx.promoRedemption.upsert({
+          where: { promoCodeId_organizationId: { promoCodeId: payment.promoCodeId, organizationId: payment.organizationId } }, update: {},
+          create: { promoCodeId: payment.promoCodeId, organizationId: payment.organizationId, subscriptionId: sub.id, paymentId: payment.id, planCode: sub.plan.code, discountPaise: sub.plan.pricePaise - payment.taxablePaise },
+        });
+        await tx.promoCode.update({ where: { id: payment.promoCodeId }, data: { usedCount: { increment: 1 } } });
+      }
       await this.audit.log({ action: 'subscription.activate', entity: 'Subscription', entityId: sub.id, organizationId: payment.organizationId, after: { plan: sub.plan.code, source, periodEnd: end } }, tx);
       return { alreadyActive: false, payment, plan: sub.plan, end, subscription: updated, renewing: Boolean(renewing), previousPlanCode: previous?.plan.code ?? null };
     });
@@ -293,36 +311,71 @@ export class BillingService {
     }
   }
 
-  /**
-   * TEMPORARY TEST ENVIRONMENTS ONLY. Lets a tester activate a plan without a payment so the plan dashboard and the
-   * manager welcome can be tested while Razorpay is off. Refused unless PREVIEW_MODE=true, the site is not
-   * solluna.co.in and no payment gateway is configured. Creates no Payment and no invoice; audited as
-   * `preview.demo_subscription`.
-   */
-  get previewActivationAllowed() {
-    return process.env.PREVIEW_MODE === 'true' && !/solluna\.co\.in/i.test(config.appUrl) && !this.rzp.configured;
+  /** A promo code this client may use for this plan, or a clear refusal. */
+  private async validPromo(orgId: string, code: string, planCode: string) {
+    const p = await this.db.promoCode.findUnique({ where: { code } });
+    const bad = (m: string) => new BadRequestException(m);
+    if (!p || !p.isActive) throw bad('This promo code is not valid');
+    if (p.expiresAt && p.expiresAt < new Date()) throw bad('This promo code has expired');
+    if (p.maxUses != null && p.usedCount >= p.maxUses) throw bad('This promo code has been fully used');
+    if (p.planCodes.length && !p.planCodes.includes(planCode)) throw bad(`This promo code is not valid for this plan`);
+    if (await this.db.promoRedemption.findUnique({ where: { promoCodeId_organizationId: { promoCodeId: p.id, organizationId: orgId } } })) throw bad('You have already used this promo code');
+    return p;
   }
 
-  async previewActivate(user: AuthUser, input: unknown) {
-    if (!this.previewActivationAllowed) throw new NotFoundException();
-    const { planCode, acceptTerms } = parse(PurchaseSchema, input);
-    if (acceptTerms !== true) throw new BadRequestException('Please accept the Terms & Conditions to continue');
-    const orgId = user.organizationId!;
+  /** Price check shown before paying (no write). */
+  async quote(user: AuthUser, input: unknown) {
+    const { planCode, promoCode } = parse(PurchaseSchema, input);
     const plan = await this.db.plan.findUnique({ where: { code: planCode } });
     if (!plan || !plan.isActive) throw new NotFoundException('Plan not available');
+    const promo = promoCode ? await this.validPromo(user.organizationId!, promoCode, plan.code) : null;
+    const discountPaise = promo ? Math.round((plan.pricePaise * promo.percentOff) / 100) : 0;
+    const taxablePaise = plan.pricePaise - discountPaise;
+    const org = await this.db.organization.findUniqueOrThrow({ where: { id: user.organizationId! } });
+    const pos = org.gstin ? stateOfGstin(org.gstin) : org.stateCode;
+    const tax = pos && config.supplier.gstin ? computeGst(taxablePaise, this.supplierState(), pos, config.gstRateBps) : null;
+    return { plan: { code: plan.code, name: plan.name, pricePaise: plan.pricePaise }, promo: promo ? { code: promo.code, percentOff: promo.percentOff } : null, discountPaise, taxablePaise, free: taxablePaise <= 0, tax };
+  }
+
+  /** 100% promo: the plan starts without a payment (no gateway, no invoice). Audited as promo.free_activation. */
+  private async activateFree(user: AuthUser, plan: { id: string; code: string; name: string; pricePaise: number }, promo: { id: string; code: string }, discountPaise: number) {
+    const orgId = user.organizationId!;
     const previous = await this.db.subscription.findFirst({ where: { organizationId: orgId, status: { in: ['ACTIVE', 'GRACE_PERIOD', 'PAST_DUE'] } }, include: { plan: true }, orderBy: { createdAt: 'desc' } });
     if (previous?.planId === plan.id && previous.status === 'ACTIVE') throw new ConflictException(`${plan.name} is already active`);
     const start = new Date();
     const end = addMonths(start, 1);
     const sub = await this.db.$transaction(async (tx) => {
+      // Uses are counted atomically so a limited code cannot be over-redeemed.
+      const taken = await tx.$executeRaw`UPDATE "PromoCode" SET "usedCount" = "usedCount" + 1 WHERE "id" = ${promo.id} AND "isActive" AND ("maxUses" IS NULL OR "usedCount" < "maxUses")`;
+      if (!taken) throw new BadRequestException('This promo code has been fully used');
       await tx.subscription.updateMany({ where: { organizationId: orgId, status: { in: ['ACTIVE', 'GRACE_PERIOD', 'PAST_DUE', 'PENDING_PAYMENT'] } }, data: { status: 'CANCELLED' } });
       const created = await tx.subscription.create({ data: { organizationId: orgId, planId: plan.id, status: 'ACTIVE', currentPeriodStart: start, currentPeriodEnd: end, ...accepted() } });
-      await this.audit.log({ actor: user, action: 'preview.demo_subscription', entity: 'Subscription', entityId: created.id, after: { plan: plan.code, termsVersion: TERMS_VERSION, note: 'Preview test activation — no payment, no invoice' } }, tx);
+      await tx.promoRedemption.create({ data: { promoCodeId: promo.id, organizationId: orgId, subscriptionId: created.id, planCode: plan.code, discountPaise } });
+      await this.audit.log({ actor: user, action: 'promo.free_activation', entity: 'Subscription', entityId: created.id, after: { plan: plan.code, promo: promo.code, termsVersion: TERMS_VERSION } }, tx);
       return created;
     });
-    await this.dispatch.emit({ type: 'subscription.activated', organizationId: orgId, title: `${plan.name} plan active`, body: `Test activation in the preview environment — no payment was taken. Active until ${end.toDateString()}.` });
-    await this.runActivationListeners(orgId, { planCode: plan.code, planName: plan.name, kind: previous ? 'change' : 'new', previousPlanCode: previous?.plan.code ?? null, preview: true });
-    return { status: sub.status, plan: { code: plan.code, name: plan.name }, currentPeriodEnd: end };
+    await this.dispatch.emit({ type: 'subscription.activated', organizationId: orgId, title: `${plan.name} plan active`, body: `Activated with promo code ${promo.code} — no payment needed. Active until ${end.toDateString()}.` });
+    await this.runActivationListeners(orgId, { planCode: plan.code, planName: plan.name, kind: previous ? 'change' : 'new', previousPlanCode: previous?.plan.code ?? null });
+    return { status: sub.status, free: true, plan: { code: plan.code, name: plan.name }, currentPeriodEnd: end };
+  }
+
+  // ───────── Promo codes (super admin) ─────────
+  async listPromos() {
+    return this.db.promoCode.findMany({ orderBy: { createdAt: 'desc' }, include: { _count: { select: { redemptions: true } } } });
+  }
+
+  async createPromo(user: AuthUser, input: unknown) {
+    const d = parse(PromoSchema, input);
+    if (await this.db.promoCode.findUnique({ where: { code: d.code } })) throw new ConflictException('A promo code with this name already exists');
+    const p = await this.db.promoCode.create({ data: { ...d, createdById: user.id } });
+    await this.audit.log({ actor: user, action: 'promo.create', entity: 'PromoCode', entityId: p.id, after: d });
+    return p;
+  }
+
+  async setPromoActive(user: AuthUser, id: string, isActive: boolean) {
+    const p = await this.db.promoCode.update({ where: { id }, data: { isActive } });
+    await this.audit.log({ actor: user, action: isActive ? 'promo.enable' : 'promo.disable', entity: 'PromoCode', entityId: id });
+    return p;
   }
 
   async billingSummary(user: AuthUser) {
@@ -338,7 +391,6 @@ export class BillingService {
       subscriptions, payments, invoices, profile,
       profileComplete: Boolean(profile.stateCode && org.address && org.pincode),
       paymentsConfigured: this.rzp.configured && this.invoicingConfigured,
-      previewActivation: this.previewActivationAllowed,
       gst: { rateBps: config.gstRateBps, supplierState: config.supplier.gstin ? stateOfGstin(config.supplier.gstin) : null },
       states: STATES,
     };

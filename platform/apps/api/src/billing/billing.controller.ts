@@ -26,8 +26,17 @@ export class BillingController {
   checkout(@CurrentUser() user: AuthUser, @Body() body: unknown) { return this.billing.checkout(user, body); }
 
   /** Preview environments only (PREVIEW_MODE): activate a plan without payment for testing. 404 everywhere else. */
-  @CustomerOnly() @Post('preview-activate') @HttpCode(200)
-  previewActivate(@CurrentUser() user: AuthUser, @Body() body: unknown) { return this.billing.previewActivate(user, body); }
+  @CustomerOnly() @Post('quote') @HttpCode(200)
+  quote(@CurrentUser() user: AuthUser, @Body() body: unknown) { return this.billing.quote(user, body); }
+
+  @StaffOnly('SUPER_ADMIN') @Get('admin/promo-codes')
+  promos() { return this.billing.listPromos(); }
+
+  @StaffOnly('SUPER_ADMIN') @Post('admin/promo-codes')
+  createPromo(@CurrentUser() user: AuthUser, @Body() body: unknown) { return this.billing.createPromo(user, body); }
+
+  @StaffOnly('SUPER_ADMIN') @Patch('admin/promo-codes/:id') @HttpCode(200)
+  setPromo(@CurrentUser() user: AuthUser, @Param('id') id: string, @Body() body: { isActive?: boolean }) { return this.billing.setPromoActive(user, id, body?.isActive === true); }
 
   @CustomerOnly() @Post('cancel') @HttpCode(200)
   cancel(@CurrentUser() user: AuthUser, @Body() body: unknown) { return this.billing.setCancel(user, body); }

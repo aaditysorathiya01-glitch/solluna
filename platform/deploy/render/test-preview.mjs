@@ -239,7 +239,9 @@ await check('UI', 'New sign-up: plans only → test activation → plan dashboar
   assert(await p.locator('nav[aria-label="Dashboard"]').count() === 0, 'tabs visible before a plan');
   await shot(p, 'signup-plans');
   await p.getByRole('button', { name: 'Select Growth' }).click();
-  await p.getByRole('button', { name: 'Activate Growth for testing (no payment)' }).click();
+  // Test activation button removed (16 Nov 2026): apply a 100% promo code created in Admin → Promo codes.
+  await p.fill('#promo-code', process.env.PREVIEW_PROMO ?? 'SOLLUNA100'); await p.click('button:has-text("Apply")');
+  await p.getByRole('button', { name: 'Activate Growth with promo code' }).click();
   const mgr = p.getByRole('region', { name: 'Your account manager' });
   await mgr.getByText('Assigned within 1 hour', { exact: false }).waitFor({ timeout: 30000 });
   const tabs = (await p.locator('nav[aria-label="Dashboard"] button').allInnerTexts()).map((t) => t.trim().toLowerCase());

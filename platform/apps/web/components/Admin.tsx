@@ -16,7 +16,7 @@ const ROLES = ['SUPER_ADMIN', 'OPERATIONS_MANAGER', 'LISTING_EXECUTIVE', 'ADS_MA
 
 export function AdminConsole({ role }: { role: string }) {
   const superAdmin = role === 'SUPER_ADMIN';
-  const tabs = [['overview', 'Overview'], ['clients', 'Clients'], ['team', 'Team'], ['plans', 'Plans'], ['payments', 'Payments'], ['manager-cost', 'Manager cost'], ['ops-mail', 'Ops mailbox'], ['inquiries', 'Enquiries'], ['announce', 'Announcements'], ...(superAdmin ? [['audit', 'Audit log'] as const] : [])] as const;
+  const tabs = [['overview', 'Overview'], ['clients', 'Clients'], ['team', 'Team'], ['plans', 'Plans'], ['payments', 'Payments'], ['manager-cost', 'Manager cost'], ['ops-mail', 'Ops mailbox'], ['inquiries', 'Enquiries'], ['announce', 'Announcements'], ...(superAdmin ? [['promo', 'Promo codes'] as const, ['audit', 'Audit log'] as const] : [])] as const;
   const [tab, setTab] = useState<string>('overview');
   const [flash, setFlash] = useState<FlashMsg>(null);
   return (
@@ -33,6 +33,7 @@ export function AdminConsole({ role }: { role: string }) {
       {tab === 'ops-mail' && <OpsMailPanel />}
       {tab === 'inquiries' && <InquiriesPanel onFlash={setFlash} />}
       {tab === 'announce' && <AnnouncePanel onFlash={setFlash} />}
+      {tab === 'promo' && superAdmin && <PromoPanel onFlash={setFlash} />}
       {tab === 'audit' && superAdmin && <AuditPanel />}
     </main>
   );
@@ -480,6 +481,61 @@ function OpsMailPanel() {
         </table>
       </div>
       {open && <Modal title={open.subject} onClose={() => setOpen(null)}><pre className="max-h-[60vh] overflow-auto whitespace-pre-wrap text-sm">{open.text}</pre></Modal>}
+    </section>
+  );
+}
+
+interface Promo { id: string; code: string; percentOff: number; planCodes: string[]; maxUses: number | null; usedCount: number; expiresAt: string | null; isActive: boolean; note: string | null; createdAt: string }
+/** Promo codes: 100% off starts the plan without payment; less than 100% reduces the Razorpay amount. One use per client. */
+function PromoPanel({ onFlash }: { onFlash: (m: FlashMsg) => void }) {
+  const rows = useApi<Promo[]>('/billing/admin/promo-codes');
+  const [plans, setPlans] = useState<string[]>([]);
+  const [err, setErr] = useState<string | null>(null);
+  async function create(e: React.FormEvent<HTMLFormElement>) {
+    e.preventDefault(); setErr(null);
+    const b = formBody(e.currentTarget) as Record<string, string>;
+    try {
+      await api('/billing/admin/promo-codes', { method: 'POST', body: { code: b.code, percentOff: Number(b.percentOff), planCodes: plans, ...(b.maxUses ? { maxUses: Number(b.maxUses) } : {}), ...(b.expiresAt ? { expiresAt: b.expiresAt } : {}), ...(b.note ? { note: b.note } : {}) } });
+      (e.target as HTMLFormElement).reset(); setPlans([]); onFlash({ kind: 'ok', text: `Promo code ${b.code.toUpperCase()} created.` }); rows.reload();
+    } catch (x) { setErr(errText(x)); }
+  }
+  async function toggle(p: Promo) {
+    try { await api(`/billing/admin/promo-codes/${p.id}`, { method: 'PATCH', body: { isActive: !p.isActive } }); rows.reload(); } catch (x) { setErr(errText(x)); }
+  }
+  return (
+    <section className="space-y-4" aria-label="Promo codes">
+      <form onSubmit={create} className="card grid gap-3 p-5 sm:grid-cols-3">
+        <h2 className="font-semibold sm:col-span-3">New promo code</h2>
+        <div><label className="label" htmlFor="promo-new-code">Code</label><input id="promo-new-code" name="code" className="input uppercase" required placeholder="LAUNCH100" /></div>
+        <div><label className="label" htmlFor="promo-new-pct">Discount %</label><input id="promo-new-pct" name="percentOff" type="number" min={1} max={100} className="input" required placeholder="100 = free" /></div>
+        <div><label className="label" htmlFor="promo-new-max">Max uses (blank = no limit)</label><input id="promo-new-max" name="maxUses" type="number" min={1} className="input" /></div>
+        <div><label className="label" htmlFor="promo-new-exp">Valid until (optional)</label><input id="promo-new-exp" name="expiresAt" type="date" className="input" /></div>
+        <div className="sm:col-span-2"><span className="label">Plans (none ticked = all plans)</span>
+          <div className="mt-2 flex gap-4 text-sm">{['RESELLER', 'GROWTH', 'PREMIUM'].map((c) => (
+            <label key={c} className="flex items-center gap-1"><input type="checkbox" checked={plans.includes(c)} onChange={(e) => setPlans((p) => e.target.checked ? [...p, c] : p.filter((x) => x !== c))} />{human(c)}</label>))}</div></div>
+        <div className="sm:col-span-3"><label className="label" htmlFor="promo-new-note">Note (internal)</label><input id="promo-new-note" name="note" className="input" placeholder="e.g. first 10 launch clients" /></div>
+        {err && <p role="alert" className="rounded-xl bg-red-50 px-3 py-2 text-sm text-red-800 sm:col-span-3">{err}</p>}
+        <div className="sm:col-span-3"><button className="btn-primary">Create code</button> <span className="ml-2 text-xs text-ink-3">100% = plan starts without payment (no invoice). One use per client.</span></div>
+      </form>
+      <div className="card overflow-x-auto">
+        <table className="w-full min-w-[720px] text-sm">
+          <thead><tr className="border-b border-ink/10 text-left text-xs uppercase tracking-wider text-ink-3"><th className="p-3">Code</th><th>Off</th><th>Plans</th><th>Used</th><th>Valid until</th><th>Status</th><th /></tr></thead>
+          <tbody>
+            {rows.data?.map((p) => (
+              <tr key={p.id} className="border-t border-ink/5">
+                <td className="p-3 font-mono">{p.code}{p.note && <p className="font-sans text-xs text-ink-3">{p.note}</p>}</td>
+                <td>{p.percentOff}%</td>
+                <td>{p.planCodes.length ? p.planCodes.map(human).join(', ') : 'All'}</td>
+                <td>{p.usedCount}{p.maxUses != null ? ` / ${p.maxUses}` : ''}</td>
+                <td>{p.expiresAt ? d(p.expiresAt) : '—'}</td>
+                <td><Status s={p.isActive ? 'ACTIVE' : 'CANCELLED'} label={p.isActive ? 'Active' : 'Off'} /></td>
+                <td className="p-3 text-right"><button className="btn-ghost py-1 text-xs" onClick={() => toggle(p)}>{p.isActive ? 'Turn off' : 'Turn on'}</button></td>
+              </tr>
+            ))}
+            {rows.data && !rows.data.length && <tr><td className="p-4 text-ink-3" colSpan={7}>No promo codes yet.</td></tr>}
+          </tbody>
+        </table>
+      </div>
     </section>
   );
 }

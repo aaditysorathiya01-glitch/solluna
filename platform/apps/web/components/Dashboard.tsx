@@ -21,7 +21,6 @@ interface Approval { id: string; actionType: string; parameters: Record<string, 
 interface BillingProfile { legalName: string; gstin: string | null; address: string | null; city: string | null; pincode: string | null; stateCode: string | null }
 interface Billing {
   paymentsConfigured: boolean;
-  previewActivation?: boolean;
   profile: BillingProfile;
   profileComplete: boolean;
   gst: { rateBps: number; supplierState: string | null };
@@ -332,10 +331,12 @@ const PLAN_PITCH: Record<string, string> = {
 };
 
 /** Opens Razorpay Checkout for a plan; activation happens only after server-side signature verification. */
-async function startCheckout(code: string, onDone: (m: { kind: 'ok' | 'err'; text: string }, activated?: boolean) => void, setBusy: (b: string | null) => void) {
+async function startCheckout(code: string, onDone: (m: { kind: 'ok' | 'err'; text: string }, activated?: boolean) => void, setBusy: (b: string | null) => void, promoCode?: string) {
   setBusy(code);
   try {
-    const order = await api<{ orderId: string; amount: number; currency: string; keyId: string; plan: { name: string } }>('/billing/checkout', { method: 'POST', body: { planCode: code, acceptTerms: true } });
+    const res = await api<{ free?: boolean; orderId: string; amount: number; currency: string; keyId: string; plan: { name: string } }>('/billing/checkout', { method: 'POST', body: { planCode: code, acceptTerms: true, ...(promoCode ? { promoCode } : {}) } });
+    if (res.free) { onDone({ kind: 'ok', text: `${res.plan.name} plan activated with your promo code. Your dedicated manager will be assigned shortly.` }, true); setBusy(null); return; }
+    const order = res;
     await loadRazorpay();
     const rzp = new window.Razorpay!({
       key: order.keyId, order_id: order.orderId, amount: order.amount, currency: order.currency,
@@ -364,14 +365,19 @@ function PlanPicker({ firstName, billing, plans, preselect, lapsed, verifying, o
   const plan = plans.find((p) => p.code === selected) ?? null;
   useEffect(() => { if (selected) document.getElementById('activate')?.scrollIntoView({ behavior: 'smooth', block: 'start' }); }, [selected]);
 
-  async function previewActivate(code: string) {
-    setBusy(code);
+  const [promoInput, setPromoInput] = useState('');
+  const [promo, setPromo] = useState<{ code: string; percentOff: number; discountPaise: number; taxablePaise: number; free: boolean } | null>(null);
+  const [promoErr, setPromoErr] = useState<string | null>(null);
+  useEffect(() => { setPromo(null); setPromoErr(null); }, [selected]);
+  async function applyPromo() {
+    if (!plan || !promoInput.trim()) return;
+    setPromoErr(null);
     try {
-      const r = await api<{ plan: { name: string } }>('/billing/preview-activate', { method: 'POST', body: { planCode: code, acceptTerms: true } });
-      onDone({ kind: 'ok', text: `${r.plan.name} plan activated for testing (no payment). Your dedicated manager will be assigned within 1 hour.` }, true);
-    } catch (e) { onDone({ kind: 'err', text: (e as Error).message }); }
-    setBusy(null);
+      const q = await api<{ promo: { code: string; percentOff: number }; discountPaise: number; taxablePaise: number; free: boolean }>('/billing/quote', { method: 'POST', body: { planCode: plan.code, promoCode: promoInput.trim() } });
+      setPromo({ code: q.promo.code, percentOff: q.promo.percentOff, discountPaise: q.discountPaise, taxablePaise: q.taxablePaise, free: q.free });
+    } catch (e) { setPromo(null); setPromoErr((e as Error).message); }
   }
+  const taxable = plan ? (promo ? promo.taxablePaise : plan.pricePaise) : 0;
 
   return (
     <div className="space-y-8">
@@ -427,27 +433,35 @@ function PlanPicker({ firstName, billing, plans, preselect, lapsed, verifying, o
           <BillingProfileForm billing={billing} onSaved={(m) => onDone(m)} />
           <div className="card p-6">
             <div className="flex flex-wrap items-baseline justify-between gap-2 text-sm"><span>{plan.name} plan · 1 month</span><span>{inrExact(plan.pricePaise)}</span></div>
-            {billing.profileComplete && billing.gst.supplierState ? (
+            {promo && <div className="mt-1 flex justify-between text-sm text-emerald-800" data-testid="promo-discount"><span>Promo {promo.code} ({promo.percentOff}% off)</span><span>− {inrExact(promo.discountPaise)}</span></div>}
+            {promo?.free ? (
+              <p className="mt-3 flex justify-between border-t border-ink/10 pt-3 font-semibold" data-testid={`total-${plan.code}`}><span>Payable</span><span>₹0</span></p>
+            ) : billing.profileComplete && billing.gst.supplierState ? (
               <>
-                <div className="mt-1 flex justify-between text-sm text-ink-3"><span>{gstTotal(plan.pricePaise, billing).label}</span><span>{inrExact(gstTotal(plan.pricePaise, billing).total - plan.pricePaise)}</span></div>
-                <p className="mt-3 flex justify-between border-t border-ink/10 pt-3 font-semibold" data-testid={`total-${plan.code}`}><span>Payable</span><span>{inrExact(gstTotal(plan.pricePaise, billing).total)}</span></p>
+                <div className="mt-1 flex justify-between text-sm text-ink-3"><span>{gstTotal(taxable, billing).label}</span><span>{inrExact(gstTotal(taxable, billing).total - taxable)}</span></div>
+                <p className="mt-3 flex justify-between border-t border-ink/10 pt-3 font-semibold" data-testid={`total-${plan.code}`}><span>Payable</span><span>{inrExact(gstTotal(taxable, billing).total)}</span></p>
               </>
             ) : <p className="mt-2 text-xs text-ink-3">Save your billing details above to see GST and the total.</p>}
-            {!billing.paymentsConfigured && (
+            <div className="mt-4 flex gap-2">
+              <input id="promo-code" className="input uppercase" placeholder="Promo code" value={promoInput} onChange={(e) => setPromoInput(e.target.value)} aria-label="Promo code" />
+              <button type="button" className="btn-ghost whitespace-nowrap" onClick={applyPromo} disabled={!promoInput.trim()}>Apply</button>
+            </div>
+            {promoErr && <p role="alert" className="mt-1 text-xs text-red-700">{promoErr}</p>}
+            {!billing.paymentsConfigured && !promo?.free && (
               <p className="mt-4 rounded-xl bg-amber-50 px-4 py-3 text-sm text-amber-900">Online payments are not configured yet. To start now, write to <a className="underline" href={`mailto:${CONTACT.email}`}>{CONTACT.email}</a> and we will activate your plan.</p>
             )}
             <label className="mt-4 flex items-start gap-2 text-sm text-ink-2">
               <input id="accept-terms" type="checkbox" className="mt-1" checked={agreed} onChange={(e) => setAgreed(e.target.checked)} />
               <span>I agree to the <a className="underline" href="/terms" target="_blank" rel="noreferrer">Terms &amp; Conditions</a>, including section 6: I will add SOLLUNA as a user on my seller accounts and allow SOLLUNA&rsquo;s automated tools to work there for my plan.</span>
             </label>
-            <button className="btn-primary mt-4 w-full" disabled={!agreed || !billing.paymentsConfigured || !billing.profileComplete || busy !== null} onClick={() => startCheckout(plan.code, onDone, setBusy)}>
-              {busy === plan.code ? 'Opening checkout…' : `Pay & activate ${plan.name}`}
-            </button>
-            {billing.previewActivation && (
-              <div className="mt-4 rounded-xl border border-dashed border-amber-400 p-4">
-                <p className="text-xs text-amber-900">Test environment only: activate this plan without payment to try the plan dashboard. No payment or invoice is created.</p>
-                <button className="btn-ghost mt-3 w-full" disabled={!agreed || busy !== null} onClick={() => previewActivate(plan.code)}>{busy === plan.code ? 'Activating…' : `Activate ${plan.name} for testing (no payment)`}</button>
-              </div>
+            {promo?.free ? (
+              <button className="btn-primary mt-4 w-full" disabled={!agreed || busy !== null} onClick={() => startCheckout(plan.code, onDone, setBusy, promo.code)}>
+                {busy === plan.code ? 'Activating…' : `Activate ${plan.name} with promo code`}
+              </button>
+            ) : (
+              <button className="btn-primary mt-4 w-full" disabled={!agreed || !billing.paymentsConfigured || !billing.profileComplete || busy !== null} onClick={() => startCheckout(plan.code, onDone, setBusy, promo?.code)}>
+                {busy === plan.code ? 'Opening checkout…' : `Pay & activate ${plan.name}`}
+              </button>
             )}
           </div>
         </section>

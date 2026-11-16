@@ -659,7 +659,7 @@ test('chat: auto-assigned manager, live delivery both ways, internal notes stay 
   const fayLater = ok(await call('GET', '/chat', { token: fay }));
   assert.equal(fayLater.managers.length, 1, 'due hand-off runs when the client opens chat');
   assert.equal(fayLater.messages.length, 3);
-  assert.equal((await call('POST', '/billing/preview-activate', { token: esha, body: { planCode: 'RESELLER' } })).status, 404, 'test activation exists only in preview environments');
+  assert.equal((await call('POST', '/billing/preview-activate', { token: esha, body: { planCode: 'RESELLER' } })).status, 404, 'test activation was removed (promo codes replace it)');
   ok(await call('POST', `/admin/clients/${S.dOrg}/managers`, { token: S.admin, body: { managerId: S.sup1.id } }));
   const dHist = ok(await call('GET', '/chat', { token: S.d }));
   const assigned = dHist.managers[0];
@@ -1957,6 +1957,55 @@ test('ops mailbox: Cloudflare Worker posts mail; OTP encrypted, one read, masked
   assert.equal(ok(await call('POST', `/ops/ops-mail/${stored.id}/otp`, { token: exec.token })).otp, '482913');
   assert.equal((await call('POST', `/ops/ops-mail/${stored.id}/otp`, { token: exec.token })).status, 404, 'deleted after one read');
   assert.ok(await db.auditLog.count({ where: { action: 'ops_mail.otp_read', entityId: stored.id } }) === 1);
+});
+
+test('promo codes: admin creates; 100% starts the plan without payment; 50% reduces the Razorpay amount and the invoice; one use per client; limits and plan rules', async () => {
+  const exec = await staff('ACCOUNTS_EXECUTIVE', S.admin);
+  assert.equal((await call('POST', '/billing/admin/promo-codes', { token: exec.token, body: { code: 'NOPE100', percentOff: 100 } })).status, 403, 'super admin only');
+  ok(await call('POST', '/billing/admin/promo-codes', { token: S.admin, body: { code: 'free-reseller', percentOff: 100, planCodes: ['RESELLER'], maxUses: 1, note: 'launch' } }));
+  ok(await call('POST', '/billing/admin/promo-codes', { token: S.admin, body: { code: 'HALF50', percentOff: 50 } }));
+  assert.equal((await call('POST', '/billing/admin/promo-codes', { token: S.admin, body: { code: 'HALF50', percentOff: 10 } })).status, 409);
+
+  const a = await registerCustomer('Promoa');
+  ok(await call('PATCH', '/billing/profile', { token: a, body: PROFILE }));
+  const wrongPlan = await call('POST', '/billing/quote', { token: a, body: { planCode: 'GROWTH', promoCode: 'FREE-RESELLER' } });
+  assert.equal(wrongPlan.status, 400); assert.match(wrongPlan.body.message, /not valid for this plan/);
+  assert.equal((await call('POST', '/billing/quote', { token: a, body: { planCode: 'RESELLER', promoCode: 'NOSUCH' } })).status, 400);
+  const q = ok(await call('POST', '/billing/quote', { token: a, body: { planCode: 'RESELLER', promoCode: 'free-reseller' } }));
+  assert.equal(q.free, true); assert.equal(q.discountPaise, 199900);
+  const paymentsBefore = await db.payment.count();
+  const freeAct = ok(await call('POST', '/billing/checkout', { token: a, body: { planCode: 'RESELLER', acceptTerms: true, promoCode: 'FREE-RESELLER' } }));
+  assert.equal(freeAct.free, true); assert.equal(freeAct.status, 'ACTIVE');
+  assert.equal(await db.payment.count(), paymentsBefore, 'no payment row for a 100% code');
+  const me = ok(await call('GET', '/auth/me', { token: a }));
+  const sub = await db.subscription.findFirst({ where: { organizationId: me.user.organizationId, status: 'ACTIVE' } });
+  assert.ok(sub?.termsVersion, 'terms recorded'); assert.ok(sub.currentPeriodEnd > new Date());
+  assert.equal(await db.invoice.count({ where: { organizationId: me.user.organizationId } }), 0, 'no invoice for a free activation');
+
+  const b = await registerCustomer('Promob');
+  ok(await call('PATCH', '/billing/profile', { token: b, body: PROFILE }));
+  const used = await call('POST', '/billing/checkout', { token: b, body: { planCode: 'RESELLER', acceptTerms: true, promoCode: 'FREE-RESELLER' } });
+  assert.equal(used.status, 400); assert.match(used.body.message, /fully used/);
+
+  // 50%: Razorpay order for half the price + GST; the invoice shows the discounted taxable value.
+  const co = ok(await call('POST', '/billing/checkout', { token: b, body: { planCode: 'GROWTH', acceptTerms: true, promoCode: 'half50' } }));
+  assert.equal(co.discountPaise, 249950); assert.equal(co.tax.taxablePaise, 249950); assert.equal(co.amount, co.tax.totalPaise);
+  const payId = `pay_${co.orderId}`;
+  ok(await call('POST', '/billing/verify', { token: b, body: { razorpay_order_id: co.orderId, razorpay_payment_id: payId, razorpay_signature: sign(KEY_SECRET, `${co.orderId}|${payId}`) } }));
+  const bOrg = ok(await call('GET', '/auth/me', { token: b })).user.organizationId;
+  const inv = await db.invoice.findFirst({ where: { organizationId: bOrg } });
+  assert.equal(inv.taxablePaise, 249950, 'invoice at the discounted value');
+  assert.equal((await db.promoCode.findUnique({ where: { code: 'HALF50' } })).usedCount, 1);
+  assert.equal((await db.promoRedemption.findFirst({ where: { organizationId: bOrg } })).discountPaise, 249950);
+  const again = await call('POST', '/billing/quote', { token: b, body: { planCode: 'PREMIUM', promoCode: 'HALF50' } });
+  assert.equal(again.status, 400); assert.match(again.body.message, /already used/);
+
+  // Turned off codes stop working; the list shows uses.
+  const list = ok(await call('GET', '/billing/admin/promo-codes', { token: S.admin }));
+  const half = list.find((p) => p.code === 'HALF50');
+  ok(await call('PATCH', `/billing/admin/promo-codes/${half.id}`, { token: S.admin, body: { isActive: false } }));
+  const c = await registerCustomer('Promoc');
+  assert.equal((await call('POST', '/billing/quote', { token: c, body: { planCode: 'GROWTH', promoCode: 'HALF50' } })).status, 400);
 });
 
 test('test-client delete is refused outside preview', async () => {
