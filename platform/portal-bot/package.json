@@ -1,0 +1,15 @@
+{
+  "name": "solluna-portal-bot",
+  "private": true,
+  "version": "0.1.0",
+  "description": "SOLLUNA AI browser (runs on its own server, talks to the SOLLUNA API). See docs/plans/AI_BROWSER_STACK.md.",
+  "type": "module",
+  "scripts": {
+    "smoke": "node test/smoke.mjs"
+  },
+  "dependencies": {
+    "@browserbasehq/stagehand": "^3.7.3",
+    "pg-boss": "^12.38.2",
+    "playwright-core": "^1.63.0"
+  }
+}
