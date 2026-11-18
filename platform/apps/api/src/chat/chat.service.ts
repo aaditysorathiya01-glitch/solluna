@@ -1,3 +1,4 @@
+import { HOURS_TEXT, isOpen, nextOpen, openLabel } from '../common/business-hours';
 import { BadRequestException, Injectable, Logger, NotFoundException, OnModuleInit } from '@nestjs/common';
 import { Subject } from 'rxjs';
 import { z } from 'zod';
@@ -265,13 +266,16 @@ export class ChatService implements OnModuleInit {
   async welcomeOnActivation(orgId: string, info: ActivationInfo) {
     if (info.kind === 'renewal') return;
     const hasManager = await this.activeManagerId(orgId);
-    const dueAt = new Date(Date.now() + WELCOME_DELAY_MIN * 60_000);
+    // Outside working hours the hand-off waits for the next opening (owner, 18 Nov 2026).
+    const opens = nextOpen();
+    const dueAt = new Date(opens.getTime() + WELCOME_DELAY_MIN * 60_000);
     const data = { planCode: info.planCode, previousPlanCode: info.previousPlanCode, kind: hasManager ? 'CHANGE' : 'NEW', preview: Boolean(info.preview), step: 0, dueAt };
     await this.db.managerWelcome.upsert({ where: { organizationId: orgId }, create: { organizationId: orgId, ...data }, update: { ...data, createdAt: new Date() } });
     if (!hasManager) {
-      await this.dispatch.emit({ type: 'manager.pending', organizationId: orgId, title: 'Your manager is being assigned', body: `Your ${info.planName} plan is active. Your dedicated SOLLUNA manager will be assigned within 1 hour and will message you in Manager chat.` });
+      const when = isOpen() ? 'within 1 hour' : `when we open (${openLabel(opens)}; working hours ${HOURS_TEXT})`;
+      await this.dispatch.emit({ type: 'manager.pending', organizationId: orgId, title: 'Your manager is being assigned', body: `Your ${info.planName} plan is active. Your dedicated SOLLUNA manager will be assigned ${when} and will message you in Manager chat.` });
     }
-    if (WELCOME_DELAY_MIN === 0) await this.processWelcomes(orgId);
+    if (WELCOME_DELAY_MIN === 0 && isOpen()) await this.processWelcomes(orgId);
   }
 
   private async activeManagerId(orgId: string) {

@@ -36,3 +36,6 @@ Categories: onboarding, language, off-topic, injection, identity, secrets, plan,
 - Never says "AI"; never claims to be human when sincerely asked.
 - Never asks for or stores passwords / OTPs; never marks a seller account connected.
 - Plan checks, approvals and tenant isolation are enforced by the server, not by the prompt.
+
+## Working hours (owner, 18 Nov 2026)
+Mon–Sat, 10 AM–7 PM IST (`BUSINESS_HOURS`, default `1-6 10:00-19:00`; `24x7` turns it off). Outside hours: manager hand-off and chat replies wait for the next opening; the client gets one short note ("Thanks for your message. Our working hours are … I will reply at …"). Code: `apps/api/src/common/business-hours.ts`.

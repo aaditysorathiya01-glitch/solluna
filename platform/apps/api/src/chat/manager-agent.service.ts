@@ -1,3 +1,4 @@
+import { HOURS_TEXT, isOpen, nextOpen, openLabel } from '../common/business-hours';
 import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import Anthropic from '@anthropic-ai/sdk';
 import { Prisma } from '@prisma/client';
@@ -34,6 +35,7 @@ const REPLY_DELAY_SEC = Number(process.env.AGENT_REPLY_DELAY_SEC ?? 15);
 const HUMAN_QUIET_MIN = Number(process.env.AGENT_HUMAN_QUIET_MIN ?? 30);
 /** Recent messages sent as-is; older ones live in a rolling summary (memory pattern adapted from claude-mem). */
 const HISTORY = Number(process.env.AGENT_HISTORY ?? 16);
+const CLOSED_PREFIX = 'Thanks for your message.';
 const DIGEST_AFTER = Number(process.env.AGENT_DIGEST_AFTER ?? 24);
 const DIGEST_SYSTEM = 'You keep the running notes for one client of SOLLUNA (Amazon / Flipkart account management). Update the notes with the new chat lines: what they sell, decisions, requests, pending items, preferences, language. Max 120 words, plain text, no greetings. Never include passwords, OTPs or card numbers.';
 const MAX_TURNS = 6;
@@ -75,11 +77,26 @@ export class ManagerAgentService implements OnModuleInit {
     const conv = await this.db.conversation.findUnique({ where: { organizationId: orgId }, select: { agentPaused: true } });
     if (conv?.agentPaused) return;
     const queued = await this.db.agentRun.findFirst({ where: { organizationId: orgId, status: 'QUEUED' } });
-    const dueAt = new Date(Date.now() + REPLY_DELAY_SEC * 1000);
+    // Working hours: outside them the reply waits for the next opening; the client gets one short note now.
+    const open = isOpen();
+    const dueAt = open ? new Date(Date.now() + REPLY_DELAY_SEC * 1000) : new Date(nextOpen().getTime() + REPLY_DELAY_SEC * 1000);
+    if (!open && !update) await this.closedNote(orgId);
     const note = update ? `update:${update}`.slice(0, 300) : undefined;
     // The client's own message wins: a reply already queued for them sees the newest pipeline step in the facts anyway.
     if (queued) await this.db.agentRun.update({ where: { id: queued.id }, data: update ? {} : { dueAt, note: null } });
     else await this.db.agentRun.create({ data: { organizationId: orgId, dueAt, note } });
+  }
+
+  /** One "we are closed" note per closed period, from the client's manager (only if one is assigned). */
+  private async closedNote(orgId: string) {
+    const a = await this.db.managerAssignment.findFirst({ where: { organizationId: orgId, isPrimary: true, endedAt: null }, select: { managerId: true } });
+    if (!a) return;
+    const conv = await this.db.conversation.findUnique({ where: { organizationId: orgId }, select: { id: true } });
+    if (!conv) return;
+    const since = new Date(Date.now() - 15 * 3_600_000); // longer than any closed night
+    const already = await this.db.message.findFirst({ where: { conversationId: conv.id, byAgent: true, createdAt: { gte: since }, body: { startsWith: CLOSED_PREFIX } } });
+    if (already) return;
+    await this.chat.postAsManager(orgId, a.managerId, `${CLOSED_PREFIX} Our working hours are ${HOURS_TEXT}. Your message is saved, and I will reply at ${openLabel(nextOpen())}.`, { byAgent: true });
   }
 
   async tick() {
