@@ -19,10 +19,10 @@ const GUIDES = {
   amazon: {
     title: 'Amazon Seller Central',
     steps: [
-      'Open Seller Central and click Settings (top right) → User Permissions (Manage permissions).',
-      'Under Action, click Invite employee.',
-      `Enter Name: ${OPS.name} and Email: ${OPS.email}, then send the invite.`,
-      'After we accept, click Confirm next to SOLLUNA and give View & Edit permissions. Bank and payment sections are not needed.',
+      'Open Seller Central and click the Settings icon (gear, top right).',
+      'Click Manage permissions.',
+      'On Manage Employees, click Actions → Invite Employee.',
+      `Fill in Name: ${OPS.name} and E-mail: ${OPS.email}, keep sellerCentral ticked, then click Send Invite. After we accept, click Confirm next to SOLLUNA and give View & Edit permissions. Bank and payment sections are not needed.`,
     ],
   },
 } as const;

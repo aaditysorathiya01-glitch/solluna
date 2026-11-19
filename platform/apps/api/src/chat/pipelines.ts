@@ -325,10 +325,11 @@ export function accessGuide(mp: Marketplace) {
   ].join('\n');
   return [
     'How to add SOLLUNA on Amazon Seller Central:',
-    '1. Open Seller Central → Settings (top right) → User Permissions (Manage permissions).',
-    '2. Under Action, click Invite employee.',
-    `3. Enter Name: ${ops.name} · Email: ${ops.email} and send the invite.`,
-    '4. After we accept, click Confirm next to SOLLUNA and give View & Edit permissions. Bank and payment sections are not needed.',
+    '1. Open Seller Central and click the Settings icon (gear, top right).',
+    '2. Click Manage permissions.',
+    '3. On Manage Employees, click Actions → Invite Employee.',
+    `4. Fill in Name: ${ops.name} · E-mail: ${ops.email}, keep sellerCentral ticked → Send Invite.`,
+    'After we accept, click Confirm next to SOLLUNA and give View & Edit permissions. Bank and payment sections are not needed.',
     `Screenshots of each step: ${link}`,
   ].join('\n');
 }
