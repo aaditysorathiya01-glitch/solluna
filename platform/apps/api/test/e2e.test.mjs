@@ -1301,6 +1301,11 @@ test('listing & mapping forms: validation, mapping + new-listing workflow record
   assert.equal(req.details.fields.productName, undefined, 'no product name field on Flipkart mapping');
   // Blank optional fields get the agreed defaults; blank SKU gets a generated one.
   assert.deepEqual([req.details.fields.localHandlingFee, req.details.fields.zonalHandlingFee, req.details.fields.nationalHandlingFee, req.details.fields.luxuryCessPct, req.details.fields.importerDetails], [0, 0, 0, 0, 'None']);
+  // A real Flipkart product link is often longer than 200 characters; the FSN is taken from it.
+  const longLink = `https://www.flipkart.com/pidilite-fevicol-sh-synthetic-resin-adhesive-1-l-pack-of-2/p/itmabc123def456gh?pid=ADHFX7ZGHYQ2KJWG&lid=LSTADHFX7ZGHYQ2KJWGZQ8X2M&marketplace=FLIPKART&store=search.flipkart.com&srno=s_1_1&otracker=search&otracker1=search&fm=organic&iid=en_${'x'.repeat(120)}&ppt=hp&ppn=homepage`;
+  const longOk = ok(await call('POST', '/catalog-forms', { token: c, body: { marketplace: 'FLIPKART', kind: 'MAPPING', data: { ...base, sellerSku: 'LONG-1', productLink: longLink } } }));
+  assert.ok(longOk.request);
+  assert.equal((await db.catalogMapping.findFirst({ where: { sellerSku: 'LONG-1' } }))?.identifier, 'ADHFX7ZGHYQ2KJWG', 'FSN from the long link');
   const auto = ok(await call('POST', '/catalog-forms', { token: c, body: { marketplace: 'FLIPKART', kind: 'MAPPING', data: { ...base, sellerSku: '', productLink: 'TCLFX7ZGHYQ2KJWF' } } }));
   const autoReq = await db.serviceRequest.findUnique({ where: { id: auto.request.id } });
   assert.match(autoReq.details.fields.sellerSku, /^SOL-FK-[2-9A-Z]{8}$/, 'blank SKU → SOLLUNA SKU');
@@ -1350,7 +1355,7 @@ test('listing & mapping forms: validation, mapping + new-listing workflow record
   const t = ok(await call('POST', '/catalog-forms/templates', { token: c, body: { marketplace: 'FLIPKART', kind: 'MAPPING', name: 'Tile cleaner 1L', data: { minOrderQty: '2', stock: 10 } } }));
   const list = ok(await call('GET', '/catalog-forms', { token: c }));
   assert.equal(list.templates.length, 1); assert.deepEqual(list.templates[0].data, { minOrderQty: '2', stock: 10 });
-  assert.equal(list.submissions.length, 9);
+  assert.equal(list.submissions.length, 10);
   assert.equal((await call('POST', '/catalog-forms/templates', { token: c, body: { marketplace: 'FLIPKART', kind: 'MAPPING', name: 'Empty', data: {} } })).status, 400);
   const other = await registerCustomer('Gita'); await pay(other, 'GROWTH');
   assert.equal((await call('DELETE', `/catalog-forms/templates/${t.id}`, { token: other })).status, 404, 'tenant isolation');

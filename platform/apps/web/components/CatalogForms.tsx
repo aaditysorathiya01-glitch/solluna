@@ -110,7 +110,9 @@ export function CatalogForms() {
   function fail(e: unknown) {
     const fe = (e as ApiError).body?.fieldErrors as Record<string, string> | undefined;
     if (fe) setErrors(fe);
-    setMsg({ err: (e as Error).message });
+    // Generic validation: say which field and why instead of only "Validation failed".
+    const issues = (e as ApiError).issues;
+    setMsg({ err: issues?.length ? `Please check: ${issues.map((i) => `${i.path.split('.').pop() || 'form'}: ${i.message}`).join(' · ')}` : (e as Error).message });
   }
 
   return (

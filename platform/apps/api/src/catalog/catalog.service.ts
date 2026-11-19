@@ -254,7 +254,7 @@ export class CatalogService {
   async submitMapping(user: AuthUser, input: unknown) {
     const d = parse(z.object({
       marketplace: MP,
-      items: z.array(z.object({ identifier: z.string().trim().min(2).max(200), sellerSku: z.string().trim().max(80).optional(), productName: z.string().trim().max(300).optional() })).min(1).max(500),
+      items: z.array(z.object({ identifier: z.string().trim().min(2).max(2000), sellerSku: z.string().trim().max(80).optional(), productName: z.string().trim().max(300).optional() })).min(1).max(500),
     }), input);
     const { request, update } = await this.orch.intake(user, {
       featureKey: 'CATALOG_MAPPING', marketplace: d.marketplace, title: `Catalog mapping: ${d.items.length} product${d.items.length > 1 ? 's' : ''} on ${d.marketplace === 'AMAZON' ? 'Amazon' : 'Flipkart'}`,

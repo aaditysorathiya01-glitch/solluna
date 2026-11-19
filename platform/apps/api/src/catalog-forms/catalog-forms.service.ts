@@ -1,7 +1,7 @@
 import { BadRequestException, ConflictException, Injectable, NotFoundException } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { z } from 'zod';
-import { formFor, validateForm, type FormKind, type Marketplace } from '../../../../packages/catalog-forms/src';
+import { formFor, productRef, validateForm, type FormKind, type Marketplace } from '../../../../packages/catalog-forms/src';
 import { PrismaService } from '../common/prisma.service';
 import { AuditService } from '../common/audit.service';
 import { parse } from '../common/zod';
@@ -54,7 +54,7 @@ export class CatalogFormsService {
     // Reuse the catalog workflow so the manager's tools (mapping confidence, listing lifecycle, quota) work unchanged.
     let requestId: string;
     if (d.kind === 'MAPPING') {
-      const r = await this.catalog.submitMapping(user, { marketplace: d.marketplace, items: [{ identifier: String(data.productLink), sellerSku: String(data.sellerSku), productName: data.productName ? String(data.productName) : undefined }] });
+      const r = await this.catalog.submitMapping(user, { marketplace: d.marketplace, items: [{ identifier: productRef(d.marketplace, String(data.productLink))?.id ?? String(data.productLink).slice(0, 2000), sellerSku: String(data.sellerSku), productName: data.productName ? String(data.productName) : undefined }] });
       requestId = r.requestId;
     } else {
       const orgId = user.organizationId!;
