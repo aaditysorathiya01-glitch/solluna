@@ -23,7 +23,7 @@ export type ChatEvent =
   | { type: 'typing'; organizationId: string; name: string; on: boolean };
 
 export interface ChatMessage {
-  id: string; body: string; createdAt: Date; readAt: Date | null; isInternalNote: boolean; senderType: 'CUSTOMER' | 'STAFF';
+  id: string; body: string; createdAt: Date; readAt: Date | null; isInternalNote: boolean; senderType: 'CUSTOMER' | 'STAFF'; images?: string[];
   sender: { id: string; name: string };
   attachments: { id: string; title: string; fileName: string; mimeType: string; sizeBytes: number }[];
 }
@@ -35,7 +35,7 @@ const SendSchema = z.object({
 });
 
 const MESSAGE_SELECT = {
-  id: true, body: true, createdAt: true, readAt: true, isInternalNote: true, senderType: true,
+  id: true, body: true, createdAt: true, readAt: true, isInternalNote: true, senderType: true, images: true,
   sender: { select: { id: true, name: true } },
   attachments: { where: { deletedAt: null }, select: { id: true, title: true, fileName: true, mimeType: true, sizeBytes: true } },
 } as const;
@@ -163,7 +163,7 @@ export class ChatService implements OnModuleInit {
   typing(orgId: string, name: string, on: boolean) { this.events.next({ type: 'typing', organizationId: orgId, name, on }); }
 
   /** Shows typing, waits about as long as a person would take to type `body`, then posts it. */
-  async typeAndPost(orgId: string, managerId: string, body: string, opts: { byAgent?: boolean; notify?: boolean } = {}) {
+  async typeAndPost(orgId: string, managerId: string, body: string, opts: { byAgent?: boolean; notify?: boolean; images?: string[] } = {}) {
     const ms = typingMs(body);
     if (ms > 0) {
       const name = (await this.db.user.findUnique({ where: { id: managerId }, select: { name: true } }))?.name ?? 'Your manager';
@@ -173,10 +173,11 @@ export class ChatService implements OnModuleInit {
     return this.postAsManager(orgId, managerId, body, opts);
   }
 
-  async postAsManager(orgId: string, managerId: string, body: string, opts: { byAgent?: boolean; notify?: boolean; internal?: boolean } = {}) {
+  async postAsManager(orgId: string, managerId: string, body: string, opts: { byAgent?: boolean; notify?: boolean; internal?: boolean; images?: string[] } = {}) {
+    const images = (opts.images ?? []).filter((p) => /^\/guides\/[a-z0-9-]+\.png$/.test(p)).slice(0, 8);
     const conv = await this.conversation(orgId);
     const message = await this.db.$transaction(async (tx) => {
-      const m = await tx.message.create({ data: { conversationId: conv.id, senderId: managerId, senderType: 'STAFF', body: body.slice(0, 5000), isInternalNote: Boolean(opts.internal), byAgent: Boolean(opts.byAgent) } });
+      const m = await tx.message.create({ data: { conversationId: conv.id, senderId: managerId, senderType: 'STAFF', body: body.slice(0, 5000), isInternalNote: Boolean(opts.internal), byAgent: Boolean(opts.byAgent), images } });
       if (!opts.internal) await tx.conversation.update({ where: { id: conv.id }, data: { lastMessageAt: m.createdAt } });
       return tx.message.findUniqueOrThrow({ where: { id: m.id }, select: MESSAGE_SELECT });
     });

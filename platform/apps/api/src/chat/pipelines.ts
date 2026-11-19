@@ -313,7 +313,11 @@ export function amazonSearchTerms(keywords: string[], maxBytes = 250) {
  * model (it once invented a wrong menu path). The help page shows the same steps with screenshots.
  */
 export function accessGuide(mp: Marketplace) {
-  const link = `${config.appUrl}/help/add-solluna-user?mp=${mp.toLowerCase()}`;
+  const images = [1, 2, 3, 4].map((n) => `/guides/${mp.toLowerCase()}-${n}.png`);
+  return { text: accessGuideText(mp), images };
+}
+
+function accessGuideText(mp: Marketplace) {
   if (mp === 'FLIPKART') return [
     'How to add SOLLUNA on Flipkart Seller Hub:',
     '1. Open Seller Hub → click your store name (top right) → Profile.',
@@ -321,7 +325,7 @@ export function accessGuide(mp: Marketplace) {
     '3. Click Add New User.',
     `4. Fill in: Role: ${ops.role} · Name: ${ops.name} · Email Id: ${ops.email} · Phone number: your own mobile number → Save.`,
     'We then get an invite email and confirm it from our side.',
-    `Screenshots of each step: ${link}`,
+    'Screenshots of each step are below 👇',
   ].join('\n');
   return [
     'How to add SOLLUNA on Amazon Seller Central:',
@@ -330,6 +334,6 @@ export function accessGuide(mp: Marketplace) {
     '3. On Manage Employees, click Actions → Invite Employee.',
     `4. Fill in Name: ${ops.name} · E-mail: ${ops.email}, keep sellerCentral ticked → Send Invite.`,
     'After we accept, click Confirm next to SOLLUNA and give View & Edit permissions. Bank and payment sections are not needed.',
-    `Screenshots of each step: ${link}`,
+    'Screenshots of each step are below 👇',
   ].join('\n');
 }

@@ -390,8 +390,9 @@ export class ManagerAgentService implements OnModuleInit {
       const d = z.object({ marketplace: z.enum(['AMAZON', 'FLIPKART']) }).parse(input);
       const a = await this.db.managerAssignment.findFirst({ where: { organizationId: b.orgId, isPrimary: true, endedAt: null }, select: { managerId: true } });
       if (!a) return 'No manager assigned yet; the guide was not sent.';
-      await this.chat.typeAndPost(b.orgId, a.managerId, accessGuide(d.marketplace), { byAgent: true });
-      return `The exact ${d.marketplace === 'FLIPKART' ? 'Flipkart' : 'Amazon'} steps and the screenshots link were sent to the client. Do not repeat them; add at most one short line.`;
+      const g = accessGuide(d.marketplace);
+      await this.chat.typeAndPost(b.orgId, a.managerId, g.text, { byAgent: true, images: g.images });
+      return `The exact ${d.marketplace === 'FLIPKART' ? 'Flipkart' : 'Amazon'} steps with screenshots were sent to the client. Do not repeat them; add at most one short line.`;
     }
     if (name === 'escalate_to_team') {
       const d = z.object({ reason: z.string().trim().min(3).max(1000), priority: z.enum(['P1', 'P2', 'P3', 'P4']) }).parse(input);

@@ -650,6 +650,8 @@ model Message {
   senderType     UserType     @default(CUSTOMER)
   body           String
   attachmentKeys String[]
+  /// Guide screenshots shown inside the message (public /guides/*.png paths only)
+  images         String[]     @default([])
   attachments    Document[]
   isInternalNote Boolean      @default(false) // staff-only, never sent to customer
   byAgent        Boolean      @default(false) // written by the client's manager agent (staff-only flag, never shown to the client)

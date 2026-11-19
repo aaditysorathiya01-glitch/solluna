@@ -6,6 +6,7 @@ export interface ChatMessage {
   id: string; body: string; createdAt: string; readAt: string | null; isInternalNote: boolean; byAgent?: boolean; senderType: 'CUSTOMER' | 'STAFF';
   sender: { id: string; name: string };
   attachments: { id: string; title: string; fileName: string; mimeType: string; sizeBytes: number }[];
+  images?: string[];
 }
 interface History { organizationId: string; managers: { id: string; name: string }[]; messages: ChatMessage[] }
 
@@ -134,6 +135,17 @@ export function ChatPanel({ mode, orgId, onActivity }: { mode: 'client' | 'staff
                 {!mine && <p className="mb-0.5 text-xs font-semibold opacity-70">{m.sender.name}</p>}
                 {mode === 'staff' && m.byAgent && <p className="mb-0.5 text-[10px] font-semibold uppercase tracking-wider opacity-60">Auto reply</p>}
                 {m.body && <p className="whitespace-pre-wrap break-words">{m.body}</p>}
+                {!!m.images?.length && (
+                  <div className="mt-2 grid grid-cols-2 gap-2" data-testid="chat-images">
+                    {m.images.map((src, i) => (
+                      <a key={src} href={src} target="_blank" rel="noreferrer" className="block" title={`Step ${i + 1} — open full size`}>
+                        {/* eslint-disable-next-line @next/next/no-img-element */}
+                        <img src={src} alt={`Step ${i + 1}`} loading="lazy" className="w-full rounded-lg border border-ink/10" />
+                        <span className="mt-0.5 block text-[10px] opacity-60">Step {i + 1} · tap to enlarge</span>
+                      </a>
+                    ))}
+                  </div>
+                )}
                 {m.attachments.map((a) => (
                   <a key={a.id} href={`/api/documents/${a.id}/download`} className={`mt-1.5 flex items-center gap-2 rounded-lg px-2 py-1.5 text-xs underline ${mine && !m.isInternalNote ? 'bg-white/10' : 'bg-ink/5'}`}>
                     📎 {a.fileName} <span className="opacity-60">({size(a.sizeBytes)})</span>
