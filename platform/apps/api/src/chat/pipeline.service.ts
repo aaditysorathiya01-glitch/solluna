@@ -259,6 +259,9 @@ export class PipelineService {
     const nextStep = this.step(after);
     if (after.status === 'ACTIVE' && nextStep?.by === 'client') {
       for (const l of this.clientTurnListeners) await l(orgId, `${PIPELINES[after.pipeline].title} (${mpOf(after.branch)}): the team finished "${step.title}". Now: ${nextStep.title}.`).catch(() => undefined);
+    } else if (after.status === 'DONE') {
+      // Last step was the team's: the manager tells the client it is done (e.g. access verified → account Connected).
+      for (const l of this.clientTurnListeners) await l(orgId, `${PIPELINES[after.pipeline].title} (${mpOf(after.branch)}) is complete: the team finished "${step.title}". Confirm this to the client and suggest the next useful step.`).catch(() => undefined);
     }
     return { result };
   }

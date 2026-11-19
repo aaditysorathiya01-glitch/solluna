@@ -1597,6 +1597,7 @@ test('manager pipeline: seller-account registration step by step; OTP/password c
   const acct = await db.marketplaceAccount.findUnique({ where: { organizationId_marketplace: { organizationId: org.id, marketplace: 'AMAZON' } } });
   assert.equal(acct.status, 'CONNECTED'); assert.match(acct.verifiedNote, /Access verified by .+ \(seller-account pipeline/);
   assert.ok(await db.auditLog.findFirst({ where: { action: 'marketplace.connected_by_team', entityId: acct.id } }));
+  await waitFor(async () => db.agentRun.findFirst({ where: { organizationId: org.id, note: { contains: 'is complete: the team finished' } } }), 'manager told the pipeline is complete');
   void lastResult;
 });
 
