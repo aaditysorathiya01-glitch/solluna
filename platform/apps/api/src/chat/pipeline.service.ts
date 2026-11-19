@@ -177,7 +177,10 @@ export class PipelineService {
   /** Text block for the manager's context: only the current step of each active pipeline. */
   async contextFor(orgId: string) {
     const runs = await this.active(orgId);
-    return runs.map((run) => {
+    // Recently finished pipelines, so the manager can confirm them (e.g. access verified) instead of saying "not yet".
+    const done = await this.db.pipelineRun.findMany({ where: { organizationId: orgId, status: 'DONE', updatedAt: { gte: new Date(Date.now() - 30 * 86_400_000) } }, orderBy: { updatedAt: 'desc' }, take: 10 });
+    const finished = done.length ? `Completed pipelines (last 30 days): ${done.map((d) => `${PIPELINES[d.pipeline].title} — ${mpOf(d.branch)} (done ${d.updatedAt.toISOString().slice(0, 10)})`).join('; ')}` : '';
+    return [finished, ...runs.map((run) => {
       const steps = stepsOf(run.pipeline, run.branch);
       const step = steps[run.stepIndex];
       if (!step) return '';
@@ -190,7 +193,7 @@ export class PipelineService {
         fields.length ? `Step fields: ${fields.join('; ')}` : '',
         step.by === 'client' ? 'When every required field is saved, call pipeline_next.' : '',
       ].filter(Boolean).join('\n');
-    }).filter(Boolean).join('\n\n');
+    })].filter(Boolean).join('\n\n');
   }
 
   // ───────── Team (ops panel) ─────────
@@ -248,10 +251,15 @@ export class PipelineService {
     if (step.key === 'verify_access') {
       const acct = await this.db.marketplaceAccount.findUnique({ where: { organizationId_marketplace: { organizationId: orgId, marketplace: mpOf(run.branch) } } });
       // The team member finishing this step IS the evidence (owner, 19 Nov 2026): the account becomes Connected, audited.
-      if (acct && acct.status !== 'CONNECTED') {
+      if (acct?.status !== 'CONNECTED') {
         const note = `Access verified by ${user.name ?? user.email ?? 'SOLLUNA team'} (seller-account pipeline, ${new Date().toISOString().slice(0, 10)})`;
-        await this.db.marketplaceAccount.update({ where: { id: acct.id }, data: { status: 'CONNECTED', verifiedNote: note, lastError: null } });
-        await this.audit.log({ actor: user, action: 'marketplace.connected_by_team', entity: 'MarketplaceAccount', entityId: acct.id, organizationId: orgId, after: { marketplace: acct.marketplace, note } });
+        const mp = mpOf(run.branch);
+        const saved = await this.db.marketplaceAccount.upsert({
+          where: { organizationId_marketplace: { organizationId: orgId, marketplace: mp } },
+          create: { organizationId: orgId, marketplace: mp, hasAccount: true, status: 'CONNECTED', verifiedNote: note },
+          update: { hasAccount: true, status: 'CONNECTED', verifiedNote: note, lastError: null },
+        });
+        await this.audit.log({ actor: user, action: 'marketplace.connected_by_team', entity: 'MarketplaceAccount', entityId: saved.id, organizationId: orgId, after: { marketplace: mp, note } });
       }
     }
     const result = await this.advanceRun(run, user);
