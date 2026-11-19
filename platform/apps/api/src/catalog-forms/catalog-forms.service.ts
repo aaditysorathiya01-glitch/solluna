@@ -27,6 +27,8 @@ const productName = (d: Record<string, string | number>) => {
 
 @Injectable()
 export class CatalogFormsService {
+  /** Run after a form is submitted (wired by the manager agent). */
+  readonly submittedListeners: ((e: { orgId: string; marketplace: 'FLIPKART' | 'AMAZON'; kind: 'MAPPING' | 'NEW_LISTING'; title: string; requestId: string }) => Promise<unknown>)[] = [];
   constructor(private readonly db: PrismaService, private readonly catalog: CatalogService, private readonly audit: AuditService) {}
 
   async list(user: AuthUser) {
@@ -76,6 +78,8 @@ export class CatalogFormsService {
     const form = await this.db.catalogForm.create({ data: { organizationId: user.organizationId!, marketplace: d.marketplace, kind: d.kind, title, data: data as Prisma.InputJsonValue, requestId, createdById: user.id } });
     await this.audit.log({ actor: user, action: 'catalog.form_submitted', entity: 'CatalogForm', entityId: form.id, after: { marketplace: d.marketplace, kind: d.kind, requestId: request.id } });
     const template = d.saveTemplateAs ? await this.saveTemplate(user, { marketplace: d.marketplace, kind: d.kind, name: d.saveTemplateAs, data: d.data }) : null;
+    // The client's manager takes it from here: task assigned, pipeline moved to the team step, chat acknowledgement.
+    for (const l of this.submittedListeners) await l({ orgId: user.organizationId!, marketplace: d.marketplace, kind: d.kind, title, requestId }).catch(() => undefined);
     return { id: form.id, request, template };
   }
 

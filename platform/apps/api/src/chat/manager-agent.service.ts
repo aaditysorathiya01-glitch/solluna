@@ -1,3 +1,4 @@
+import { CatalogFormsService } from '../catalog-forms/catalog-forms.service';
 import { HOURS_TEXT, isOpen, nextOpen, openLabel } from '../common/business-hours';
 import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import Anthropic from '@anthropic-ai/sdk';
@@ -59,7 +60,22 @@ export class ManagerAgentService implements OnModuleInit {
     private readonly orch: OrchestratorService,
     private readonly chat: ChatService,
     private readonly pipelines: PipelineService,
+    forms: CatalogFormsService,
   ) {
+    // Listings & Mapping form submitted: assign the task to the client's manager, move the pipeline to the team step,
+    // and let the manager acknowledge it in chat (owner, 19 Nov 2026).
+    forms.submittedListeners.push(async (e) => {
+      const a = await this.db.managerAssignment.findFirst({ where: { organizationId: e.orgId, isPrimary: true, endedAt: null }, select: { managerId: true } });
+      if (a) await this.db.task.updateMany({ where: { requestId: e.requestId, assigneeId: null }, data: { assigneeId: a.managerId } });
+      const pipeline = e.kind === 'MAPPING' ? 'CATALOG_MAPPING' : 'NEW_LISTING';
+      const field = e.kind === 'MAPPING' ? 'forms_submitted' : 'form_submitted';
+      try {
+        await this.pipelines.start(e.orgId, pipeline, e.marketplace, true, { [field]: 'yes' });
+        await this.pipelines.save(e.orgId, pipeline, e.marketplace, field, 'yes').catch(() => undefined); // a run that was already waiting for the form
+        await this.pipelines.next(e.orgId, pipeline, e.marketplace);
+      } catch { /* already at the team step */ }
+      await this.enqueue(e.orgId, `The client submitted the ${e.marketplace === 'FLIPKART' ? 'Flipkart' : 'Amazon'} ${e.kind === 'MAPPING' ? 'mapping' : 'new listing'} form (${e.title}). Acknowledge it in one or two lines: the team is working on it and you will update them.`);
+    });
     // OTP / password capture runs first and always (even when automatic replies are off), then the reply is queued.
     chat.clientMessageListeners.push((orgId, body) => this.pipelines.capture(orgId, body));
     chat.clientMessageListeners.push((orgId) => this.enqueue(orgId));

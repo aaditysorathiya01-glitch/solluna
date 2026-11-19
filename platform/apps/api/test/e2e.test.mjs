@@ -1306,6 +1306,11 @@ test('listing & mapping forms: validation, mapping + new-listing workflow record
   const longOk = ok(await call('POST', '/catalog-forms', { token: c, body: { marketplace: 'FLIPKART', kind: 'MAPPING', data: { ...base, sellerSku: 'LONG-1', productLink: longLink } } }));
   assert.ok(longOk.request);
   assert.equal((await db.catalogMapping.findFirst({ where: { sellerSku: 'LONG-1' } }))?.identifier, 'ADHFX7ZGHYQ2KJWG', 'FSN from the long link');
+  // The manager takes over: catalog-mapping pipeline at the team step, chat acknowledgement queued.
+  const cOrg = ok(await call('GET', '/auth/me', { token: c })).user.organizationId;
+  const mapRun = await db.pipelineRun.findFirst({ where: { organizationId: cOrg, pipeline: 'CATALOG_MAPPING', status: 'ACTIVE' } });
+  assert.ok(mapRun && mapRun.stepIndex >= 1, 'pipeline moved past the form step');
+  assert.ok(await db.agentRun.findFirst({ where: { organizationId: cOrg, note: { contains: 'submitted the Flipkart mapping form' } } }), 'manager acknowledges in chat');
   const auto = ok(await call('POST', '/catalog-forms', { token: c, body: { marketplace: 'FLIPKART', kind: 'MAPPING', data: { ...base, sellerSku: '', productLink: 'TCLFX7ZGHYQ2KJWF' } } }));
   const autoReq = await db.serviceRequest.findUnique({ where: { id: auto.request.id } });
   assert.match(autoReq.details.fields.sellerSku, /^SOL-FK-[2-9A-Z]{8}$/, 'blank SKU → SOLLUNA SKU');
