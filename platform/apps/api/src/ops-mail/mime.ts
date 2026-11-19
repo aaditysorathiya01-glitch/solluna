@@ -75,7 +75,7 @@ export function classify(m: ParsedMail): { kind: 'OTP' | 'INVITE' | 'OTHER'; mar
   const from = m.from.toLowerCase();
   const marketplace = /amazon\.(in|com)|sellercentral/.test(from) ? 'AMAZON' : /flipkart/.test(from) ? 'FLIPKART' : null;
   const s = `${m.subject} ${m.text.slice(0, 2000)}`;
-  if (/invit|added you as a user|add(ed)? you to|user permission|join .*seller/i.test(s) && !findOtp(m.subject, m.text)) return { kind: 'INVITE', marketplace };
+  if (/invit|added you as a user|add(ed)? you to|user permission|join .*seller|granted .{0,40}access/i.test(s) && !findOtp(m.subject, m.text)) return { kind: 'INVITE', marketplace };
   if (findOtp(m.subject, m.text)) return { kind: 'OTP', marketplace };
   return { kind: 'OTHER', marketplace };
 }
