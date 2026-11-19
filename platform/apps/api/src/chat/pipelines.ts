@@ -28,7 +28,7 @@ const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const PIN = /^\d{6}$/;
 
 const ADMIN_PATH: Record<Marketplace, string> = {
-  FLIPKART: `Flipkart Seller Hub: Home → Profile → Manage Users → New User. Fill Name "${ops.name}", Email "${ops.email}"${ops.phone ? `, Phone "${ops.phone}"` : ''}, Role "${ops.role}", then save.`,
+  FLIPKART: `Flipkart Seller Hub: store name (top right) → Profile → Manage Users (View) → Add New User. Role "${ops.role}", Name "${ops.name}", Email Id "${ops.email}", Phone number = the client's own mobile (owner, 19 Nov 2026), then Save.`,
   AMAZON: `Amazon Seller Central (India): Home → Settings → Manage permissions → Action → Invite employee. Invite "${ops.email}" (name "${ops.name}"). After SOLLUNA accepts, the client clicks Confirm next to SOLLUNA and gives Admin (or View & Edit) permissions; bank / payment sections are not needed.`,
 };
 
@@ -319,7 +319,7 @@ export function accessGuide(mp: Marketplace) {
     '1. Open Seller Hub → click your store name (top right) → Profile.',
     '2. On the Profile page, open Manage Users (click View).',
     '3. Click Add New User.',
-    `4. Fill in: Role: ${ops.role} · Name: ${ops.name} · Email Id: ${ops.email} · Phone number: ${ops.phone ?? 'I will share it here'} → Save.`,
+    `4. Fill in: Role: ${ops.role} · Name: ${ops.name} · Email Id: ${ops.email} · Phone number: your own mobile number → Save.`,
     'We then get an invite email and confirm it from our side.',
     `Screenshots of each step: ${link}`,
   ].join('\n');

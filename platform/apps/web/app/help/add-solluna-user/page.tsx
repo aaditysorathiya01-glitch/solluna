@@ -4,7 +4,7 @@ import { GuideShots } from './GuideShots';
 
 export const metadata: Metadata = { title: 'Add SOLLUNA as a user — SOLLUNA', description: 'Step-by-step: give SOLLUNA access to your Flipkart Seller Hub or Amazon Seller Central without sharing your password.' };
 
-const OPS = { name: process.env.OPS_USER_NAME ?? 'SOLLUNA Operations', email: process.env.OPS_USER_EMAIL ?? 'ops@solluna.co.in', role: process.env.OPS_USER_ROLE ?? 'Admin', phone: process.env.OPS_USER_PHONE ?? 'the number your manager shares in chat' };
+const OPS = { name: process.env.OPS_USER_NAME ?? 'SOLLUNA Operations', email: process.env.OPS_USER_EMAIL ?? 'ops@solluna.co.in', role: process.env.OPS_USER_ROLE ?? 'Admin' };
 
 const GUIDES = {
   flipkart: {
@@ -13,7 +13,7 @@ const GUIDES = {
       'Open Seller Hub and click your store name (top right) → Profile.',
       'On the Profile page, open Manage Users (click View).',
       'Click Add New User.',
-      `Fill in Role: ${OPS.role}, Name: ${OPS.name}, Email Id: ${OPS.email}, Phone number: ${OPS.phone}, then click Save. We receive an invite email and confirm it from our side.`,
+      `Fill in Role: ${OPS.role}, Name: ${OPS.name}, Email Id: ${OPS.email}, Phone number: your own mobile number, then click Save. We receive an invite email and confirm it from our side.`,
     ],
   },
   amazon: {
