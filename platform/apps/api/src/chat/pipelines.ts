@@ -316,10 +316,11 @@ export function accessGuide(mp: Marketplace) {
   const link = `${config.appUrl}/help/add-solluna-user?mp=${mp.toLowerCase()}`;
   if (mp === 'FLIPKART') return [
     'How to add SOLLUNA on Flipkart Seller Hub:',
-    '1. Open Seller Hub → click your Profile (top right) → Manage Users.',
-    '2. Click New User.',
-    `3. Fill in: Name: ${ops.name} · Email: ${ops.email} · Role: ${ops.role}${ops.phone ? ` · Phone: ${ops.phone}` : ''}`,
-    '4. Save. We get an invite email and confirm it from our side.',
+    '1. Open Seller Hub → click your store name (top right) → Profile.',
+    '2. On the Profile page, open Manage Users (click View).',
+    '3. Click Add New User.',
+    `4. Fill in: Role: ${ops.role} · Name: ${ops.name} · Email Id: ${ops.email} · Phone number: ${ops.phone ?? 'I will share it here'} → Save.`,
+    'We then get an invite email and confirm it from our side.',
     `Screenshots of each step: ${link}`,
   ].join('\n');
   return [

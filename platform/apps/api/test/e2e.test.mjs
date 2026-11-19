@@ -1457,7 +1457,7 @@ test('manager agent: replies as the manager, saves facts, plan-checked requests,
   // Add-user steps come from the server, word for word (the model never writes menu paths).
   await say('[agent-test] tool:send_access_guide {"marketplace":"FLIPKART"}');
   const guide = await waitFor(async () => (await replies()).find((m) => m.body.startsWith('How to add SOLLUNA on Flipkart Seller Hub:')), 'access guide');
-  assert.ok(guide.body.includes('Profile (top right) → Manage Users') && guide.body.includes('ops@solluna.co.in') && guide.body.includes('/help/add-solluna-user?mp=flipkart'));
+  assert.ok(guide.body.includes('open Manage Users (click View)') && guide.body.includes('ops@solluna.co.in') && guide.body.includes('/help/add-solluna-user?mp=flipkart'));
   await say('[agent-test] please run ads for me');
   const ads = await waitFor(async () => db.serviceRequest.findFirst({ where: { organizationId: org.id, featureKey: 'ADS_MANAGEMENT' } }), 'ads request');
   assert.equal(ads.entitlement, 'OUT_OF_PLAN', 'plan check still applies'); assert.equal(ads.createdById, 'system');
