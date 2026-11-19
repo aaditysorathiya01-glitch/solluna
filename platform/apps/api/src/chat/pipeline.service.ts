@@ -247,7 +247,12 @@ export class PipelineService {
     run = await this.db.pipelineRun.update({ where: { id: run.id }, data: { data } });
     if (step.key === 'verify_access') {
       const acct = await this.db.marketplaceAccount.findUnique({ where: { organizationId_marketplace: { organizationId: orgId, marketplace: mpOf(run.branch) } } });
-      if (acct?.status !== 'CONNECTED') throw new BadRequestException('Mark the marketplace account Connected (with evidence) first, then finish this step.');
+      // The team member finishing this step IS the evidence (owner, 19 Nov 2026): the account becomes Connected, audited.
+      if (acct && acct.status !== 'CONNECTED') {
+        const note = `Access verified by ${user.name ?? user.email ?? 'SOLLUNA team'} (seller-account pipeline, ${new Date().toISOString().slice(0, 10)})`;
+        await this.db.marketplaceAccount.update({ where: { id: acct.id }, data: { status: 'CONNECTED', verifiedNote: note, lastError: null } });
+        await this.audit.log({ actor: user, action: 'marketplace.connected_by_team', entity: 'MarketplaceAccount', entityId: acct.id, organizationId: orgId, after: { marketplace: acct.marketplace, note } });
+      }
     }
     const result = await this.advanceRun(run, user);
     const after = await this.db.pipelineRun.findUniqueOrThrow({ where: { id: run.id } });

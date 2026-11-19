@@ -1591,10 +1591,12 @@ test('manager pipeline: seller-account registration step by step; OTP/password c
   assert.ok(!/password|OTP/i.test(/Current step 1\/2[^"]*Step instructions: ([^"]*?)Step fields/.exec(facts)?.[1]?.replace('Never ask for their password or OTP in this step.', '') ?? ''), 'admin-access step asks for no secrets');
   await tool('pipeline_next', { pipeline: 'SELLER_ACCOUNT_REGISTRATION', marketplace: 'AMAZON' });
   await waitFor(async () => (await runs()).find((x) => x.id === amz.id).step?.by === 'team', 'verify step');
-  assert.equal((await call('POST', `/ops/chats/${org.id}/pipelines/${amz.id}/advance`, { token: ops.token })).status, 400, 'needs Connected first');
-  await db.marketplaceAccount.update({ where: { organizationId_marketplace: { organizationId: org.id, marketplace: 'AMAZON' } }, data: { status: 'CONNECTED', verifiedNote: 'invite accepted in Seller Central' } });
+  // The team member finishing "verifies access" is the evidence: the account becomes Connected with their name, audited.
   ok(await call('POST', `/ops/chats/${org.id}/pipelines/${amz.id}/advance`, { token: ops.token }));
   assert.equal((await runs()).find((x) => x.id === amz.id).status, 'DONE');
+  const acct = await db.marketplaceAccount.findUnique({ where: { organizationId_marketplace: { organizationId: org.id, marketplace: 'AMAZON' } } });
+  assert.equal(acct.status, 'CONNECTED'); assert.match(acct.verifiedNote, /Access verified by .+ \(seller-account pipeline/);
+  assert.ok(await db.auditLog.findFirst({ where: { action: 'marketplace.connected_by_team', entityId: acct.id } }));
   void lastResult;
 });
 
