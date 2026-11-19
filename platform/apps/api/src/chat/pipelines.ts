@@ -37,7 +37,7 @@ const grantAdmin = (mp: Marketplace): PipeStep[] => [
     instructions: `Walk the client through giving SOLLUNA admin access, one step at a time: ${ADMIN_PATH[mp]} Never ask for their password or OTP in this step. When they say the invite is sent, save invite_sent = yes.`,
     fields: [{ key: 'invite_sent', label: 'Invite sent', kind: 'confirm', required: true }] },
   { key: 'verify_access', title: 'SOLLUNA accepts the invite and verifies access', by: 'team',
-    instructions: 'The team is accepting the invite and checking access. Tell the client it is being verified and you will confirm shortly. Do not ask for anything else in this step.', fields: [] },
+    instructions: 'The team is accepting the invite and checking access. Tell the client it is being verified and you will confirm shortly. Do not ask for anything else in this step. (Team: open the invite from solluna.ops@gmail.com in an Incognito window and sign up / sign in as ops@solluna.co.in only, never with a personal login; on Amazon the client then clicks Confirm and gives View & Edit. Mark this step done once you can see the seller account.)', fields: [] },
 ];
 
 const CHECKLIST: Record<Marketplace, string> = {

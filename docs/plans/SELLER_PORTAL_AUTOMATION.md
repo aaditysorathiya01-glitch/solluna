@@ -38,3 +38,6 @@ Inputs needed to start the pilot: ops@solluna.co.in mailbox with IMAP app passwo
 
 ## Ops mailbox (12 Nov 2026)
 Google does not offer app passwords on the new solluna.ops@gmail.com, so the bot does not read Gmail. Cloudflare Email Routing sends ops@solluna.co.in to a Worker (`platform/deploy/cloudflare/ops-mail-worker.js`) that forwards a copy to Gmail and posts the mail to SOLLUNA (`/api/ops-mail/inbound`, secret header). OTPs are stored encrypted for 10 minutes and shown once (Admin → Ops mailbox); the AI browser will read them through the same service. `OPS_MAIL_USER` / `OPS_MAIL_PASSWORD` are no longer needed.
+
+## Accepting client invites (19 Nov 2026)
+Always open the invite from solluna.ops@gmail.com in an **Incognito window** and sign up / sign in as ops@solluna.co.in. Accepting while another Amazon login is open links the invite to the wrong account ("accepted with an email address other than the one that was invited"): reject that one, re-invite, accept again in Incognito. After access works, mark the pipeline step "SOLLUNA accepts the invite and verifies access" done in Ops; the manager then confirms to the client.
