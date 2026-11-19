@@ -11,8 +11,8 @@ import type { AuthUser } from './auth.types';
 const AUTH_LIMIT = Number(process.env.AUTH_RATE_LIMIT_PER_MIN ?? 5);
 const LIMIT = { default: { limit: AUTH_LIMIT, ttl: 60_000 } };
 
-function setSession(res: Response, token: string) {
-  res.cookie(SESSION_COOKIE, token, { httpOnly: true, secure: config.cookieSecure, sameSite: 'lax', path: '/', maxAge: 12 * 3600 * 1000 });
+function setSession(res: Response, token: string, ttlMs = 12 * 3600 * 1000) {
+  res.cookie(SESSION_COOKIE, token, { httpOnly: true, secure: config.cookieSecure, sameSite: 'lax', path: '/', maxAge: ttlMs });
 }
 
 @Controller('auth')
@@ -23,14 +23,14 @@ export class AuthController {
   async register(@Body() body: unknown, @Req() req: Request, @Res({ passthrough: true }) res: Response) {
     const r = await this.auth.register(body, req.ip);
     if ('codeRequired' in r) { res.status(202); return r; } // email code sent; account not created yet
-    setSession(res, r.token);
+    setSession(res, r.token, r.ttlMs);
     return r;
   }
 
   @Public() @Post('login') @HttpCode(200) @Throttle(LIMIT)
   async login(@Body() body: unknown, @Req() req: Request, @Res({ passthrough: true }) res: Response) {
-    const { token } = await this.auth.login(body, req.ip);
-    setSession(res, token);
+    const { token, ttlMs } = await this.auth.login(body, req.ip);
+    setSession(res, token, ttlMs);
     return { token };
   }
 
@@ -51,8 +51,8 @@ export class AuthController {
 
   @Post('password/change') @HttpCode(200) @Throttle(LIMIT) @AllowPending2fa()
   async change(@CurrentUser() user: AuthUser, @Body() body: unknown, @Res({ passthrough: true }) res: Response) {
-    const { token } = await this.auth.changePassword(user, body);
-    setSession(res, token);
+    const { token, ttlMs } = await this.auth.changePassword(user, body);
+    setSession(res, token, ttlMs);
     return { ok: true, token };
   }
 

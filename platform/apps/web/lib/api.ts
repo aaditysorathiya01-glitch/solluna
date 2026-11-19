@@ -29,6 +29,11 @@ export async function api<T = unknown>(path: string, init: { method?: string; bo
     if (!json) data = { message: res.ok ? undefined : waking ? WAKING_MESSAGE : 'Something went wrong. Please try again.' };
     if (!res.ok) {
       const msg = Array.isArray(data?.message) ? data.message.join(', ') : data?.message ?? `Request failed (${res.status})`;
+      // Expired session on a form: say what to do without losing what was typed (owner, 19 Nov 2026).
+      if (res.status === 401 && /^(Not signed in|Session expired or invalid)$/.test(msg) && typeof window !== 'undefined' && !path.startsWith('/auth/') && (init.method ?? 'GET') !== 'GET') {
+        window.open('/login', '_blank', 'noopener');
+        throw new ApiError(401, 'Your session has expired. We opened the sign-in page in a new tab: sign in there, then come back and click the button again. Everything you typed is still here.', undefined, data as Record<string, unknown> | undefined);
+      }
       throw new ApiError(res.status, msg, data?.issues, (data ?? undefined) as Record<string, unknown> | undefined);
     }
     return data as unknown as T;

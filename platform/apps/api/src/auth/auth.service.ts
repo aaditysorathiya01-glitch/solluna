@@ -374,7 +374,13 @@ export class AuthService {
     };
   }
 
+  /** Clients stay signed in for 30 days (CLIENT_SESSION_DAYS); staff sessions keep the short JWT_TTL (owner, 19 Nov 2026). */
   private async issue(userId: string) {
-    return { token: await this.jwt.signAsync({ sub: userId }) };
+    const u = await this.db.user.findUnique({ where: { id: userId }, select: { type: true } });
+    if (u?.type === 'CUSTOMER') {
+      const days = Number(process.env.CLIENT_SESSION_DAYS ?? 30);
+      return { token: await this.jwt.signAsync({ sub: userId }, { expiresIn: `${days}d` }), ttlMs: days * 86_400_000 };
+    }
+    return { token: await this.jwt.signAsync({ sub: userId }), ttlMs: 12 * 3600 * 1000 };
   }
 }
