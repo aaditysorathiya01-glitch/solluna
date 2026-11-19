@@ -38,6 +38,8 @@ export function ChatPanel({ mode, orgId, onActivity }: { mode: 'client' | 'staff
   const [query, setQuery] = useState('');
   const [agent, setAgent] = useState<{ enabled: boolean; paused: boolean } | null>(null);
   const endRef = useRef<HTMLDivElement>(null);
+  const [typing, setTyping] = useState<string | null>(null);
+  const typingTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
 
   const load = useCallback(async (q?: string) => {
@@ -62,8 +64,16 @@ export function ChatPanel({ mode, orgId, onActivity }: { mode: 'client' | 'staff
       onActivity?.();
       if (mode === 'staff' && e.organizationId !== orgId) return;
       setHist((h) => (h && !h.messages.some((m) => m.id === e.message.id) ? { ...h, messages: [...h.messages, e.message] } : h));
+      if (e.message.senderType === 'STAFF') setTyping(null);
       const fromOtherSide = mode === 'client' ? e.message.senderType === 'STAFF' : e.message.senderType === 'CUSTOMER';
       if (fromOtherSide && document.visibilityState === 'visible') api(`${base}/read`, { method: 'POST' }).catch(() => {});
+    });
+    es.addEventListener('typing', (ev) => {
+      const e = JSON.parse((ev as MessageEvent).data);
+      if (mode === 'staff' && e.organizationId !== orgId) return;
+      if (typingTimer.current) clearTimeout(typingTimer.current);
+      setTyping(e.on ? e.name : null);
+      if (e.on) typingTimer.current = setTimeout(() => setTyping(null), 60_000);
     });
     es.addEventListener('read', (ev) => {
       const e = JSON.parse((ev as MessageEvent).data);
@@ -75,7 +85,7 @@ export function ChatPanel({ mode, orgId, onActivity }: { mode: 'client' | 'staff
     return () => es.close();
   }, [streamUrl, base, mode, orgId, onActivity]);
 
-  useEffect(() => { endRef.current?.scrollIntoView({ block: 'end' }); }, [hist?.messages.length]);
+  useEffect(() => { endRef.current?.scrollIntoView({ block: 'end' }); }, [hist?.messages.length, typing]);
 
   async function send(e: React.FormEvent) {
     e.preventDefault();
@@ -134,6 +144,12 @@ export function ChatPanel({ mode, orgId, onActivity }: { mode: 'client' | 'staff
             </div>
           );
         })}
+        {typing && (
+          <div className="flex items-center gap-2 px-1 text-xs text-ink-3" role="status" data-testid="typing">
+            <span className="inline-flex gap-1" aria-hidden><span className="h-1.5 w-1.5 animate-bounce rounded-full bg-ink-3 [animation-delay:-0.3s]" /><span className="h-1.5 w-1.5 animate-bounce rounded-full bg-ink-3 [animation-delay:-0.15s]" /><span className="h-1.5 w-1.5 animate-bounce rounded-full bg-ink-3" /></span>
+            {typing} is typing…
+          </div>
+        )}
         <div ref={endRef} />
       </div>
       <form onSubmit={send} className="space-y-2 border-t border-ink/10 p-3">

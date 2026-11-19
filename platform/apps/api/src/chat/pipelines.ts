@@ -307,3 +307,27 @@ export function amazonSearchTerms(keywords: string[], maxBytes = 250) {
   }
   return words.join(' ');
 }
+
+/**
+ * Client-facing "add SOLLUNA as a user" guide (owner, 19 Nov 2026): exact steps sent by the server, never written by the
+ * model (it once invented a wrong menu path). The help page shows the same steps with screenshots.
+ */
+export function accessGuide(mp: Marketplace) {
+  const link = `${config.appUrl}/help/add-solluna-user?mp=${mp.toLowerCase()}`;
+  if (mp === 'FLIPKART') return [
+    'How to add SOLLUNA on Flipkart Seller Hub:',
+    '1. Open Seller Hub → click your Profile (top right) → Manage Users.',
+    '2. Click New User.',
+    `3. Fill in: Name: ${ops.name} · Email: ${ops.email} · Role: ${ops.role}${ops.phone ? ` · Phone: ${ops.phone}` : ''}`,
+    '4. Save. We get an invite email and confirm it from our side.',
+    `Screenshots of each step: ${link}`,
+  ].join('\n');
+  return [
+    'How to add SOLLUNA on Amazon Seller Central:',
+    '1. Open Seller Central → Settings (top right) → User Permissions (Manage permissions).',
+    '2. Under Action, click Invite employee.',
+    `3. Enter Name: ${ops.name} · Email: ${ops.email} and send the invite.`,
+    '4. After we accept, click Confirm next to SOLLUNA and give View & Edit permissions. Bank and payment sections are not needed.',
+    `Screenshots of each step: ${link}`,
+  ].join('\n');
+}

@@ -90,7 +90,7 @@ before(async () => {
     env: {
       ...process.env, DATABASE_URL, PORT: String(port), JWT_SECRET: 'e2e-jwt-secret-e2e-jwt-secret-1234', COOKIE_SECURE: 'false',
       RAZORPAY_KEY_ID: KEY_ID, RAZORPAY_KEY_SECRET: KEY_SECRET, RAZORPAY_WEBHOOK_SECRET: WEBHOOK_SECRET, RAZORPAY_API_BASE: `http://127.0.0.1:${rzpPort}`,
-      CONNECTOR_WEBHOOK_URL: `http://127.0.0.1:${sinkPort}/hook`, CONNECTOR_WEBHOOK_SECRET: CONNECTOR_SECRET, RATE_LIMIT_PER_MIN: '10000', AUTH_RATE_LIMIT_PER_MIN: '40', MAX_UPLOAD_MB: '1', MANAGER_ASSIGN_DELAY_MIN: '0', MANAGER_MESSAGE_GAP_SEC: '0', ANTHROPIC_API_KEY: 'test-key', ANTHROPIC_BASE_URL: `http://127.0.0.1:${claude.port}`, LOOKUP_DAILY_LIMIT: '3', AGENT_REPLY_DELAY_SEC: '0', AGENT_HUMAN_QUIET_MIN: '30', AGENT_HISTORY: '6', AGENT_DIGEST_AFTER: '4', BUSINESS_HOURS: '24x7', REPORT_CYCLE: 'off', OPS_MAIL_INBOUND_SECRET: 'ops-mail-test-secret-0123456789', SPAPI_CLIENT_ID: 'amzn1.application-oa2-client.test', SPAPI_CLIENT_SECRET: 'test-secret', SPAPI_TEST_REFRESH_TOKEN: 'Atzr|test-refresh', SPAPI_LWA_URL: `http://127.0.0.1:${spapiPort}/auth/o2/token`, SPAPI_ENDPOINT: `http://127.0.0.1:${spapiPort}`, FLIPKART_TOKEN_URL: `http://127.0.0.1:${spapiPort}/oauth-service/oauth/token`, EVAL_RESULTS_DIR: join(tmpdir(), 'solluna-evals'),
+      CONNECTOR_WEBHOOK_URL: `http://127.0.0.1:${sinkPort}/hook`, CONNECTOR_WEBHOOK_SECRET: CONNECTOR_SECRET, RATE_LIMIT_PER_MIN: '10000', AUTH_RATE_LIMIT_PER_MIN: '40', MAX_UPLOAD_MB: '1', MANAGER_ASSIGN_DELAY_MIN: '0', MANAGER_MESSAGE_GAP_SEC: '0', ANTHROPIC_API_KEY: 'test-key', ANTHROPIC_BASE_URL: `http://127.0.0.1:${claude.port}`, LOOKUP_DAILY_LIMIT: '3', AGENT_REPLY_DELAY_SEC: '0', AGENT_HUMAN_QUIET_MIN: '30', AGENT_HISTORY: '6', AGENT_DIGEST_AFTER: '4', BUSINESS_HOURS: '24x7', AGENT_TYPING_MS_PER_CHAR: '0', REPORT_CYCLE: 'off', OPS_MAIL_INBOUND_SECRET: 'ops-mail-test-secret-0123456789', SPAPI_CLIENT_ID: 'amzn1.application-oa2-client.test', SPAPI_CLIENT_SECRET: 'test-secret', SPAPI_TEST_REFRESH_TOKEN: 'Atzr|test-refresh', SPAPI_LWA_URL: `http://127.0.0.1:${spapiPort}/auth/o2/token`, SPAPI_ENDPOINT: `http://127.0.0.1:${spapiPort}`, FLIPKART_TOKEN_URL: `http://127.0.0.1:${spapiPort}/oauth-service/oauth/token`, EVAL_RESULTS_DIR: join(tmpdir(), 'solluna-evals'),
       SUPPLIER_LEGAL_NAME: 'Aaditya Jitendrabhai Sorathia', SUPPLIER_TRADE_NAME: 'Solluna', SUPPLIER_GSTIN: SUPPLIER_GSTIN, SUPPLIER_ADDRESS: 'Survey No 135, Plot No 9, Shreeji Nagar, Meghpar Kumbhardi Sim, Anjar, Kachchh, Gujarat 370110', INVOICE_SAC: '998399',
     },
     stdio: ['ignore', 'pipe', 'pipe'],
@@ -1454,6 +1454,10 @@ test('manager agent: replies as the manager, saves facts, plan-checked requests,
   assert.equal(fk.hasAccount, false); assert.equal(fk.status, 'PENDING', 'never CONNECTED by the agent');
   await waitFor(async () => (await replies()).some((m) => m.body.startsWith('Done 👍')), 'reply after tools');
 
+  // Add-user steps come from the server, word for word (the model never writes menu paths).
+  await say('[agent-test] tool:send_access_guide {"marketplace":"FLIPKART"}');
+  const guide = await waitFor(async () => (await replies()).find((m) => m.body.startsWith('How to add SOLLUNA on Flipkart Seller Hub:')), 'access guide');
+  assert.ok(guide.body.includes('Profile (top right) → Manage Users') && guide.body.includes('ops@solluna.co.in') && guide.body.includes('/help/add-solluna-user?mp=flipkart'));
   await say('[agent-test] please run ads for me');
   const ads = await waitFor(async () => db.serviceRequest.findFirst({ where: { organizationId: org.id, featureKey: 'ADS_MANAGEMENT' } }), 'ads request');
   assert.equal(ads.entitlement, 'OUT_OF_PLAN', 'plan check still applies'); assert.equal(ads.createdById, 'system');

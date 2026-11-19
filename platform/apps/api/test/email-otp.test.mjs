@@ -32,7 +32,7 @@ before(async () => {
   base = `http://127.0.0.1:${port}/api`;
   api = spawn('node', ['dist/apps/api/src/main.js'], {
     cwd: apiDir, stdio: ['ignore', 'pipe', 'pipe'],
-    env: { ...process.env, DATABASE_URL, PORT: String(port), JWT_SECRET: 'otp-e2e-secret-otp-e2e-secret-123', COOKIE_SECURE: 'false', RESEND_API_KEY: 're_test_key', RESEND_API_URL: `http://127.0.0.1:${resend.address().port}`, LOGIN_EMAIL_OTP: 'staff', PREVIEW_MODE: 'true', BUSINESS_HOURS: '24x7', REPORT_CYCLE: 'off', RATE_LIMIT_PER_MIN: '10000', AUTH_RATE_LIMIT_PER_MIN: '100', MANAGER_ASSIGN_DELAY_MIN: '0' },
+    env: { ...process.env, DATABASE_URL, PORT: String(port), JWT_SECRET: 'otp-e2e-secret-otp-e2e-secret-123', COOKIE_SECURE: 'false', RESEND_API_KEY: 're_test_key', RESEND_API_URL: `http://127.0.0.1:${resend.address().port}`, LOGIN_EMAIL_OTP: 'staff', PREVIEW_MODE: 'true', BUSINESS_HOURS: '24x7', AGENT_TYPING_MS_PER_CHAR: '0', REPORT_CYCLE: 'off', RATE_LIMIT_PER_MIN: '10000', AUTH_RATE_LIMIT_PER_MIN: '100', MANAGER_ASSIGN_DELAY_MIN: '0' },
   });
   let log = ''; api.stdout.on('data', (d) => (log += d)); api.stderr.on('data', (d) => (log += d));
   for (let i = 0; i < 80; i++) {

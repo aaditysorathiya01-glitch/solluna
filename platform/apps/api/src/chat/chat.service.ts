@@ -13,9 +13,14 @@ import type { AuthUser } from '../auth/auth.types';
 import { BillingService, type ActivationInfo } from '../billing/billing.service';
 
 /** Live events. Customers only ever receive their own org's non-internal events (filtered at the stream). */
+/** Human typing time: ~35 ms per character (AGENT_TYPING_MS_PER_CHAR), 1.2–9 s per bubble; 0 turns it off (tests). */
+const TYPING_MS_PER_CHAR = Number(process.env.AGENT_TYPING_MS_PER_CHAR ?? 35);
+export const typingMs = (body: string) => (TYPING_MS_PER_CHAR <= 0 ? 0 : Math.min(9000, 1200 + body.length * TYPING_MS_PER_CHAR));
+
 export type ChatEvent =
   | { type: 'message'; organizationId: string; internal: boolean; message: ChatMessage }
-  | { type: 'read'; organizationId: string; by: 'CUSTOMER' | 'STAFF'; at: string };
+  | { type: 'read'; organizationId: string; by: 'CUSTOMER' | 'STAFF'; at: string }
+  | { type: 'typing'; organizationId: string; name: string; on: boolean };
 
 export interface ChatMessage {
   id: string; body: string; createdAt: Date; readAt: Date | null; isInternalNote: boolean; senderType: 'CUSTOMER' | 'STAFF';
@@ -154,6 +159,20 @@ export class ChatService implements OnModuleInit {
   }
 
   /** A message from the client's manager written by the system (the manager agent): same delivery as a staff reply. */
+  /** "Kabir is typing…" for the client (owner, 19 Nov 2026: replies should feel typed, not flashed). */
+  typing(orgId: string, name: string, on: boolean) { this.events.next({ type: 'typing', organizationId: orgId, name, on }); }
+
+  /** Shows typing, waits about as long as a person would take to type `body`, then posts it. */
+  async typeAndPost(orgId: string, managerId: string, body: string, opts: { byAgent?: boolean; notify?: boolean } = {}) {
+    const ms = typingMs(body);
+    if (ms > 0) {
+      const name = (await this.db.user.findUnique({ where: { id: managerId }, select: { name: true } }))?.name ?? 'Your manager';
+      this.typing(orgId, name, true);
+      await new Promise((r) => setTimeout(r, ms));
+    }
+    return this.postAsManager(orgId, managerId, body, opts);
+  }
+
   async postAsManager(orgId: string, managerId: string, body: string, opts: { byAgent?: boolean; notify?: boolean; internal?: boolean } = {}) {
     const conv = await this.conversation(orgId);
     const message = await this.db.$transaction(async (tx) => {
@@ -326,6 +345,7 @@ export class ChatService implements OnModuleInit {
         return tx.message.findUniqueOrThrow({ where: { id: m.id }, select: MESSAGE_SELECT });
       });
       this.events.next({ type: 'message', organizationId: orgId, internal: false, message: message as ChatMessage });
+      if (lines[w.step + 1]) this.typing(orgId, manager.name, true); // the next line is "being typed" during the gap
       if (w.step === 0) {
         await this.dispatch.emit({ type: 'chat.message', organizationId: orgId, title: w.kind === 'NEW' ? `${manager.name} is your SOLLUNA manager` : `Message from ${manager.name}`, body, data: { messageId: message.id } });
         await this.audit.log({ action: 'manager.welcome', entity: 'Organization', entityId: orgId, organizationId: orgId, after: { managerId: manager.id, plan: w.planCode, kind: w.kind } });

@@ -62,7 +62,7 @@ before(async () => {
   apiBase = `http://127.0.0.1:${apiPort}/api`; webBase = `http://127.0.0.1:${webPort}`;
 
   const a = start('node', ['dist/apps/api/src/main.js'], apiDir, {
-    DATABASE_URL, PORT: String(apiPort), JWT_SECRET: 'web-e2e-secret-web-e2e-secret-123', COOKIE_SECURE: 'false', MANAGER_ASSIGN_DELAY_MIN: '0', MANAGER_MESSAGE_GAP_SEC: '0', ANTHROPIC_API_KEY: 'test-key', ANTHROPIC_BASE_URL: `http://127.0.0.1:${claude.port}`, BUSINESS_HOURS: '24x7', AGENT_REPLY_DELAY_SEC: '0',
+    DATABASE_URL, PORT: String(apiPort), JWT_SECRET: 'web-e2e-secret-web-e2e-secret-123', COOKIE_SECURE: 'false', MANAGER_ASSIGN_DELAY_MIN: '0', MANAGER_MESSAGE_GAP_SEC: '0', ANTHROPIC_API_KEY: 'test-key', ANTHROPIC_BASE_URL: `http://127.0.0.1:${claude.port}`, BUSINESS_HOURS: '24x7', AGENT_TYPING_MS_PER_CHAR: '0', AGENT_REPLY_DELAY_SEC: '0',
     RAZORPAY_KEY_ID: KEY_ID, RAZORPAY_KEY_SECRET: KEY_SECRET, RAZORPAY_WEBHOOK_SECRET: 'wh', RAZORPAY_API_BASE: `http://127.0.0.1:${rzpPort}`, RATE_LIMIT_PER_MIN: '10000', AUTH_RATE_LIMIT_PER_MIN: '100', EXPOSE_AUTH_LINKS: 'true', APP_URL: 'http://web.invalid',
     SUPPLIER_LEGAL_NAME: 'Aaditya Jitendrabhai Sorathia', SUPPLIER_TRADE_NAME: 'Solluna', SUPPLIER_GSTIN: '24OPVPS8924H1ZQ', SUPPLIER_ADDRESS: 'Survey No 135, Plot No 9, Shreeji Nagar, Meghpar Kumbhardi Sim, Anjar, Kachchh, Gujarat 370110', SUPPLIER_EMAIL: 'solluna.play@gmail.com',
   });
@@ -475,6 +475,13 @@ test('public site: services, about, FAQ, legal pages render from the shared head
   await page.waitForURL(/\/services/);
   await page.getByRole('heading', { name: '29 services. One accountable team.' }).waitFor();
   assert.equal(await page.locator('main li.card').count(), 29, 'every service listed from the live plan matrix');
+  // Help page linked from the manager's add-user guide: Amazon first when asked, exact ops details.
+  await page.goto(`${webBase}/help/add-solluna-user?mp=amazon`);
+  await page.getByRole('heading', { name: 'Add SOLLUNA as a user' }).waitFor();
+  const firstGuide = await page.locator('main section h2').first().innerText();
+  assert.equal(firstGuide, 'Amazon Seller Central');
+  assert.ok((await page.locator('main').innerText()).includes('ops@solluna.co.in'));
+  await page.goto(webBase);
   for (const [path, heading] of [['/about', /Specialists for the work/], ['/faq', /Questions sellers ask/], ['/terms', 'Terms & Conditions'], ['/privacy', 'Privacy Policy'], ['/refund-policy', 'Refund & Cancellation Policy']]) {
     await page.goto(webBase + path);
     await page.getByRole('heading', { name: heading, level: 1 }).waitFor();

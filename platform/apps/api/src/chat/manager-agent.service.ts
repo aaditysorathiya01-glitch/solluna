@@ -9,10 +9,10 @@ import { AuditService } from '../common/audit.service';
 import { config } from '../common/config';
 import { DispatcherService } from '../connectors/dispatcher.service';
 import { OrchestratorService } from '../orchestrator/orchestrator.service';
-import { ChatService, type ChatMessage } from './chat.service';
+import { ChatService, typingMs, type ChatMessage } from './chat.service';
 import { systemPrompt, TOOLS } from './manager-prompt';
 import { PipelineService } from './pipeline.service';
-import { PIPELINE_KEYS, stepsOf } from './pipelines';
+import { PIPELINE_KEYS, accessGuide, stepsOf } from './pipelines';
 import { checkInput, checkOutput, flagNotes, rewriteNote, SAFE_FALLBACK, SOFT_VIOLATIONS, type InputFlag, type OutputViolation } from './guardrails';
 
 /**
@@ -47,6 +47,8 @@ type Bound = { orgId: string; runId: string };
 export class ManagerAgentService implements OnModuleInit {
   private readonly log = new Logger('ManagerAgent');
   private running = false;
+  /** Per client: bubbles still being "typed" (the next reply waits for them). */
+  private readonly posting = new Map<string, Promise<void>>();
   /** Other services add short client facts (e.g. SKUs missing a purchase price) without a circular dependency. */
   readonly factProviders: ((orgId: string) => Promise<string | null>)[] = [];
 
@@ -96,7 +98,7 @@ export class ManagerAgentService implements OnModuleInit {
     const since = new Date(Date.now() - 15 * 3_600_000); // longer than any closed night
     const already = await this.db.message.findFirst({ where: { conversationId: conv.id, byAgent: true, createdAt: { gte: since }, body: { startsWith: CLOSED_PREFIX } } });
     if (already) return;
-    await this.chat.postAsManager(orgId, a.managerId, `${CLOSED_PREFIX} Our working hours are ${HOURS_TEXT}. Your message is saved, and I will reply at ${openLabel(nextOpen())}.`, { byAgent: true });
+    await this.chat.typeAndPost(orgId, a.managerId, `${CLOSED_PREFIX} Our working hours are ${HOURS_TEXT}. Your message is saved, and I will reply at ${openLabel(nextOpen())}.`, { byAgent: true });
   }
 
   async tick() {
@@ -119,6 +121,7 @@ export class ManagerAgentService implements OnModuleInit {
 
   async run(runId: string, orgId: string) {
     try {
+      await this.posting.get(orgId); // previous reply still being typed
       const conv = await this.db.conversation.findUnique({ where: { organizationId: orgId } });
       if (!conv || conv.agentPaused) return this.finish(runId, 'SKIPPED', 'paused');
       const assignment = await this.db.managerAssignment.findFirst({ where: { organizationId: orgId, isPrimary: true, endedAt: null }, include: { manager: { select: { id: true, name: true, isActive: true } } } });
@@ -189,7 +192,13 @@ export class ManagerAgentService implements OnModuleInit {
 
       await this.digest(orgId, conv.id).catch((e) => this.log.warn(`Digest for ${orgId} failed: ${(e as Error).message}`));
       const bubbles = text.split(/\n\s*\n/).map((x) => x.trim()).filter(Boolean).slice(0, 3);
-      for (const body of bubbles) await this.chat.postAsManager(orgId, assignment.manager.id, body, { byAgent: true, notify: body === bubbles[0] });
+      // Bubbles appear one by one with a typing indicator (owner, 19 Nov 2026). The next run for this client waits for them.
+      const managerId = assignment.manager.id;
+      const post = async () => { for (const body of bubbles) await this.chat.typeAndPost(orgId, managerId, body, { byAgent: true, notify: body === bubbles[0] }); };
+      if (bubbles.some((b) => typingMs(b) > 0)) {
+        const chain = (this.posting.get(orgId) ?? Promise.resolve()).then(post).catch((e) => Logger.error(e, 'AgentPost')).finally(() => { if (this.posting.get(orgId) === chain) this.posting.delete(orgId); });
+        this.posting.set(orgId, chain);
+      } else await post();
       const cost = (usage.input * PRICE.input + usage.output * PRICE.output + usage.cacheRead * PRICE.cacheRead + usage.cacheWrite * PRICE.cacheWrite); // micro-USD (tokens × $/MTok)
       await this.db.agentRun.update({ where: { id: runId }, data: {
         status: 'DONE', model: AGENT_MODEL, inputTokens: usage.input, outputTokens: usage.output, cacheReadTokens: usage.cacheRead, cacheWriteTokens: usage.cacheWrite,
@@ -376,6 +385,13 @@ export class ManagerAgentService implements OnModuleInit {
       const row = await this.db.productCost.create({ data: { organizationId: b.orgId, sku: d.sku, costPaise: Math.round(d.cost_inr * 100), includesGst: d.includes_gst, effectiveFrom: from, clientConfirmed: true, enteredById: 'manager-chat' } });
       await this.audit.log({ action: 'product_cost.add', entity: 'ProductCost', entityId: row.id, organizationId: b.orgId, after: { sku: d.sku, costPaise: row.costPaise, by: 'manager-chat (client said)' } });
       return `Saved purchase price ₹${d.cost_inr} per unit for ${d.sku}.`;
+    }
+    if (name === 'send_access_guide') {
+      const d = z.object({ marketplace: z.enum(['AMAZON', 'FLIPKART']) }).parse(input);
+      const a = await this.db.managerAssignment.findFirst({ where: { organizationId: b.orgId, isPrimary: true, endedAt: null }, select: { managerId: true } });
+      if (!a) return 'No manager assigned yet; the guide was not sent.';
+      await this.chat.typeAndPost(b.orgId, a.managerId, accessGuide(d.marketplace), { byAgent: true });
+      return `The exact ${d.marketplace === 'FLIPKART' ? 'Flipkart' : 'Amazon'} steps and the screenshots link were sent to the client. Do not repeat them; add at most one short line.`;
     }
     if (name === 'escalate_to_team') {
       const d = z.object({ reason: z.string().trim().min(3).max(1000), priority: z.enum(['P1', 'P2', 'P3', 'P4']) }).parse(input);
