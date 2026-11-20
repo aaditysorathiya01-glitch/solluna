@@ -1,0 +1,13 @@
+{
+  "extraKnownMarketplaces": {
+    "context-mode": { "source": { "source": "github", "repo": "mksglu/context-mode" } },
+    "thedotmack": { "source": { "source": "github", "repo": "thedotmack/claude-mem" } }
+  },
+  "enabledPlugins": {
+    "context-mode@context-mode": true,
+    "claude-mem@thedotmack": true
+  },
+  "env": {
+    "DO_NOT_TRACK": "1"
+  }
+}
