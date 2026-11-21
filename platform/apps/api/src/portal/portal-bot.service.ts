@@ -24,12 +24,13 @@ const SECRETS: Record<string, () => string | undefined> = {
 };
 
 const Step = z.union([
+  // OTP first: a union picks the first matching shape, and the plain fill would swallow it.
+  z.object({ otp: z.enum(['FLIPKART', 'AMAZON']), fill: z.string().min(1).max(300) }),
   z.object({ goto: z.string().url() }),
   z.object({ click: z.string().min(1).max(300) }),
   z.object({ fill: z.string().min(1).max(300), value: z.string().max(300).optional(), secret: z.enum(['OPS_EMAIL', 'OPS_FLIPKART_PASSWORD', 'OPS_AMAZON_PASSWORD']).optional() }),
   z.object({ press: z.string().max(30) }),
   z.object({ wait: z.number().int().min(100).max(20_000) }),
-  z.object({ otp: z.enum(['FLIPKART', 'AMAZON']), fill: z.string().min(1).max(300) }),
 ]);
 const ProbeSchema = z.object({ steps: z.array(Step).min(1).max(15), profile: z.enum(['ops-flipkart', 'ops-amazon']).default('ops-flipkart') });
 
