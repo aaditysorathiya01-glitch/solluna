@@ -24,6 +24,7 @@ const SECRETS: Record<string, () => string | undefined> = {
 };
 
 const Step = z.union([
+  z.object({ login: z.enum(['FLIPKART']) }),
   // OTP first: a union picks the first matching shape, and the plain fill would swallow it.
   z.object({ otp: z.enum(['FLIPKART', 'AMAZON']), fill: z.string().min(1).max(300) }),
   z.object({ goto: z.string().url() }),
@@ -98,7 +99,8 @@ export class PortalBotService {
         const label = JSON.stringify('fill' in s && ('secret' in s || 'otp' in s) ? { ...s, value: undefined } : s).slice(0, 200);
         let error: string | undefined;
         try {
-          if ('goto' in s) await page.goto(s.goto, { waitUntil: 'domcontentloaded', timeout: 45_000 });
+          if ('login' in s) await this.flipkartLogin(page);
+          else if ('goto' in s) await page.goto(s.goto, { waitUntil: 'domcontentloaded', timeout: 45_000 });
           else if ('otp' in s) {
             const code = await this.mail.waitForOtp(s.otp, started);
             if (!code) throw new Error('No OTP arrived in the ops mailbox within 2 minutes');
@@ -125,6 +127,32 @@ export class PortalBotService {
       await browser?.close().catch(() => undefined);
       await this.bb(`/sessions/${session.id}`, { projectId: process.env.BROWSERBASE_PROJECT_ID, status: 'REQUEST_RELEASE' }).catch(() => undefined);
     }
+  }
+
+  /**
+   * Signs the ops user in to Flipkart Seller Hub if needed (learned 21 Nov 2026): Login → username → Next → password →
+   * Enter → 6 one-digit OTP boxes, OTP read from the ops mailbox. A saved session skips straight to the dashboard.
+   */
+  private async flipkartLogin(page: Page) {
+    await page.goto('https://seller.flipkart.com/index.html#dashboard/home-page', { waitUntil: 'domcontentloaded', timeout: 45_000 });
+    await page.waitForTimeout(4000);
+    if (page.url().includes('#dashboard') && !page.url().includes('referral_url')) return;
+    const started = new Date();
+    await page.locator('button:has-text("Login")').first().click({ timeout: 15_000 });
+    await page.locator('input[name=username]').fill(config.opsUser.email);
+    await page.locator('button:has-text("Next")').first().click();
+    const pw = process.env.OPS_FLIPKART_PASSWORD;
+    if (!pw) throw new Error('OPS_FLIPKART_PASSWORD is not set');
+    await page.locator('input[name=password]').fill(pw, { timeout: 15_000 });
+    await page.keyboard.press('Enter');
+    const boxes = page.locator('input[type=tel]');
+    const otpAsked = await boxes.first().waitFor({ timeout: 12_000 }).then(() => true).catch(() => false);
+    if (otpAsked) {
+      const code = await this.mail.waitForOtp('FLIPKART', started);
+      if (!code) throw new Error('Flipkart asked for an OTP but none reached the ops mailbox in 2 minutes');
+      for (let i = 0; i < code.length; i++) await boxes.nth(i).fill(code[i]);
+    }
+    await page.waitForURL(/#dashboard/, { timeout: 30_000 });
   }
 
   /** "text=Login", "role=button[name=Next]" or any Playwright selector; plain words match visible text. */
