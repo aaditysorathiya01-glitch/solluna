@@ -104,6 +104,7 @@ export class PortalBotService {
         const label = JSON.stringify('fill' in s && ('secret' in s || 'otp' in s) ? { ...s, value: undefined } : s).slice(0, 200);
         let error: string | undefined;
         let inspected: string | undefined;
+        await this.dismissPopups(page);
         try {
           if ('login' in s) await this.flipkartLogin(page);
           else if ('clickAt' in s) await page.mouse.click(s.clickAt.x, s.clickAt.y);
@@ -179,6 +180,14 @@ export class PortalBotService {
       for (let i = 0; i < code.length; i++) await boxes.nth(i).fill(code[i]);
     }
     await page.waitForURL(/#dashboard/, { timeout: 30_000 });
+  }
+
+  /** Known Seller Hub popups (notification prompt, tutorial video, "New Listings Page") are closed before each step. */
+  private async dismissPopups(page: Page) {
+    const quick = { timeout: 600 };
+    await page.locator('#moe-dontallow_button').click(quick).catch(() => undefined);
+    if (await page.getByText('What are its benefits?').isVisible().catch(() => false)) { await page.keyboard.press('Escape').catch(() => undefined); await page.mouse.click(120, 600).catch(() => undefined); }
+    if (await page.getByText('Learn To Do Single Listing').isVisible().catch(() => false)) await page.getByRole('button', { name: 'Close' }).last().click(quick).catch(() => undefined);
   }
 
   /** "text=Login", "role=button[name=Next]" or any Playwright selector; plain words match visible text. */
