@@ -98,7 +98,11 @@ export class PortalBotService {
           else if ('otp' in s) {
             const code = await this.mail.waitForOtp(s.otp, started);
             if (!code) throw new Error('No OTP arrived in the ops mailbox within 2 minutes');
-            await this.target(page, s.fill).fill(code);
+            // Flipkart shows one box per digit; a single field gets the whole code.
+            const boxes = page.locator(s.fill);
+            const n = await boxes.count();
+            if (n >= code.length) for (let i = 0; i < code.length; i++) await boxes.nth(i).fill(code[i]);
+            else await this.target(page, s.fill).fill(code);
           } else if ('fill' in s) {
             const v = s.secret ? SECRETS[s.secret]?.() : s.value;
             if (v == null) throw new Error(`${s.secret ?? 'value'} is not set`);

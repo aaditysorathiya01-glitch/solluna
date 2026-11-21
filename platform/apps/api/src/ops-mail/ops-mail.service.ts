@@ -55,7 +55,7 @@ export class OpsMailService implements OnModuleInit, OnModuleDestroy {
   async list() {
     const rows = await this.db.opsMail.findMany({ orderBy: { receivedAt: 'desc' }, take: 50 });
     const now = Date.now();
-    return rows.map((r) => ({ id: r.id, receivedAt: r.receivedAt, from: r.fromAddr, subject: r.subject, kind: r.kind, marketplace: r.marketplace, otpWaiting: Boolean(r.otpCipher && r.otpExpiresAt && r.otpExpiresAt.getTime() > now) }));
+    return rows.map((r) => ({ id: r.id, receivedAt: r.receivedAt, from: r.fromAddr, subject: r.kind === 'OTP' ? r.subject.replace(/\b\d{4,8}\b/g, '••••••') : r.subject, kind: r.kind, marketplace: r.marketplace, otpWaiting: Boolean(r.otpCipher && r.otpExpiresAt && r.otpExpiresAt.getTime() > now) }));
   }
 
   /** One read: returns the OTP and deletes it. */
@@ -90,7 +90,7 @@ export class OpsMailService implements OnModuleInit, OnModuleDestroy {
     if (!r) throw new NotFoundException('Mail not found');
     await this.audit.log({ actor: user, action: 'ops_mail.read', entity: 'OpsMail', entityId: id });
     const text = decrypt(r.bodyCipher);
-    return { id, from: r.fromAddr, subject: r.subject, receivedAt: r.receivedAt, text: r.kind === 'OTP' ? text.replace(/\b\d{4,8}\b/g, '••••••') : text };
+    return { id, from: r.fromAddr, subject: r.kind === 'OTP' ? r.subject.replace(/\b\d{4,8}\b/g, '••••••') : r.subject, receivedAt: r.receivedAt, text: r.kind === 'OTP' ? text.replace(/\b\d{4,8}\b/g, '••••••') : text };
   }
 
   async sweep() {
