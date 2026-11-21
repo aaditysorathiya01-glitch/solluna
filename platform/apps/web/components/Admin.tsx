@@ -16,7 +16,7 @@ const ROLES = ['SUPER_ADMIN', 'OPERATIONS_MANAGER', 'LISTING_EXECUTIVE', 'ADS_MA
 
 export function AdminConsole({ role }: { role: string }) {
   const superAdmin = role === 'SUPER_ADMIN';
-  const tabs = [['overview', 'Overview'], ['clients', 'Clients'], ['team', 'Team'], ['plans', 'Plans'], ['payments', 'Payments'], ['manager-cost', 'Manager cost'], ['ops-mail', 'Ops mailbox'], ['inquiries', 'Enquiries'], ['announce', 'Announcements'], ...(superAdmin ? [['promo', 'Promo codes'] as const, ['audit', 'Audit log'] as const] : [])] as const;
+  const tabs = [['overview', 'Overview'], ['clients', 'Clients'], ['team', 'Team'], ['plans', 'Plans'], ['payments', 'Payments'], ['manager-cost', 'Manager cost'], ['ops-mail', 'Ops mailbox'], ['inquiries', 'Enquiries'], ['announce', 'Announcements'], ...(superAdmin ? [['portal-bot', 'Portal bot'] as const, ['promo', 'Promo codes'] as const, ['audit', 'Audit log'] as const] : [])] as const;
   const [tab, setTab] = useState<string>('overview');
   const [flash, setFlash] = useState<FlashMsg>(null);
   return (
@@ -33,6 +33,7 @@ export function AdminConsole({ role }: { role: string }) {
       {tab === 'ops-mail' && <OpsMailPanel />}
       {tab === 'inquiries' && <InquiriesPanel onFlash={setFlash} />}
       {tab === 'announce' && <AnnouncePanel onFlash={setFlash} />}
+      {tab === 'portal-bot' && superAdmin && <PortalBotPanel onFlash={setFlash} />}
       {tab === 'promo' && superAdmin && <PromoPanel onFlash={setFlash} />}
       {tab === 'audit' && superAdmin && <AuditPanel />}
     </main>
@@ -443,6 +444,58 @@ function AmazonCheck() {
       {r && (r.ok
         ? <p className="text-sm text-emerald-800" data-testid="amazon-ok">Connected ✓ {r.amazonIn ? 'Amazon.in is active.' : 'Amazon.in not active on this account.'} Marketplaces: {r.marketplaces?.map((m) => m.name).join(', ')}</p>
         : <p className="text-sm text-red-700" role="alert">{r.message}</p>)}
+    </section>
+  );
+}
+
+interface PortalRunRow { id: string; client: string; requestId: string | null; status: string; input: { fsn: string; sku: string; values: Record<string, string> }; missing: { field: string; reason: string }[] | null; error: string | null; listingRef: string | null; createdAt: string; updatedAt: string }
+interface PortalRunFull extends PortalRunRow { filled: { field: string; value: string }[] | null; shots: { step: string; png: string }[] | null }
+const RUN_LABEL: Record<string, string> = { RUNNING: 'Filling the form…', READY: 'Waiting for your approval', SUBMITTING: 'Submitting…', SUBMITTED: 'Submitted · in Flipkart QC', FAILED: 'Stopped', REJECTED: 'Rejected' };
+/** Flipkart mapping bot (safety mode): the bot fills Seller Hub and stops before Submit; the owner checks the screenshots and approves. */
+function PortalBotPanel({ onFlash }: { onFlash: (f: FlashMsg) => void }) {
+  const rows = useApi<PortalRunRow[]>('/admin/portal-bot/runs');
+  const [open, setOpen] = useState<PortalRunFull | null>(null);
+  const [busy, setBusy] = useState(false);
+  async function view(id: string) { try { setOpen(await api<PortalRunFull>(`/admin/portal-bot/runs/${id}`)); } catch (e) { onFlash({ kind: 'err', text: errText(e) }); } }
+  async function act(path: string, ok: string, body?: unknown) {
+    setBusy(true);
+    try { await api(path, { method: 'POST', body: body ? JSON.stringify(body) : undefined }); onFlash({ kind: 'ok', text: ok }); setOpen(null); rows.reload(); }
+    catch (e) { onFlash({ kind: 'err', text: errText(e) }); } finally { setBusy(false); }
+  }
+  return (
+    <section className="space-y-3" aria-label="Portal bot">
+      <div className="flex items-center justify-between gap-2"><div><h2 className="font-semibold">Portal bot · Flipkart mapping</h2><p className="text-xs text-ink-3">The bot fills the Seller Hub form from the client&apos;s mapping form and stops before Submit. Check the screenshots, then approve to submit.</p></div><button className="btn-ghost py-1.5 text-xs" onClick={rows.reload}>Refresh</button></div>
+      {rows.data && !rows.data.length && <Empty>No bot runs yet. A Flipkart mapping form submitted by a client starts the bot automatically.</Empty>}
+      <div className="space-y-2">
+        {rows.data?.map((r) => (
+          <div key={r.id} className="card flex flex-wrap items-center justify-between gap-2 p-4 text-sm">
+            <div className="min-w-0">
+              <p className="font-medium">{r.client} · SKU {r.input.sku} · FSN {r.input.fsn}</p>
+              <p className="text-xs text-ink-3">{dt(r.createdAt)} · <span className={r.status === 'READY' ? 'font-semibold text-amber-700' : r.status === 'FAILED' ? 'text-red-700' : ''}>{RUN_LABEL[r.status] ?? r.status}</span>{r.error ? ` · ${r.error}` : ''}{r.listingRef ? ` · ${r.listingRef}` : ''}</p>
+            </div>
+            <div className="flex gap-2">
+              <button className="btn-ghost py-1.5 text-xs" onClick={() => view(r.id)}>Screenshots</button>
+              {['FAILED', 'REJECTED'].includes(r.status) && r.requestId && <button className="btn-ghost py-1.5 text-xs" disabled={busy} onClick={() => act(`/admin/portal-bot/mapping/${r.requestId}`, 'The bot started again')}>Run again</button>}
+            </div>
+          </div>
+        ))}
+      </div>
+      {open && (
+        <Modal title={`${open.client} · SKU ${open.input.sku}`} onClose={() => setOpen(null)}>
+          <div className="max-h-[70vh] space-y-3 overflow-y-auto">
+            <p className="text-sm">{RUN_LABEL[open.status] ?? open.status}{open.error ? ` · ${open.error}` : ''}</p>
+            {open.missing?.length ? <div className="rounded-xl bg-red-50 p-3 text-sm text-red-800"><p className="font-medium">Not entered</p><ul className="list-disc pl-5">{open.missing.map((m) => <li key={m.field}>{m.field}: {m.reason}</li>)}</ul></div> : null}
+            {open.filled?.length ? <table className="w-full text-xs"><tbody>{open.filled.map((f) => <tr key={f.field} className="border-t border-ink/5"><td className="py-1 pr-2 text-ink-3">{f.field}</td><td className="py-1">{f.value}</td></tr>)}</tbody></table> : null}
+            {open.shots?.map((s, i) => <figure key={i}><figcaption className="text-xs text-ink-3">{s.step}</figcaption>{/* eslint-disable-next-line @next/next/no-img-element */}<img src={`data:image/png;base64,${s.png}`} alt={s.step} className="w-full rounded-lg border border-ink/10" /></figure>)}
+          </div>
+          {open.status === 'READY' && (
+            <div className="mt-3 flex justify-end gap-2">
+              <button className="btn-ghost" disabled={busy} onClick={() => act(`/admin/portal-bot/runs/${open.id}/reject`, 'Rejected — nothing was submitted', { note: 'Rejected by the owner after review' })}>Reject</button>
+              <button className="btn-primary" disabled={busy} onClick={() => act(`/admin/portal-bot/runs/${open.id}/approve`, 'Approved — the bot is submitting on Flipkart')}>Approve &amp; submit on Flipkart</button>
+            </div>
+          )}
+        </Modal>
+      )}
     </section>
   );
 }

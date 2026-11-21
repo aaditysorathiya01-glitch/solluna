@@ -67,6 +67,27 @@ export class PortalBotService {
     return this.contexts.get(profile)!;
   }
 
+  /** A remote browser page on the ops profile (persistent cookies), with blocked pages closed at once. Always call close(). */
+  async openPage(profile: 'ops-flipkart' | 'ops-amazon') {
+    if (!this.configured) throw new BadRequestException('Add BROWSERBASE_API_KEY and BROWSERBASE_PROJECT_ID in the server environment.');
+    const contextId = await this.contextFor(profile);
+    const session = await this.bb<{ id: string; connectUrl: string }>('/sessions', {
+      projectId: process.env.BROWSERBASE_PROJECT_ID, region: 'ap-southeast-1',
+      browserSettings: { context: { id: contextId, persist: true }, solveCaptchas: false, recordSession: false, viewport: { width: 1366, height: 860 } },
+    });
+    const browser = await chromium.connectOverCDP(session.connectUrl, { timeout: 30_000 });
+    const ctx = browser.contexts()[0];
+    const holder = { page: ctx.pages()[0] ?? await ctx.newPage() };
+    const guard = (p: Page) => p.on('framenavigated', (f) => { if (f === p.mainFrame() && BLOCKED.test(f.url())) void p.close().catch(() => undefined); });
+    guard(holder.page);
+    ctx.on('page', (p) => { guard(p); holder.page = p; });
+    const close = async () => {
+      await browser.close().catch(() => undefined);
+      await this.bb(`/sessions/${session.id}`, { projectId: process.env.BROWSERBASE_PROJECT_ID, status: 'REQUEST_RELEASE' }).catch(() => undefined);
+    };
+    return { holder, close };
+  }
+
   async startProbe(user: AuthUser, input: unknown) {
     if (!this.configured) throw new BadRequestException('Add BROWSERBASE_API_KEY and BROWSERBASE_PROJECT_ID in the server environment.');
     const d = parse(ProbeSchema, input);
@@ -167,7 +188,7 @@ export class PortalBotService {
    * Signs the ops user in to Flipkart Seller Hub if needed (learned 21 Nov 2026): Login → username → Next → password →
    * Enter → 6 one-digit OTP boxes, OTP read from the ops mailbox. A saved session skips straight to the dashboard.
    */
-  private async flipkartLogin(page: Page) {
+  async flipkartLogin(page: Page) {
     await page.goto('https://seller.flipkart.com/index.html#dashboard/home-page', { waitUntil: 'domcontentloaded', timeout: 45_000 });
     await page.waitForTimeout(4000);
     if (page.url().includes('#dashboard') && !page.url().includes('referral_url')) return;
@@ -190,7 +211,7 @@ export class PortalBotService {
   }
 
   /** Known Seller Hub popups (notification prompt, tutorial video, "New Listings Page") are closed before each step. */
-  private async dismissPopups(page: Page) {
+  async dismissPopups(page: Page) {
     const quick = { timeout: 600 };
     await page.locator('#moe-dontallow_button').click(quick).catch(() => undefined);
     // "New Listings Page! What are its benefits?" ignores Escape; its only button closes the tour (no setting changes).

@@ -1,4 +1,5 @@
 import { PortalBotService } from '../portal/portal-bot.service';
+import { FlipkartMappingService } from '../portal/flipkart-mapping.service';
 import { TestClientPurgeService } from '../admin/test-client-purge.service';
 import { Body, Controller, Get, HttpCode, MessageEvent, Param, Patch, Post, Query, Sse } from '@nestjs/common';
 import { SkipThrottle } from '@nestjs/throttler';
@@ -81,11 +82,18 @@ export class OpsChatController {
 @Controller('admin')
 @StaffOnly('SUPER_ADMIN', 'OPERATIONS_MANAGER')
 export class AdminClientsController {
-  constructor(private readonly chat: ChatService, private readonly agent: ManagerAgentService, private readonly evals: AgentEvalsService, private readonly spapi: SpApiService, private readonly purge: TestClientPurgeService, private readonly bot: PortalBotService) {}
+  constructor(private readonly chat: ChatService, private readonly agent: ManagerAgentService, private readonly evals: AgentEvalsService, private readonly spapi: SpApiService, private readonly purge: TestClientPurgeService, private readonly bot: PortalBotService, private readonly fkMap: FlipkartMappingService) {}
 
   /** Portal bot probe (super admin): run a few steps in Seller Hub / Seller Central and get screenshots back. */
   @Post('portal-bot/probe') @HttpCode(200) @StaffOnly('SUPER_ADMIN') probe(@CurrentUser() u: AuthUser, @Body() body: unknown) { return this.bot.startProbe(u, body); }
   @Get('portal-bot/probe/:id') @StaffOnly('SUPER_ADMIN') probeResult(@Param('id') id: string) { return this.bot.getProbe(id); }
+
+  /** Flipkart mapping bot (safety mode): runs stop before Submit; the owner approves or rejects each run here. */
+  @Get('portal-bot/runs') @StaffOnly('SUPER_ADMIN') runs() { return this.fkMap.list(); }
+  @Get('portal-bot/runs/:id') @StaffOnly('SUPER_ADMIN') run(@Param('id') id: string) { return this.fkMap.get(id); }
+  @Post('portal-bot/mapping/:requestId') @HttpCode(200) @StaffOnly('SUPER_ADMIN') prepareMapping(@CurrentUser() u: AuthUser, @Param('requestId') requestId: string) { return this.fkMap.prepare(u, requestId); }
+  @Post('portal-bot/runs/:id/approve') @HttpCode(200) @StaffOnly('SUPER_ADMIN') approveRun(@CurrentUser() u: AuthUser, @Param('id') id: string) { return this.fkMap.approve(u, id); }
+  @Post('portal-bot/runs/:id/reject') @HttpCode(200) @StaffOnly('SUPER_ADMIN') rejectRun(@CurrentUser() u: AuthUser, @Param('id') id: string, @Body() body: { note?: string }) { return this.fkMap.reject(u, id, typeof body?.note === 'string' ? body.note : undefined); }
 
   /** Amazon SP-API connection check with the test seller (super admin). */
   @Post('amazon/test') @HttpCode(200) @StaffOnly('SUPER_ADMIN') amazonTest() { return this.spapi.testConnection(); }

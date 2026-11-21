@@ -1280,3 +1280,25 @@ model PromoRedemption {
   @@unique([promoCodeId, organizationId])
   @@index([organizationId])
 }
+
+/// Portal bot runs (owner, 21 Nov 2026): the bot fills a Seller Hub form, stops before Submit, and waits for the owner's
+/// approval (safety mode). Screenshots are kept as evidence. status: RUNNING | READY | SUBMITTING | SUBMITTED | FAILED | REJECTED
+model PortalRun {
+  id             String   @id @default(cuid())
+  organizationId String
+  requestId      String?
+  kind           String // FLIPKART_MAPPING
+  status         String   @default("RUNNING")
+  input          Json // the values the bot will enter (client form + SOLLUNA fixed values)
+  filled         Json? // [{ field, value }]
+  missing        Json? // [{ field, reason }]
+  shots          Json? // [{ step, png (base64) }]
+  error          String?
+  listingRef     String?
+  approvedById   String?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  @@index([organizationId, createdAt])
+  @@index([status])
+}

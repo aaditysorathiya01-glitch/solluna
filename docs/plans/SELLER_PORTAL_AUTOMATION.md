@@ -41,3 +41,10 @@ Google does not offer app passwords on the new solluna.ops@gmail.com, so the bot
 
 ## Accepting client invites (19 Nov 2026)
 Always open the invite from solluna.ops@gmail.com in an **Incognito window** and sign up / sign in as ops@solluna.co.in. Accepting while another Amazon login is open links the invite to the wrong account ("accepted with an email address other than the one that was invited"): reject that one, re-invite, accept again in Incognito. After access works, mark the pipeline step "SOLLUNA accepts the invite and verifies access" done in Ops; the manager then confirms to the client.
+
+## Flipkart mapping bot (built 21 Nov 2026)
+- Trigger: a client submits the Flipkart Mapping form → the bot starts at once (`PORTAL_BOT_AUTO=off` disables). Admin → Portal bot → "Run again" re-runs.
+- Recipe (no AI call): Listings in Progress → FSN in "Create listings using products available on Flipkart" → START SELLING → Selling Information form; 26 fields filled by their `name` (`apps/api/src/portal/flipkart-mapping.service.ts`).
+- Safety mode: the bot stops before Submit and saves screenshots (`PortalRun`, status READY). The owner approves in Admin → Portal bot. Only then a second run fills the same values, clicks Submit and looks the SKU up in Listings in Progress (evidence). A changed client form blocks approval.
+- After a verified submit: mapping EXACT_VERIFIED + FSN, tasks UNDER_MARKETPLACE_REVIEW (never ACTIVE), pipeline "map" step done, manager tells the client it is in Flipkart QC.
+- Any value Flipkart does not offer (e.g. a tax code or procurement type not in its list) stops the run with the reason; nothing is submitted.
