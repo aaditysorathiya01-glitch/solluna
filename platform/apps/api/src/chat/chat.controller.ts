@@ -1,3 +1,4 @@
+import { PortalBotService } from '../portal/portal-bot.service';
 import { TestClientPurgeService } from '../admin/test-client-purge.service';
 import { Body, Controller, Get, HttpCode, MessageEvent, Param, Patch, Post, Query, Sse } from '@nestjs/common';
 import { SkipThrottle } from '@nestjs/throttler';
@@ -80,7 +81,11 @@ export class OpsChatController {
 @Controller('admin')
 @StaffOnly('SUPER_ADMIN', 'OPERATIONS_MANAGER')
 export class AdminClientsController {
-  constructor(private readonly chat: ChatService, private readonly agent: ManagerAgentService, private readonly evals: AgentEvalsService, private readonly spapi: SpApiService, private readonly purge: TestClientPurgeService) {}
+  constructor(private readonly chat: ChatService, private readonly agent: ManagerAgentService, private readonly evals: AgentEvalsService, private readonly spapi: SpApiService, private readonly purge: TestClientPurgeService, private readonly bot: PortalBotService) {}
+
+  /** Portal bot probe (super admin): run a few steps in Seller Hub / Seller Central and get screenshots back. */
+  @Post('portal-bot/probe') @HttpCode(200) @StaffOnly('SUPER_ADMIN') probe(@CurrentUser() u: AuthUser, @Body() body: unknown) { return this.bot.startProbe(u, body); }
+  @Get('portal-bot/probe/:id') @StaffOnly('SUPER_ADMIN') probeResult(@Param('id') id: string) { return this.bot.getProbe(id); }
 
   /** Amazon SP-API connection check with the test seller (super admin). */
   @Post('amazon/test') @HttpCode(200) @StaffOnly('SUPER_ADMIN') amazonTest() { return this.spapi.testConnection(); }

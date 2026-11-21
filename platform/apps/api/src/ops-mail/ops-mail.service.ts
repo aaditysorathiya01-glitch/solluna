@@ -68,6 +68,21 @@ export class OpsMailService implements OnModuleInit, OnModuleDestroy {
     return { otp: decrypt(r.otpCipher), receivedAt: r.receivedAt };
   }
 
+  /** For the portal bot: waits for a fresh OTP from this marketplace, returns it once and deletes it (never to the model). */
+  async waitForOtp(marketplace: 'FLIPKART' | 'AMAZON', since: Date, timeoutMs = 120_000) {
+    const until = Date.now() + timeoutMs;
+    while (Date.now() < until) {
+      const r = await this.db.opsMail.findFirst({ where: { marketplace, kind: 'OTP', receivedAt: { gte: since }, otpCipher: { not: null }, otpExpiresAt: { gt: new Date() } }, orderBy: { receivedAt: 'desc' } });
+      if (r?.otpCipher) {
+        await this.db.opsMail.update({ where: { id: r.id }, data: { otpCipher: null, otpExpiresAt: null } });
+        await this.audit.log({ action: 'ops_mail.otp_used_by_bot', entity: 'OpsMail', entityId: r.id, after: { marketplace } });
+        return decrypt(r.otpCipher);
+      }
+      await new Promise((x) => setTimeout(x, 3000));
+    }
+    return null;
+  }
+
   /** Full text (e.g. an invite link) — operations managers only, audited. */
   async read(user: AuthUser, id: string) {
     if (!['SUPER_ADMIN', 'OPERATIONS_MANAGER'].includes(user.staffRole ?? '')) throw new ForbiddenException('Only operations managers can open ops mail');
