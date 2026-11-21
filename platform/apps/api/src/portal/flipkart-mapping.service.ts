@@ -70,6 +70,67 @@ export class FlipkartMappingService implements OnModuleInit {
       if (e.marketplace !== 'FLIPKART' || e.kind !== 'MAPPING' || !this.bot.configured || process.env.PORTAL_BOT_AUTO === 'off') return;
       await this.prepare(null, e.requestId).catch((err) => this.log.warn(`auto prepare ${e.requestId}: ${(err as Error).message}`));
     });
+    // Live check: submitted offers are looked up in My Listings → Active (15 min after Submit, then every 3 hours, 14 days).
+    setInterval(() => this.liveSweep().catch((e) => this.log.warn(`live sweep: ${(e as Error).message}`)), 5 * 60_000).unref();
+  }
+
+  private sweeping = false;
+  private async liveSweep() {
+    if (this.sweeping || !this.bot.configured) return;
+    this.sweeping = true;
+    try {
+      const now = Date.now();
+      const due = await this.db.portalRun.findMany({ where: { kind: 'FLIPKART_MAPPING', status: 'SUBMITTED', createdAt: { gt: new Date(now - 14 * 86_400_000) } }, orderBy: { updatedAt: 'asc' }, take: 10 });
+      const ready = due.filter((r) => {
+        const age = now - r.updatedAt.getTime();
+        return age > (r.error === 'live-check' ? 3 * 3_600_000 : 15 * 60_000);
+      });
+      if (ready.length) await this.checkLive(null, ready.map((r) => r.id));
+    } finally { this.sweeping = false; }
+  }
+
+  /**
+   * Evidence that the offer is live (learned 21 Nov 2026): My Listings → Active, searched by SKU
+   * (#dashboard/listings-management?listingState=ACTIVE&listingsSearchQuery=SKU) shows the SKU row. Then: tasks and request
+   * COMPLETED, pipeline step "Flipkart confirms" = LIVE, and the manager confirms to the client.
+   */
+  async checkLive(user: AuthUser | null, ids: string[]) {
+    const runs = await this.db.portalRun.findMany({ where: { id: { in: ids }, status: 'SUBMITTED' } });
+    if (!runs.length) throw new BadRequestException('No submitted run to check');
+    const out: { id: string; live: boolean }[] = [];
+    const opened = await this.bot.openPage('ops-flipkart');
+    try {
+      await this.bot.flipkartLogin(opened.holder.page);
+      for (const run of runs) {
+        const input = run.input as unknown as RunInput;
+        const page = opened.holder.page;
+        await page.goto(`https://seller.flipkart.com/index.html#dashboard/listings-management?listingState=ACTIVE&listingsSearchQuery=${encodeURIComponent(input.sku)}&partnerContext=ALL`, { waitUntil: 'domcontentloaded', timeout: 45_000 });
+        await page.waitForTimeout(9000);
+        await this.bot.dismissPopups(page);
+        const activeTab = (await page.locator('[id$="tabitem-ACTIVE"]').first().innerText().catch(() => '')).replace(/\s+/g, ' ');
+        const count = Number(/(\d+)\s*$/.exec(activeTab)?.[1] ?? 0);
+        const row = await page.getByText(input.sku, { exact: true }).count().catch(() => 0);
+        const live = count > 0 && row > 0;
+        out.push({ id: run.id, live });
+        if (!live) { await this.db.portalRun.update({ where: { id: run.id }, data: { error: 'live-check' } }); continue; }
+        const png = await page.screenshot({ type: 'png' }).catch(() => null);
+        const shots = [...((run.shots as unknown as Shot[] | null) ?? []), ...(png ? [{ step: 'My Listings → Active (live)', png: png.toString('base64') }] : [])];
+        await this.db.portalRun.update({ where: { id: run.id }, data: { status: 'LIVE', error: null, shots: shots as unknown as Prisma.InputJsonValue } });
+        await this.afterLive(run.id, run.organizationId, run.requestId, `${run.listingRef ?? `SKU ${input.sku} / FSN ${input.fsn}`}`, user);
+      }
+    } finally { await opened.close(); }
+    return out;
+  }
+
+  private async afterLive(id: string, orgId: string, requestId: string | null, listingRef: string, user: AuthUser | null) {
+    const evidence = { summary: `Flipkart My Listings shows the offer in Active (checked by the portal bot, run ${id})`, marketplaceRef: listingRef };
+    await this.db.task.updateMany({ where: { organizationId: orgId, requestId, status: { notIn: ['COMPLETED', 'CANCELLED'] } }, data: { status: 'COMPLETED', evidence } });
+    if (requestId) await this.db.serviceRequest.updateMany({ where: { id: requestId, organizationId: orgId }, data: { status: 'COMPLETED' } });
+    await this.audit.log({ actor: user ?? undefined, action: 'portal_bot.mapping_live', entity: 'PortalRun', entityId: id, organizationId: orgId, after: { listingRef } });
+    const pr = await this.db.pipelineRun.findFirst({ where: { organizationId: orgId, pipeline: 'CATALOG_MAPPING', branch: 'FLIPKART_MAPPING', status: 'ACTIVE' }, orderBy: { createdAt: 'desc' } });
+    // Step 2 = "Flipkart confirms the listing(s)"; finishing it moves to the client step, which makes the manager tell the client.
+    if (pr?.stepIndex === 2) await this.pipelines.teamAdvance(user, orgId, pr.id, { fields: { outcome: 'LIVE' } }).catch((e) => this.log.warn(`pipeline live: ${(e as Error).message}`));
+    else for (const l of this.pipelines.clientTurnListeners) await l(orgId, `Flipkart mapping (${listingRef}) is now LIVE: it shows in Flipkart My Listings → Active. Confirm this to the client.`).catch(() => undefined);
   }
 
   /** Recent runs for Admin → Portal bot (screenshots only in the single-run view). */

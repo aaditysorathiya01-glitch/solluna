@@ -450,7 +450,7 @@ function AmazonCheck() {
 
 interface PortalRunRow { id: string; client: string; requestId: string | null; status: string; input: { fsn: string; sku: string; values: Record<string, string> }; missing: { field: string; reason: string }[] | null; error: string | null; listingRef: string | null; createdAt: string; updatedAt: string }
 interface PortalRunFull extends PortalRunRow { filled: { field: string; value: string }[] | null; shots: { step: string; png: string }[] | null }
-const RUN_LABEL: Record<string, string> = { RUNNING: 'Filling the form…', READY: 'Waiting for your approval', SUBMITTING: 'Submitting…', SUBMITTED: 'Submitted · in Flipkart QC', FAILED: 'Stopped', REJECTED: 'Rejected' };
+const RUN_LABEL: Record<string, string> = { RUNNING: 'Filling the form…', READY: 'Waiting for your approval', SUBMITTING: 'Submitting…', SUBMITTED: 'Submitted · waiting for Flipkart to make it live', LIVE: 'Live on Flipkart ✓', FAILED: 'Stopped', REJECTED: 'Rejected' };
 /** Flipkart mapping bot (safety mode): the bot fills Seller Hub and stops before Submit; the owner checks the screenshots and approves. */
 function PortalBotPanel({ onFlash }: { onFlash: (f: FlashMsg) => void }) {
   const rows = useApi<PortalRunRow[]>('/admin/portal-bot/runs');
@@ -471,10 +471,11 @@ function PortalBotPanel({ onFlash }: { onFlash: (f: FlashMsg) => void }) {
           <div key={r.id} className="card flex flex-wrap items-center justify-between gap-2 p-4 text-sm">
             <div className="min-w-0">
               <p className="font-medium">{r.client} · SKU {r.input.sku} · FSN {r.input.fsn}</p>
-              <p className="text-xs text-ink-3">{dt(r.createdAt)} · <span className={r.status === 'READY' ? 'font-semibold text-amber-700' : r.status === 'FAILED' ? 'text-red-700' : ''}>{RUN_LABEL[r.status] ?? r.status}</span>{r.error ? ` · ${r.error}` : ''}{r.listingRef ? ` · ${r.listingRef}` : ''}</p>
+              <p className="text-xs text-ink-3">{dt(r.createdAt)} · <span className={r.status === 'READY' ? 'font-semibold text-amber-700' : r.status === 'FAILED' ? 'text-red-700' : ''}>{RUN_LABEL[r.status] ?? r.status}</span>{r.error && r.error !== 'live-check' ? ` · ${r.error}` : ''}{r.listingRef ? ` · ${r.listingRef}` : ''}</p>
             </div>
             <div className="flex gap-2">
               <button className="btn-ghost py-1.5 text-xs" onClick={() => view(r.id)}>Screenshots</button>
+              {r.status === 'SUBMITTED' && <button className="btn-ghost py-1.5 text-xs" disabled={busy} onClick={() => act(`/admin/portal-bot/runs/${r.id}/check-live`, 'Checked Flipkart My Listings')}>Check live now</button>}
               {r.status === 'FAILED' && r.error?.startsWith('Submitted, but') && <button className="btn-primary py-1.5 text-xs" disabled={busy} onClick={() => act(`/admin/portal-bot/runs/${r.id}/confirm`, 'Marked as submitted — the manager will tell the client')}>Screenshot shows success → confirm</button>}
               {['FAILED', 'REJECTED'].includes(r.status) && r.requestId && !r.error?.startsWith('Submitted, but') && <button className="btn-ghost py-1.5 text-xs" disabled={busy} onClick={() => act(`/admin/portal-bot/mapping/${r.requestId}`, 'The bot started again')}>Run again</button>}
             </div>
@@ -484,7 +485,7 @@ function PortalBotPanel({ onFlash }: { onFlash: (f: FlashMsg) => void }) {
       {open && (
         <Modal title={`${open.client} · SKU ${open.input.sku}`} onClose={() => setOpen(null)}>
           <div className="max-h-[70vh] space-y-3 overflow-y-auto">
-            <p className="text-sm">{RUN_LABEL[open.status] ?? open.status}{open.error ? ` · ${open.error}` : ''}</p>
+            <p className="text-sm">{RUN_LABEL[open.status] ?? open.status}{open.error && open.error !== 'live-check' ? ` · ${open.error}` : ''}</p>
             {open.missing?.length ? <div className="rounded-xl bg-red-50 p-3 text-sm text-red-800"><p className="font-medium">Not entered</p><ul className="list-disc pl-5">{open.missing.map((m) => <li key={m.field}>{m.field}: {m.reason}</li>)}</ul></div> : null}
             {open.filled?.length ? <table className="w-full text-xs"><tbody>{open.filled.map((f) => <tr key={f.field} className="border-t border-ink/5"><td className="py-1 pr-2 text-ink-3">{f.field}</td><td className="py-1">{f.value}</td></tr>)}</tbody></table> : null}
             {open.shots?.map((s, i) => <figure key={i}><figcaption className="text-xs text-ink-3">{s.step}</figcaption>{/* eslint-disable-next-line @next/next/no-img-element */}<img src={`data:image/png;base64,${s.png}`} alt={s.step} className="w-full rounded-lg border border-ink/10" /></figure>)}
