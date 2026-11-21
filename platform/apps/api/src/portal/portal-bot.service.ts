@@ -193,7 +193,8 @@ export class PortalBotService {
   private async dismissPopups(page: Page) {
     const quick = { timeout: 600 };
     await page.locator('#moe-dontallow_button').click(quick).catch(() => undefined);
-    if (await page.getByText('What are its benefits?').isVisible().catch(() => false)) { await page.keyboard.press('Escape').catch(() => undefined); await page.mouse.click(120, 600).catch(() => undefined); }
+    // "New Listings Page! What are its benefits?" ignores Escape; its only button closes the tour (no setting changes).
+    if (await page.getByText('What are its benefits?').isVisible().catch(() => false)) await page.getByRole('button', { name: 'View the new page' }).click(quick).catch(() => undefined);
     if (await page.getByText('Learn To Do Single Listing').isVisible().catch(() => false)) await page.getByRole('button', { name: 'Close' }).last().click(quick).catch(() => undefined);
   }
 
