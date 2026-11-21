@@ -207,7 +207,8 @@ export class FlipkartMappingService implements OnModuleInit {
       if (v === undefined) continue;
       const el = page.locator(`[name="${r.name}"]`).first();
       try {
-        if (!(await el.count())) { missing.push({ field: r.label, reason: 'Field not on this Flipkart form' }); continue; }
+        // Flipkart hides some fields for some products (e.g. Importer Details when the country is India): skip, note it.
+        if (!(await el.count())) { filled.push({ field: r.label, value: `${v} (not asked by Flipkart for this product, skipped)` }); continue; }
         await el.scrollIntoViewIfNeeded({ timeout: 5000 }).catch(() => undefined);
         if (r.kind === 'select') {
           const opts = await el.locator('option').allTextContents();
@@ -256,7 +257,7 @@ export class FlipkartMappingService implements OnModuleInit {
     const first = page.locator('[name=sku_id]').first();
     await first.scrollIntoViewIfNeeded().catch(() => undefined);
     await snap(page, 'Filled form (1)');
-    for (const [i, n] of ['shipping_days', 'length_p0', 'country_of_origin', 'shelf_life'].entries()) {
+    for (const [i, n] of ['shipping_days', 'length_p0', 'country_of_origin'].entries()) {
       await page.locator(`[name="${n}"]`).first().scrollIntoViewIfNeeded({ timeout: 5000 }).catch(() => undefined);
       await page.waitForTimeout(400);
       await snap(page, `Filled form (${i + 2})`);
