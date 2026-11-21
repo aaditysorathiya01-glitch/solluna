@@ -105,7 +105,7 @@ export class PortalBotService {
         let error: string | undefined;
         let inspected: string | undefined;
         await this.dismissPopups(page);
-        try {
+        const act = async () => {
           if ('login' in s) await this.flipkartLogin(page);
           else if ('clickAt' in s) await page.mouse.click(s.clickAt.x, s.clickAt.y);
           else if ('fields' in s) inspected = await page.evaluate(() => {
@@ -143,6 +143,13 @@ export class PortalBotService {
           } else if ('click' in s) await this.target(page, s.click).click({ timeout: 15_000 });
           else if ('press' in s) await page.keyboard.press(s.press);
           else if ('wait' in s) await page.waitForTimeout(s.wait);
+        };
+        try {
+          // A Seller Hub popup can open a moment after the check; close it and retry the step once.
+          try { await act(); } catch (first) {
+            if (!('type' in s || 'click' in s || 'hover' in s || 'fill' in s)) throw first;
+            await page.waitForTimeout(1500); await this.dismissPopups(page); await act();
+          }
           await page.waitForLoadState('domcontentloaded', { timeout: 15_000 }).catch(() => undefined);
           await page.waitForTimeout(1200);
         } catch (e) { error = (e as Error).message.split('\n')[0].slice(0, 300); }
