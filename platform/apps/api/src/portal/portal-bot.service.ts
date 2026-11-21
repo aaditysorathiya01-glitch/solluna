@@ -115,7 +115,7 @@ export class PortalBotService {
               if (el.type === 'hidden') continue;
               const row = el.closest('div[class*="row"], div[class*="Row"], tr, li, .form-group') ?? el.parentElement?.parentElement;
               const label = (row?.querySelector('label')?.textContent ?? row?.textContent ?? '').trim().replace(/\s+/g, ' ').slice(0, 70);
-              const opts = el.tagName === 'SELECT' ? ` options=[${Array.from(el.options).map((o) => o.text.trim()).slice(0, 12).join(' | ')}]` : '';
+              const opts = el.tagName === 'SELECT' ? ` options=[${Array.from(el.options).map((o: any) => o.text.trim()).slice(0, 12).join(' | ')}]` : '';
               rows.push(`${label} => ${el.tagName.toLowerCase()}${el.type ? `[${el.type}]` : ''}${el.name ? ` name=${el.name}` : ''}${el.id ? ` #${el.id}` : ''}${opts}`);
             }
             return rows.join('\n');
