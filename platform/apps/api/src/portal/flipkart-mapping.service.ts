@@ -49,6 +49,8 @@ const RECIPE: { key: string; name: string; kind: Kind; label: string }[] = [
   { key: 'shelfLifeMonths', name: 'shelf_life', kind: 'fill', label: 'Shelf Life' },
 ];
 const LISTINGS = 'https://seller.flipkart.com/index.html#dashboard/listingsInProgress';
+/** Key-order-independent JSON (Postgres jsonb re-orders keys). */
+const stable = (v: unknown): string => v && typeof v === 'object' && !Array.isArray(v) ? `{${Object.keys(v as object).sort().map((k) => `${JSON.stringify(k)}:${stable((v as Record<string, unknown>)[k])}`).join(',')}}` : JSON.stringify(v);
 const norm = (s: string) => s.toLowerCase().replace(/[^a-z0-9.]/g, '');
 
 interface Shot { step: string; png: string }
@@ -114,7 +116,7 @@ export class FlipkartMappingService implements OnModuleInit {
     const run = await this.get(id);
     if (run.status !== 'READY') throw new BadRequestException(`Only a READY run can be approved (this one is ${run.status})`);
     const { input } = await this.inputFor(run.requestId!);
-    if (JSON.stringify(input) !== JSON.stringify(run.input)) throw new BadRequestException('The client form changed after this run. Run the bot again and review the new screenshots.');
+    if (stable(input) !== stable(run.input)) throw new BadRequestException('The client form changed after this run. Run the bot again and review the new screenshots.');
     await this.db.portalRun.update({ where: { id }, data: { status: 'SUBMITTING', approvedById: user.id, error: null } });
     await this.audit.log({ actor: user, action: 'portal_bot.mapping_approved', entity: 'PortalRun', entityId: id, organizationId: run.organizationId, after: { fsn: input.fsn, sku: input.sku } });
     void this.execute(id, input, true, user).catch((e) => this.log.error(e));
