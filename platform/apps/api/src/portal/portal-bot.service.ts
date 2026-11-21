@@ -25,6 +25,8 @@ const SECRETS: Record<string, () => string | undefined> = {
 
 const Step = z.union([
   z.object({ login: z.enum(['FLIPKART']) }),
+  z.object({ clickAt: z.object({ x: z.number().min(0).max(2000), y: z.number().min(0).max(2000) }) }),
+  z.object({ inspect: z.string().min(1).max(100) }),
   // OTP first: a union picks the first matching shape, and the plain fill would swallow it.
   z.object({ otp: z.enum(['FLIPKART', 'AMAZON']), fill: z.string().min(1).max(300) }),
   z.object({ goto: z.string().url() }),
@@ -35,7 +37,7 @@ const Step = z.union([
 ]);
 const ProbeSchema = z.object({ steps: z.array(Step).min(1).max(15), profile: z.enum(['ops-flipkart', 'ops-amazon']).default('ops-flipkart') });
 
-interface Shot { step: string; url: string; title: string; png: string; elements: string[]; error?: string }
+interface Shot { step: string; url: string; title: string; png: string; elements: string[]; error?: string; html?: string }
 interface Job { id: string; status: 'RUNNING' | 'DONE' | 'FAILED'; shots: Shot[]; error?: string; startedAt: Date }
 
 @Injectable()
@@ -98,8 +100,14 @@ export class PortalBotService {
       for (const s of d.steps) {
         const label = JSON.stringify('fill' in s && ('secret' in s || 'otp' in s) ? { ...s, value: undefined } : s).slice(0, 200);
         let error: string | undefined;
+        let inspected: string | undefined;
         try {
           if ('login' in s) await this.flipkartLogin(page);
+          else if ('clickAt' in s) await page.mouse.click(s.clickAt.x, s.clickAt.y);
+          else if ('inspect' in s) inspected = await page.evaluate((t) => {
+            const all = Array.from(document.querySelectorAll('body *')).filter((e) => (e as HTMLElement).innerText?.trim() === t);
+            return all.slice(0, 3).map((e) => (e.parentElement?.parentElement ?? e).outerHTML.slice(0, 1500)).join('\n---\n');
+          }, s.inspect);
           else if ('goto' in s) await page.goto(s.goto, { waitUntil: 'domcontentloaded', timeout: 45_000 });
           else if ('otp' in s) {
             const code = await this.mail.waitForOtp(s.otp, started);
@@ -119,7 +127,7 @@ export class PortalBotService {
           await page.waitForLoadState('domcontentloaded', { timeout: 15_000 }).catch(() => undefined);
           await page.waitForTimeout(1200);
         } catch (e) { error = (e as Error).message.split('\n')[0].slice(0, 300); }
-        job.shots.push({ step: label, url: page.url(), title: await page.title().catch(() => ''), png: (await page.screenshot({ type: 'png' }).catch(() => Buffer.alloc(0))).toString('base64'), elements: await this.elements(page), error });
+        job.shots.push({ step: label, url: page.url(), title: await page.title().catch(() => ''), png: (await page.screenshot({ type: 'png' }).catch(() => Buffer.alloc(0))).toString('base64'), elements: await this.elements(page), error, html: inspected });
         if (error) break;
       }
       job.status = 'DONE';
