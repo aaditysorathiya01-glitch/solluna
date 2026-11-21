@@ -13,8 +13,9 @@ import { PortalBotService } from './portal-bot.service';
  * Flipkart mapping bot (owner, 21 Nov 2026: "mapping AI karega, team nahi").
  * Recipe learned live on Seller Hub: Listings → Add New Listing (#dashboard/listingsInProgress) → paste the FSN in
  * "Create listings using products available on Flipkart" → START SELLING → "Selling Information" form.
- * Safety mode: the bot fills the form, takes screenshots and STOPS before Submit. The owner approves in Admin → Portal bot;
- * only then a second run fills the same values and clicks Submit, and the listing is checked in Listings in Progress.
+ * Auto mode (owner, 21 Nov 2026, after the live test passed): fill → screenshots → Submit → check the SKU in Listings in
+ * Progress. Any value Flipkart does not offer, or a required field left empty, stops the run before Submit.
+ * PORTAL_BOT_REVIEW=on restores safety mode: stop before Submit until the owner approves in Admin → Portal bot.
  * No AI call is used: field names are fixed (recipe), so the client's values go in exactly as given.
  */
 type Kind = 'fill' | 'select' | 'date';
@@ -101,7 +102,10 @@ export class FlipkartMappingService implements OnModuleInit {
     if (busy) throw new BadRequestException('The bot is already working on this request');
     const run = await this.db.portalRun.create({ data: { organizationId: orgId, requestId, kind: 'FLIPKART_MAPPING', input: input as unknown as Prisma.InputJsonValue } });
     await this.audit.log({ actor: user ?? undefined, action: 'portal_bot.mapping_prepare', entity: 'PortalRun', entityId: run.id, organizationId: orgId, after: { requestId, fsn: input.fsn, sku: input.sku } });
-    void this.execute(run.id, input, false).catch((e) => this.log.error(e));
+    // Owner, 21 Nov 2026: the recipe passed its live test, so the bot submits on its own (no per-listing approval).
+    // PORTAL_BOT_REVIEW=on brings back safety mode (stop before Submit, owner approves in Admin → Portal bot).
+    const auto = process.env.PORTAL_BOT_REVIEW !== 'on';
+    void this.execute(run.id, input, auto, user).catch((e) => this.log.error(e));
     return { id: run.id, status: run.status };
   }
 
@@ -125,7 +129,7 @@ export class FlipkartMappingService implements OnModuleInit {
     return { id, status: 'REJECTED' };
   }
 
-  private async execute(id: string, input: RunInput, submit: boolean, approver?: AuthUser) {
+  private async execute(id: string, input: RunInput, submit: boolean, approver: AuthUser | null) {
     const shots: Shot[] = [];
     const snap = async (page: Page, step: string, fullPage = false) => {
       const png = await page.screenshot({ type: 'png', fullPage }).catch(() => null);
@@ -165,7 +169,7 @@ export class FlipkartMappingService implements OnModuleInit {
       if (!found) throw new Error(`Submitted, but SKU ${input.sku} is not visible in Listings in Progress yet. Check the screenshots before retrying.`);
       const listingRef = `SKU ${input.sku} / FSN ${input.fsn}`;
       await this.db.portalRun.update({ where: { id }, data: { status: 'SUBMITTED', filled, shots: shots as unknown as Prisma.InputJsonValue, listingRef } });
-      await this.afterSubmit(id, input, listingRef, approver!);
+      await this.afterSubmit(id, input, listingRef, approver);
     } catch (e) {
       const msg = (e as Error).message.split('\n')[0].slice(0, 500);
       this.log.warn(`run ${id}: ${msg}`);
@@ -265,11 +269,11 @@ export class FlipkartMappingService implements OnModuleInit {
   }
 
   /** Evidence → mapping record, pipeline "map" step done (the manager tells the client), audit. Status stays "in QC", never ACTIVE. */
-  private async afterSubmit(id: string, input: RunInput, listingRef: string, approver: AuthUser) {
+  private async afterSubmit(id: string, input: RunInput, listingRef: string, approver: AuthUser | null) {
     const run = await this.get(id);
     const orgId = run.organizationId;
     await this.db.catalogMapping.updateMany({ where: { organizationId: orgId, serviceRequestId: run.requestId, marketplace: 'FLIPKART' }, data: { status: 'EXACT_VERIFIED', candidateId: input.fsn, result: { by: 'portal-bot', runId: id, submittedAt: new Date().toISOString(), listingRef } } });
-    await this.db.task.updateMany({ where: { organizationId: orgId, requestId: run.requestId, status: { in: ['NEW', 'QUEUED', 'IN_PROGRESS'] } }, data: { status: 'UNDER_MARKETPLACE_REVIEW', evidence: { summary: `Offer submitted on Flipkart Seller Hub by the portal bot (owner-approved run ${id}); waiting for Flipkart QC`, marketplaceRef: listingRef } } });
+    await this.db.task.updateMany({ where: { organizationId: orgId, requestId: run.requestId, status: { in: ['NEW', 'QUEUED', 'IN_PROGRESS'] } }, data: { status: 'UNDER_MARKETPLACE_REVIEW', evidence: { summary: `Offer submitted on Flipkart Seller Hub by the portal bot (run ${id}); waiting for Flipkart QC`, marketplaceRef: listingRef } } });
     await this.db.serviceRequest.updateMany({ where: { id: run.requestId!, organizationId: orgId }, data: { status: 'UNDER_MARKETPLACE_REVIEW' } });
     await this.audit.log({ actor: approver, action: 'portal_bot.mapping_submitted', entity: 'PortalRun', entityId: id, organizationId: orgId, after: { listingRef } });
     // Pipeline: the team's "map" step is done → the manager tells the client it is with Flipkart for QC.

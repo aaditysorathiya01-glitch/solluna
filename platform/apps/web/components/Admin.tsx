@@ -464,7 +464,7 @@ function PortalBotPanel({ onFlash }: { onFlash: (f: FlashMsg) => void }) {
   }
   return (
     <section className="space-y-3" aria-label="Portal bot">
-      <div className="flex items-center justify-between gap-2"><div><h2 className="font-semibold">Portal bot · Flipkart mapping</h2><p className="text-xs text-ink-3">The bot fills the Seller Hub form from the client&apos;s mapping form and stops before Submit. Check the screenshots, then approve to submit.</p></div><button className="btn-ghost py-1.5 text-xs" onClick={rows.reload}>Refresh</button></div>
+      <div className="flex items-center justify-between gap-2"><div><h2 className="font-semibold">Portal bot · Flipkart mapping</h2><p className="text-xs text-ink-3">The bot fills the Seller Hub form from the client&apos;s mapping form, submits it and checks the SKU in Listings in Progress. It stops before Submit if a value is not accepted by Flipkart.</p></div><button className="btn-ghost py-1.5 text-xs" onClick={rows.reload}>Refresh</button></div>
       {rows.data && !rows.data.length && <Empty>No bot runs yet. A Flipkart mapping form submitted by a client starts the bot automatically.</Empty>}
       <div className="space-y-2">
         {rows.data?.map((r) => (

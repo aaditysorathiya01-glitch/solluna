@@ -224,7 +224,7 @@ export class PipelineService {
   }
 
   /** Team marks its step done. Access verification needs the marketplace account to be CONNECTED (evidence-based). */
-  async teamAdvance(user: AuthUser, orgId: string, runId: string, input: unknown = {}) {
+  async teamAdvance(user: AuthUser | null, orgId: string, runId: string, input: unknown = {}) {
     let run = await this.teamRun(orgId, runId);
     const step = this.step(run);
     if (run.status !== 'ACTIVE' || !step) throw new BadRequestException('Pipeline is not active');
@@ -252,7 +252,7 @@ export class PipelineService {
       const acct = await this.db.marketplaceAccount.findUnique({ where: { organizationId_marketplace: { organizationId: orgId, marketplace: mpOf(run.branch) } } });
       // The team member finishing this step IS the evidence (owner, 19 Nov 2026): the account becomes Connected, audited.
       if (acct?.status !== 'CONNECTED') {
-        const note = `Access verified by ${user.name ?? user.email ?? 'SOLLUNA team'} (seller-account pipeline, ${new Date().toISOString().slice(0, 10)})`;
+        const note = `Access verified by ${user?.name ?? user?.email ?? 'SOLLUNA team'} (seller-account pipeline, ${new Date().toISOString().slice(0, 10)})`;
         const mp = mpOf(run.branch);
         const saved = await this.db.marketplaceAccount.upsert({
           where: { organizationId_marketplace: { organizationId: orgId, marketplace: mp } },
