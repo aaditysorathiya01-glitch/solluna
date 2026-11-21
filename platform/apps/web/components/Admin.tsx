@@ -464,7 +464,7 @@ function PortalBotPanel({ onFlash }: { onFlash: (f: FlashMsg) => void }) {
   }
   return (
     <section className="space-y-3" aria-label="Portal bot">
-      <div className="flex items-center justify-between gap-2"><div><h2 className="font-semibold">Portal bot · Flipkart mapping</h2><p className="text-xs text-ink-3">The bot fills the Seller Hub form from the client&apos;s mapping form, submits it and checks the SKU in Listings in Progress. It stops before Submit if a value is not accepted by Flipkart.</p></div><button className="btn-ghost py-1.5 text-xs" onClick={rows.reload}>Refresh</button></div>
+      <div className="flex items-center justify-between gap-2"><div><h2 className="font-semibold">Portal bot · Flipkart mapping</h2><p className="text-xs text-ink-3">The bot fills the Seller Hub form from the client&apos;s mapping form, submits it and waits for Flipkart&apos;s &quot;Listing added successfully&quot;. It stops before Submit if a value is not accepted by Flipkart.</p></div><button className="btn-ghost py-1.5 text-xs" onClick={rows.reload}>Refresh</button></div>
       {rows.data && !rows.data.length && <Empty>No bot runs yet. A Flipkart mapping form submitted by a client starts the bot automatically.</Empty>}
       <div className="space-y-2">
         {rows.data?.map((r) => (
@@ -475,7 +475,8 @@ function PortalBotPanel({ onFlash }: { onFlash: (f: FlashMsg) => void }) {
             </div>
             <div className="flex gap-2">
               <button className="btn-ghost py-1.5 text-xs" onClick={() => view(r.id)}>Screenshots</button>
-              {['FAILED', 'REJECTED'].includes(r.status) && r.requestId && <button className="btn-ghost py-1.5 text-xs" disabled={busy} onClick={() => act(`/admin/portal-bot/mapping/${r.requestId}`, 'The bot started again')}>Run again</button>}
+              {r.status === 'FAILED' && r.error?.startsWith('Submitted, but') && <button className="btn-primary py-1.5 text-xs" disabled={busy} onClick={() => act(`/admin/portal-bot/runs/${r.id}/confirm`, 'Marked as submitted — the manager will tell the client')}>Screenshot shows success → confirm</button>}
+              {['FAILED', 'REJECTED'].includes(r.status) && r.requestId && !r.error?.startsWith('Submitted, but') && <button className="btn-ghost py-1.5 text-xs" disabled={busy} onClick={() => act(`/admin/portal-bot/mapping/${r.requestId}`, 'The bot started again')}>Run again</button>}
             </div>
           </div>
         ))}

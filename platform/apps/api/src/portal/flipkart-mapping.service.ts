@@ -123,6 +123,18 @@ export class FlipkartMappingService implements OnModuleInit {
     return { id, status: 'SUBMITTING' };
   }
 
+  /** Owner confirms from the screenshot that Flipkart accepted a run the bot could not verify (no second Submit). */
+  async confirm(user: AuthUser, id: string) {
+    const run = await this.get(id);
+    if (run.status !== 'FAILED' || !run.error?.startsWith('Submitted, but')) throw new BadRequestException('Only a run that was submitted but not verified can be confirmed');
+    const input = run.input as unknown as RunInput;
+    const listingRef = `SKU ${input.sku} / FSN ${input.fsn}`;
+    await this.db.portalRun.update({ where: { id }, data: { status: 'SUBMITTED', error: null, listingRef } });
+    await this.audit.log({ actor: user, action: 'portal_bot.mapping_confirmed', entity: 'PortalRun', entityId: id, organizationId: run.organizationId, after: { listingRef } });
+    await this.afterSubmit(id, input, listingRef, user);
+    return { id, status: 'SUBMITTED' };
+  }
+
   async reject(user: AuthUser, id: string, note?: string) {
     const run = await this.get(id);
     if (run.status !== 'READY') throw new BadRequestException('Only a READY run can be rejected');
@@ -154,21 +166,15 @@ export class FlipkartMappingService implements OnModuleInit {
         await this.db.portalRun.update({ where: { id }, data: { status: 'READY', filled, missing, shots: shots as unknown as Prisma.InputJsonValue } });
         return;
       }
-      // Approved: Submit, read Flipkart's reply, then look the SKU up in Listings in Progress (evidence).
+      // Submit, then Flipkart's own confirmation is the evidence: mapping to an existing FSN shows "Listing added
+      // successfully" and goes straight to My Listings (it never appears in Listings in Progress, learned 21 Nov 2026).
       await pg().getByRole('button', { name: /^submit$/i }).last().click({ timeout: 15_000 });
-      await pg().waitForTimeout(6000);
-      const errors = await this.formErrors(pg());
+      const ok = await pg().getByText(/listing added successfully/i).first().waitFor({ timeout: 30_000 }).then(() => true).catch(() => false);
       await snap(pg(), 'After Submit');
-      if (errors.length) throw new Error(`Flipkart rejected the form: ${errors.join('; ').slice(0, 400)}`);
-      await pg().goto(LISTINGS, { waitUntil: 'domcontentloaded', timeout: 45_000 });
-      await pg().waitForTimeout(7000);
-      await this.bot.dismissPopups(pg());
-      const box = pg().locator('input[placeholder^="Search by SKU"]').first();
-      await box.click({ timeout: 15_000 }); await box.pressSequentially(input.sku, { delay: 50 }); await pg().keyboard.press('Enter');
-      await pg().waitForTimeout(6000);
-      await snap(pg(), 'Listings in Progress (SKU search)');
-      const found = await pg().getByText(input.sku, { exact: false }).count().catch(() => 0);
-      if (!found) throw new Error(`Submitted, but SKU ${input.sku} is not visible in Listings in Progress yet. Check the screenshots before retrying.`);
+      if (!ok) {
+        const errors = await this.formErrors(pg());
+        throw new Error(errors.length ? `Flipkart rejected the form: ${errors.join('; ').slice(0, 400)}` : 'Submitted, but Flipkart did not show "Listing added successfully". Check the screenshot before retrying.');
+      }
       const listingRef = `SKU ${input.sku} / FSN ${input.fsn}`;
       await this.db.portalRun.update({ where: { id }, data: { status: 'SUBMITTED', filled, shots: shots as unknown as Prisma.InputJsonValue, listingRef } });
       await this.afterSubmit(id, input, listingRef, approver);

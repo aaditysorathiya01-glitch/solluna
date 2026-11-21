@@ -93,6 +93,7 @@ export class AdminClientsController {
   @Get('portal-bot/runs/:id') @StaffOnly('SUPER_ADMIN') run(@Param('id') id: string) { return this.fkMap.get(id); }
   @Post('portal-bot/mapping/:requestId') @HttpCode(200) @StaffOnly('SUPER_ADMIN') prepareMapping(@CurrentUser() u: AuthUser, @Param('requestId') requestId: string) { return this.fkMap.prepare(u, requestId); }
   @Post('portal-bot/runs/:id/approve') @HttpCode(200) @StaffOnly('SUPER_ADMIN') approveRun(@CurrentUser() u: AuthUser, @Param('id') id: string) { return this.fkMap.approve(u, id); }
+  @Post('portal-bot/runs/:id/confirm') @HttpCode(200) @StaffOnly('SUPER_ADMIN') confirmRun(@CurrentUser() u: AuthUser, @Param('id') id: string) { return this.fkMap.confirm(u, id); }
   @Post('portal-bot/runs/:id/reject') @HttpCode(200) @StaffOnly('SUPER_ADMIN') rejectRun(@CurrentUser() u: AuthUser, @Param('id') id: string, @Body() body: { note?: string }) { return this.fkMap.reject(u, id, typeof body?.note === 'string' ? body.note : undefined); }
 
   /** Amazon SP-API connection check with the test seller (super admin). */
