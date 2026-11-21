@@ -27,6 +27,7 @@ const Step = z.union([
   z.object({ login: z.enum(['FLIPKART']) }),
   z.object({ clickAt: z.object({ x: z.number().min(0).max(2000), y: z.number().min(0).max(2000) }) }),
   z.object({ inspect: z.string().min(1).max(100) }),
+  z.object({ type: z.string().min(1).max(300), value: z.string().max(300) }),
   // OTP first: a union picks the first matching shape, and the plain fill would swallow it.
   z.object({ otp: z.enum(['FLIPKART', 'AMAZON']), fill: z.string().min(1).max(300) }),
   z.object({ goto: z.string().url() }),
@@ -104,6 +105,7 @@ export class PortalBotService {
         try {
           if ('login' in s) await this.flipkartLogin(page);
           else if ('clickAt' in s) await page.mouse.click(s.clickAt.x, s.clickAt.y);
+          else if ('type' in s) { const t = this.target(page, s.type); await t.click(); await t.fill(''); await t.pressSequentially(s.value, { delay: 60 }); }
           else if ('inspect' in s) inspected = await page.evaluate((t) => {
             const all = Array.from(document.querySelectorAll('body *')).filter((e) => (e as HTMLElement).innerText?.trim() === t);
             return all.slice(0, 3).map((e) => (e.parentElement?.parentElement ?? e).outerHTML.slice(0, 1500)).join('\n---\n');
