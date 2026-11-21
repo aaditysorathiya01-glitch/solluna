@@ -28,6 +28,7 @@ const Step = z.union([
   z.object({ clickAt: z.object({ x: z.number().min(0).max(2000), y: z.number().min(0).max(2000) }) }),
   z.object({ inspect: z.string().min(1).max(100) }),
   z.object({ hover: z.string().min(1).max(300) }),
+  z.object({ fields: z.literal(true) }),
   z.object({ type: z.string().min(1).max(300), value: z.string().max(300) }),
   // OTP first: a union picks the first matching shape, and the plain fill would swallow it.
   z.object({ otp: z.enum(['FLIPKART', 'AMAZON']), fill: z.string().min(1).max(300) }),
@@ -106,6 +107,19 @@ export class PortalBotService {
         try {
           if ('login' in s) await this.flipkartLogin(page);
           else if ('clickAt' in s) await page.mouse.click(s.clickAt.x, s.clickAt.y);
+          else if ('fields' in s) inspected = await page.evaluate(() => {
+            // Every form control with its visible label, name, type, required flag and the options of selects.
+            const rows: string[] = [];
+            for (const el of Array.from(document.querySelectorAll("input, select, textarea")) as any[]) {
+              const r = el.getBoundingClientRect(); if (r.width < 2 && r.height < 2 && el.type !== 'hidden') continue;
+              if (el.type === 'hidden') continue;
+              const row = el.closest('div[class*="row"], div[class*="Row"], tr, li, .form-group') ?? el.parentElement?.parentElement;
+              const label = (row?.querySelector('label')?.textContent ?? row?.textContent ?? '').trim().replace(/\s+/g, ' ').slice(0, 70);
+              const opts = el.tagName === 'SELECT' ? ` options=[${Array.from(el.options).map((o) => o.text.trim()).slice(0, 12).join(' | ')}]` : '';
+              rows.push(`${label} => ${el.tagName.toLowerCase()}${el.type ? `[${el.type}]` : ''}${el.name ? ` name=${el.name}` : ''}${el.id ? ` #${el.id}` : ''}${opts}`);
+            }
+            return rows.join('\n');
+          });
           else if ('hover' in s) await this.target(page, s.hover).hover({ timeout: 15_000 });
           else if ('type' in s) { const t = this.target(page, s.type); await t.click(); await t.fill(''); await t.pressSequentially(s.value, { delay: 60 }); }
           else if ('inspect' in s) inspected = await page.evaluate((t) => {
