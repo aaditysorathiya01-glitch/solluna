@@ -88,8 +88,11 @@ export class PortalBotService {
     try {
       browser = await chromium.connectOverCDP(session.connectUrl, { timeout: 30_000 });
       const ctx = browser.contexts()[0];
-      const page = ctx.pages()[0] ?? await ctx.newPage();
-      page.on('framenavigated', (f) => { if (f === page.mainFrame() && BLOCKED.test(f.url())) void page.goBack().catch(() => undefined); });
+      let page = ctx.pages()[0] ?? await ctx.newPage();
+      // Links that open a new tab: follow the newest tab (blocked pages are closed at once).
+      const guard = (p: Page) => p.on('framenavigated', (f) => { if (f === p.mainFrame() && BLOCKED.test(f.url())) void p.close().catch(() => undefined); });
+      guard(page);
+      ctx.on('page', (p) => { guard(p); page = p; });
       const started = new Date();
       for (const s of d.steps) {
         const label = JSON.stringify('fill' in s && ('secret' in s || 'otp' in s) ? { ...s, value: undefined } : s).slice(0, 200);
