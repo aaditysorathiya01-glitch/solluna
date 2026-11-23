@@ -1,5 +1,5 @@
 import { BadRequestException, Injectable, Logger, NotFoundException, ServiceUnavailableException } from '@nestjs/common';
-import { randomUUID } from 'crypto';
+import { createHmac, randomUUID } from 'crypto';
 import { chromium, type Browser, type Page } from 'playwright-core';
 import { z } from 'zod';
 import { AuditService } from '../common/audit.service';
@@ -16,6 +16,16 @@ import type { AuthUser } from '../auth/auth.types';
  * returned; bank / payment / settlement / user-settings pages are blocked; captchas are NOT solved; every run is audited.
  */
 const BB = 'https://api.browserbase.com/v1';
+/** RFC 6238 code (30 s, 6 digits) from a base32 authenticator secret. */
+export function totp(secret: string, now = Date.now()) {
+  const A = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567';
+  let bits = '';
+  for (const c of secret.replace(/\s+/g, '').toUpperCase().replace(/=+$/, '')) { const i = A.indexOf(c); if (i < 0) throw new Error('Bad authenticator secret'); bits += i.toString(2).padStart(5, '0'); }
+  const key = Buffer.from((bits.match(/.{8}/g) ?? []).map((b) => parseInt(b, 2)));
+  const ctr = Buffer.alloc(8); ctr.writeBigUInt64BE(BigInt(Math.floor(now / 30_000)));
+  const h = createHmac('sha1', key).update(ctr).digest(); const o = h[19] & 15;
+  return String(((h.readUInt32BE(o) & 0x7fffffff) % 1_000_000)).padStart(6, '0');
+}
 const BLOCKED = /(bank|payment|settlement|payout|manage-?users|user-?permissions|account-?settings\/(users|password))/i;
 const SECRETS: Record<string, () => string | undefined> = {
   OPS_EMAIL: () => config.opsUser.email,
@@ -24,7 +34,7 @@ const SECRETS: Record<string, () => string | undefined> = {
 };
 
 const Step = z.union([
-  z.object({ login: z.enum(['FLIPKART']) }),
+  z.object({ login: z.enum(['FLIPKART', 'AMAZON']) }),
   z.object({ clickAt: z.object({ x: z.number().min(0).max(2000), y: z.number().min(0).max(2000) }) }),
   z.object({ inspect: z.string().min(1).max(100) }),
   z.object({ hover: z.string().min(1).max(300) }),
@@ -127,7 +137,7 @@ export class PortalBotService {
         let inspected: string | undefined;
         await this.dismissPopups(page);
         const act = async () => {
-          if ('login' in s) await this.flipkartLogin(page);
+          if ('login' in s) await (s.login === 'AMAZON' ? this.amazonLogin(page) : this.flipkartLogin(page));
           else if ('clickAt' in s) await page.mouse.click(s.clickAt.x, s.clickAt.y);
           else if ('fields' in s) inspected = await page.evaluate(() => {
             // Every form control with its visible label, name, type, required flag and the options of selects.
@@ -208,6 +218,45 @@ export class PortalBotService {
       for (let i = 0; i < code.length; i++) await boxes.nth(i).fill(code[i]);
     }
     await page.waitForURL(/#dashboard/, { timeout: 30_000 });
+  }
+
+  /**
+   * Signs the ops user in to Seller Central India: email → password → 2-step code. The code comes from the authenticator
+   * secret (OPS_AMAZON_TOTP_SECRET, set up when the ops user enabled 2-Step Verification) or, if Amazon e-mails it, from the
+   * ops mailbox. Then the account picker: the client's seller account, marketplace India. A saved session skips all of it.
+   */
+  async amazonLogin(page: Page) {
+    await page.goto('https://sellercentral.amazon.in/home', { waitUntil: 'domcontentloaded', timeout: 45_000 });
+    await page.waitForTimeout(4000);
+    if (!/\/ap\/|signin|\/login/i.test(page.url()) && !(await page.locator('#ap_email, #ap_password').count())) return;
+    const started = new Date();
+    const pw = process.env.OPS_AMAZON_PASSWORD;
+    if (!pw) throw new Error('OPS_AMAZON_PASSWORD is not set');
+    if (await page.locator('#ap_email').isVisible().catch(() => false)) {
+      await page.locator('#ap_email').fill(config.opsUser.email);
+      if (await page.locator('#continue').isVisible().catch(() => false)) await page.locator('#continue').click();
+    }
+    await page.locator('#ap_password').fill(pw, { timeout: 15_000 });
+    await page.locator('#signInSubmit').click();
+    await page.waitForTimeout(4000);
+    if (await page.locator('#auth-captcha-guess, #captchacharacters').count()) throw new Error('Amazon asked for a captcha: the team must sign in once by hand (captchas are never solved by the bot)');
+    const otpBox = page.locator('#auth-mfa-otpcode, input[name=otpCode], input[name=code]').first();
+    if (await otpBox.isVisible({ timeout: 8000 }).catch(() => false)) {
+      const secret = process.env.OPS_AMAZON_TOTP_SECRET;
+      const code = secret ? totp(secret) : await this.mail.waitForOtp('AMAZON', started);
+      if (!code) throw new Error('Amazon asked for a 2-step code: set OPS_AMAZON_TOTP_SECRET (authenticator) or no code reached the ops mailbox in 2 minutes');
+      await otpBox.fill(code);
+      await page.locator('#auth-mfa-remember-device').check().catch(() => undefined);
+      await page.locator('#auth-signin-button, input[type=submit]').first().click();
+      await page.waitForTimeout(5000);
+    }
+    // Account picker ("Select an account"): one seller today; pick India and confirm.
+    if (/account-switcher|merchant-picker/i.test(page.url()) || await page.getByText(/select an account/i).count()) {
+      await page.getByText(/^India$/).first().click({ timeout: 10_000 }).catch(() => undefined);
+      await page.getByRole('button', { name: /select account/i }).click({ timeout: 10_000 }).catch(() => undefined);
+      await page.waitForTimeout(5000);
+    }
+    if (/\/ap\/|signin/i.test(page.url())) throw new Error(`Amazon sign-in did not finish (${page.url().slice(0, 120)})`);
   }
 
   /** Known Seller Hub popups (notification prompt, tutorial video, "New Listings Page") are closed before each step. */
