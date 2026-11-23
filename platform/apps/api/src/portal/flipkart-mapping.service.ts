@@ -87,7 +87,7 @@ export class FlipkartMappingService implements OnModuleInit {
       const due = await this.db.portalRun.findMany({ where: { kind: { in: ['FLIPKART_MAPPING', 'AMAZON_MAPPING'] }, status: 'SUBMITTED', createdAt: { gt: new Date(now - 14 * 86_400_000) } }, orderBy: { updatedAt: 'asc' }, take: 10 });
       const ready = due.filter((r) => {
         const age = now - r.updatedAt.getTime();
-        return age > (r.error === 'live-check' ? 3 * 3_600_000 : 15 * 60_000);
+        return age > (r.error === 'live-check' ? 3 * 3_600_000 : r.error?.startsWith('live-check:fix') ? 30 * 60_000 : 15 * 60_000);
       });
       for (const kind of ['FLIPKART_MAPPING', 'AMAZON_MAPPING']) {
         const ids = ready.filter((r) => r.kind === kind).map((r) => r.id);
@@ -311,7 +311,7 @@ export class FlipkartMappingService implements OnModuleInit {
   }
 
   /** Amazon live check: Manage All Inventory searched by SKU shows the SKU with status Active. */
-  private async checkLiveAmazon(user: AuthUser | null, runs: { id: string; organizationId: string; requestId: string | null; listingRef: string | null; input: Prisma.JsonValue; shots: Prisma.JsonValue }[]) {
+  private async checkLiveAmazon(user: AuthUser | null, runs: { id: string; organizationId: string; requestId: string | null; listingRef: string | null; error: string | null; input: Prisma.JsonValue; shots: Prisma.JsonValue }[]) {
     const out: { id: string; live: boolean }[] = [];
     const opened = await this.bot.openPage('ops-amazon');
     try {
@@ -322,16 +322,39 @@ export class FlipkartMappingService implements OnModuleInit {
         await page.goto(`https://sellercentral.amazon.in/myinventory/inventory?fulfilledBy=all&page=1&pageSize=25&searchField=all&searchTerm=${encodeURIComponent(input.sku)}&sort=date_created_desc&status=all`, { waitUntil: 'domcontentloaded', timeout: 60_000 });
         await page.waitForTimeout(12_000);
         const text = (await page.locator('body').innerText().catch(() => '')).replace(/\s+/g, ' ');
-        const live = text.includes(input.sku) && /\bActive\b/.test(text) && !/\bInactive\b[^.]{0,40}\b(no|0) (quantity|inventory)/i.test(text);
+        const missingOffer = text.includes(input.sku) && /Missing Offer/i.test(text);
+        const live = text.includes(input.sku) && !missingOffer && /\bActive\b/.test(text);
         out.push({ id: run.id, live });
         const png = await page.screenshot({ type: 'png' }).catch(() => null);
-        if (!live) { await this.db.portalRun.update({ where: { id: run.id }, data: { error: 'live-check' } }); continue; }
+        if (missingOffer) {
+          // Amazon glitch (owner, 23 Nov 2026): "Missing Offer" right after a submitted offer. Fix → Product Identity →
+          // Submit Edits with no change makes Amazon pick the offer up. At most 2 tries per run, then the team is told.
+          const tries = Number(/fix(\d)/.exec(run.error ?? '')?.[1] ?? 0);
+          if (tries >= 2) { await this.db.portalRun.update({ where: { id: run.id }, data: { status: 'FAILED', error: 'Amazon still shows "Missing Offer" after 2 automatic fixes: check the listing in Manage All Inventory' } }); continue; }
+          const fixed = await this.amazonMissingOfferFix(page).catch((e) => { this.log.warn(`missing offer fix: ${(e as Error).message}`); return false; });
+          const shot = await page.screenshot({ type: 'png' }).catch(() => null);
+          const shots = [...((run.shots as unknown as Shot[] | null) ?? []), ...(shot ? [{ step: `Missing Offer fix ${tries + 1} (${fixed ? 'Edits submitted' : 'not confirmed'})`, png: shot.toString('base64') }] : [])];
+          await this.db.portalRun.update({ where: { id: run.id }, data: { error: `live-check:fix${tries + 1}`, shots: shots as unknown as Prisma.InputJsonValue } });
+          await this.audit.log({ actor: user ?? undefined, action: 'portal_bot.amazon_missing_offer_fix', entity: 'PortalRun', entityId: run.id, organizationId: run.organizationId, after: { sku: input.sku, fixed } });
+          continue;
+        }
+        if (!live) { await this.db.portalRun.update({ where: { id: run.id }, data: { error: run.error?.startsWith('live-check') ? run.error : 'live-check' } }); continue; }
         const shots = [...((run.shots as unknown as Shot[] | null) ?? []), ...(png ? [{ step: 'Manage All Inventory (live)', png: png.toString('base64') }] : [])];
         await this.db.portalRun.update({ where: { id: run.id }, data: { status: 'LIVE', error: null, shots: shots as unknown as Prisma.InputJsonValue } });
         await this.afterLive(run.id, run.organizationId, run.requestId, run.listingRef ?? refOf(input), user, 'AMAZON');
       }
     } finally { await opened.close(); }
     return out;
+  }
+
+  /** On the Manage All Inventory row: Fix → Product Identity → Submit Edits (nothing changed) → "Edits submitted". */
+  private async amazonMissingOfferFix(page: Page) {
+    await page.getByRole('button', { name: /^fix$/i }).first().click({ timeout: 15_000 });
+    await page.waitForTimeout(8000);
+    await page.getByText('Product Identity', { exact: false }).first().click({ timeout: 20_000 });
+    await page.waitForTimeout(4000);
+    await page.locator('kat-button:has-text("Submit Edits"), button:has-text("Submit Edits")').first().click({ timeout: 15_000 });
+    return page.getByText(/edits submitted|all done/i).first().waitFor({ timeout: 30_000 }).then(() => true).catch(() => false);
   }
 
   /** Listings in Progress → FSN search → START SELLING → wait for the Selling Information form. */

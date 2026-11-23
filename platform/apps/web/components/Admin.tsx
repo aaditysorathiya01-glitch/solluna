@@ -471,7 +471,7 @@ function PortalBotPanel({ onFlash }: { onFlash: (f: FlashMsg) => void }) {
           <div key={r.id} className="card flex flex-wrap items-center justify-between gap-2 p-4 text-sm">
             <div className="min-w-0">
               <p className="font-medium">{r.client} · SKU {r.input.sku} · {r.input.asin ? `Amazon ASIN ${r.input.asin}` : `Flipkart FSN ${r.input.fsn}`}</p>
-              <p className="text-xs text-ink-3">{dt(r.createdAt)} · <span className={r.status === 'READY' ? 'font-semibold text-amber-700' : r.status === 'FAILED' ? 'text-red-700' : ''}>{RUN_LABEL[r.status] ?? r.status}</span>{r.error && r.error !== 'live-check' ? ` · ${r.error}` : ''}{r.listingRef ? ` · ${r.listingRef}` : ''}</p>
+              <p className="text-xs text-ink-3">{dt(r.createdAt)} · <span className={r.status === 'READY' ? 'font-semibold text-amber-700' : r.status === 'FAILED' ? 'text-red-700' : ''}>{RUN_LABEL[r.status] ?? r.status}</span>{r.error && !r.error.startsWith('live-check') ? ` · ${r.error}` : ''}{r.listingRef ? ` · ${r.listingRef}` : ''}</p>
             </div>
             <div className="flex gap-2">
               <button className="btn-ghost py-1.5 text-xs" onClick={() => view(r.id)}>Screenshots</button>
@@ -485,7 +485,7 @@ function PortalBotPanel({ onFlash }: { onFlash: (f: FlashMsg) => void }) {
       {open && (
         <Modal title={`${open.client} · SKU ${open.input.sku}`} onClose={() => setOpen(null)}>
           <div className="max-h-[70vh] space-y-3 overflow-y-auto">
-            <p className="text-sm">{RUN_LABEL[open.status] ?? open.status}{open.error && open.error !== 'live-check' ? ` · ${open.error}` : ''}</p>
+            <p className="text-sm">{RUN_LABEL[open.status] ?? open.status}{open.error && !open.error.startsWith('live-check') ? ` · ${open.error}` : ''}</p>
             {open.missing?.length ? <div className="rounded-xl bg-red-50 p-3 text-sm text-red-800"><p className="font-medium">Not entered</p><ul className="list-disc pl-5">{open.missing.map((m) => <li key={m.field}>{m.field}: {m.reason}</li>)}</ul></div> : null}
             {open.filled?.length ? <table className="w-full text-xs"><tbody>{open.filled.map((f) => <tr key={f.field} className="border-t border-ink/5"><td className="py-1 pr-2 text-ink-3">{f.field}</td><td className="py-1">{f.value}</td></tr>)}</tbody></table> : null}
             {open.shots?.map((s, i) => <figure key={i}><figcaption className="text-xs text-ink-3">{s.step}</figcaption>{/* eslint-disable-next-line @next/next/no-img-element */}<img src={`data:image/png;base64,${s.png}`} alt={s.step} className="w-full rounded-lg border border-ink/10" /></figure>)}
