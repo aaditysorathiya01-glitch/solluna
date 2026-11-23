@@ -39,6 +39,8 @@ const Step = z.union([
   z.object({ inspect: z.string().min(1).max(100) }),
   z.object({ hover: z.string().min(1).max(300) }),
   z.object({ fields: z.literal(true) }),
+  z.object({ deepFields: z.literal(true) }),
+  z.object({ scroll: z.number().int().min(-20000).max(20000) }),
   z.object({ type: z.string().min(1).max(300), value: z.string().max(300) }),
   // OTP first: a union picks the first matching shape, and the plain fill would swallow it.
   z.object({ otp: z.enum(['FLIPKART', 'AMAZON']), fill: z.string().min(1).max(300) }),
@@ -150,6 +152,24 @@ export class PortalBotService {
               const opts = el.tagName === 'SELECT' ? ` options=[${Array.from(el.options).map((o: any) => o.text.trim()).slice(0, 12).join(' | ')}]` : '';
               rows.push(`${label} => ${el.tagName.toLowerCase()}${el.type ? `[${el.type}]` : ''}${el.name ? ` name=${el.name}` : ''}${el.id ? ` #${el.id}` : ''}${opts}`);
             }
+            return rows.join('\n');
+          });
+          else if ('scroll' in s) await page.mouse.wheel(0, s.scroll);
+          else if ('deepFields' in s) inspected = await page.evaluate(() => {
+            // Amazon's Katal components (kat-input, kat-radiobutton…) live in shadow roots: walk them all.
+            const rows: string[] = [];
+            const walk = (root: any) => {
+              for (const el of Array.from(root.querySelectorAll('*')) as any[]) {
+                if (el.shadowRoot) walk(el.shadowRoot);
+                const tag = el.tagName.toLowerCase();
+                if (!/^(input|select|textarea|kat-input|kat-dropdown|kat-radiobutton|kat-checkbox|kat-toggle|kat-textarea|kat-predictive-input|kat-button)$/.test(tag)) continue;
+                if (tag === 'input' && el.getRootNode() !== document && /kat-/.test(el.getRootNode()?.host?.tagName?.toLowerCase() ?? '')) continue; // inner input of a kat- component
+                const a = (n: string) => el.getAttribute?.(n) ?? '';
+                const r = el.getBoundingClientRect();
+                rows.push(`${tag} name=${a('name')} id=${el.id} label=${(a('label') || a('aria-label')).slice(0, 60)} value=${String(el.value ?? a('value')).slice(0, 40)} type=${a('type')} y=${Math.round(r.top + window.scrollY)}${a('data-testid') ? ` testid=${a('data-testid')}` : ''}`);
+              }
+            };
+            walk(document);
             return rows.join('\n');
           });
           else if ('hover' in s) await this.target(page, s.hover).hover({ timeout: 15_000 });
