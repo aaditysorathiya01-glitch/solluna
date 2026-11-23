@@ -91,7 +91,7 @@ export class AdminClientsController {
   /** Flipkart mapping bot (safety mode): runs stop before Submit; the owner approves or rejects each run here. */
   @Get('portal-bot/runs') @StaffOnly('SUPER_ADMIN') runs() { return this.fkMap.list(); }
   @Get('portal-bot/runs/:id') @StaffOnly('SUPER_ADMIN') run(@Param('id') id: string) { return this.fkMap.get(id); }
-  @Post('portal-bot/mapping/:requestId') @HttpCode(200) @StaffOnly('SUPER_ADMIN') prepareMapping(@CurrentUser() u: AuthUser, @Param('requestId') requestId: string) { return this.fkMap.prepare(u, requestId); }
+  @Post('portal-bot/mapping/:requestId') @HttpCode(200) @StaffOnly('SUPER_ADMIN') prepareMapping(@CurrentUser() u: AuthUser, @Param('requestId') requestId: string, @Query('review') review?: string) { return this.fkMap.prepare(u, requestId, review === '1'); }
   @Post('portal-bot/runs/:id/approve') @HttpCode(200) @StaffOnly('SUPER_ADMIN') approveRun(@CurrentUser() u: AuthUser, @Param('id') id: string) { return this.fkMap.approve(u, id); }
   @Post('portal-bot/runs/:id/confirm') @HttpCode(200) @StaffOnly('SUPER_ADMIN') confirmRun(@CurrentUser() u: AuthUser, @Param('id') id: string) { return this.fkMap.confirm(u, id); }
   @Post('portal-bot/runs/:id/check-live') @HttpCode(200) @StaffOnly('SUPER_ADMIN') checkLive(@CurrentUser() u: AuthUser, @Param('id') id: string) { return this.fkMap.checkLive(u, [id]); }

@@ -8,6 +8,7 @@ import { CatalogFormsService } from '../catalog-forms/catalog-forms.service';
 import { PipelineService } from '../chat/pipeline.service';
 import type { AuthUser } from '../auth/auth.types';
 import { PortalBotService } from './portal-bot.service';
+import { fillOffer, offerProblems, openOffer, SUBMIT as AMAZON_SUBMIT } from './amazon-offer';
 
 /**
  * Flipkart mapping bot (owner, 21 Nov 2026: "mapping AI karega, team nahi").
@@ -54,7 +55,10 @@ const stable = (v: unknown): string => v && typeof v === 'object' && !Array.isAr
 const norm = (s: string) => s.toLowerCase().replace(/[^a-z0-9.]/g, '');
 
 interface Shot { step: string; png: string }
-interface RunInput { fsn: string; sku: string; values: Record<string, string> }
+/** fsn for Flipkart runs, asin for Amazon runs (kind FLIPKART_MAPPING / AMAZON_MAPPING). */
+interface RunInput { mp?: 'FLIPKART' | 'AMAZON'; fsn?: string; asin?: string; sku: string; values: Record<string, string> }
+const mpOf = (i: RunInput) => i.mp ?? (i.asin ? 'AMAZON' : 'FLIPKART');
+const refOf = (i: RunInput) => mpOf(i) === 'AMAZON' ? `SKU ${i.sku} / ASIN ${i.asin}` : `SKU ${i.sku} / FSN ${i.fsn}`;
 
 @Injectable()
 export class FlipkartMappingService implements OnModuleInit {
@@ -67,7 +71,7 @@ export class FlipkartMappingService implements OnModuleInit {
   /** A submitted Flipkart mapping form starts the bot at once (safety mode: it stops before Submit). */
   onModuleInit() {
     this.forms.submittedListeners.push(async (e) => {
-      if (e.marketplace !== 'FLIPKART' || e.kind !== 'MAPPING' || !this.bot.configured || process.env.PORTAL_BOT_AUTO === 'off') return;
+      if (e.kind !== 'MAPPING' || !this.bot.configured || process.env.PORTAL_BOT_AUTO === 'off') return;
       await this.prepare(null, e.requestId).catch((err) => this.log.warn(`auto prepare ${e.requestId}: ${(err as Error).message}`));
     });
     // Live check: submitted offers are looked up in My Listings → Active (15 min after Submit, then every 3 hours, 14 days).
@@ -80,12 +84,15 @@ export class FlipkartMappingService implements OnModuleInit {
     this.sweeping = true;
     try {
       const now = Date.now();
-      const due = await this.db.portalRun.findMany({ where: { kind: 'FLIPKART_MAPPING', status: 'SUBMITTED', createdAt: { gt: new Date(now - 14 * 86_400_000) } }, orderBy: { updatedAt: 'asc' }, take: 10 });
+      const due = await this.db.portalRun.findMany({ where: { kind: { in: ['FLIPKART_MAPPING', 'AMAZON_MAPPING'] }, status: 'SUBMITTED', createdAt: { gt: new Date(now - 14 * 86_400_000) } }, orderBy: { updatedAt: 'asc' }, take: 10 });
       const ready = due.filter((r) => {
         const age = now - r.updatedAt.getTime();
         return age > (r.error === 'live-check' ? 3 * 3_600_000 : 15 * 60_000);
       });
-      if (ready.length) await this.checkLive(null, ready.map((r) => r.id));
+      for (const kind of ['FLIPKART_MAPPING', 'AMAZON_MAPPING']) {
+        const ids = ready.filter((r) => r.kind === kind).map((r) => r.id);
+        if (ids.length) await this.checkLive(null, ids).catch((e) => this.log.warn(`live ${kind}: ${(e as Error).message}`));
+      }
     } finally { this.sweeping = false; }
   }
 
@@ -97,6 +104,7 @@ export class FlipkartMappingService implements OnModuleInit {
   async checkLive(user: AuthUser | null, ids: string[]) {
     const runs = await this.db.portalRun.findMany({ where: { id: { in: ids }, status: 'SUBMITTED' } });
     if (!runs.length) throw new BadRequestException('No submitted run to check');
+    if (runs[0].kind === 'AMAZON_MAPPING') return this.checkLiveAmazon(user, runs.filter((r) => r.kind === 'AMAZON_MAPPING'));
     const out: { id: string; live: boolean }[] = [];
     const opened = await this.bot.openPage('ops-flipkart');
     try {
@@ -116,21 +124,22 @@ export class FlipkartMappingService implements OnModuleInit {
         const png = await page.screenshot({ type: 'png' }).catch(() => null);
         const shots = [...((run.shots as unknown as Shot[] | null) ?? []), ...(png ? [{ step: 'My Listings → Active (live)', png: png.toString('base64') }] : [])];
         await this.db.portalRun.update({ where: { id: run.id }, data: { status: 'LIVE', error: null, shots: shots as unknown as Prisma.InputJsonValue } });
-        await this.afterLive(run.id, run.organizationId, run.requestId, `${run.listingRef ?? `SKU ${input.sku} / FSN ${input.fsn}`}`, user);
+        await this.afterLive(run.id, run.organizationId, run.requestId, run.listingRef ?? refOf(input), user, 'FLIPKART');
       }
     } finally { await opened.close(); }
     return out;
   }
 
-  private async afterLive(id: string, orgId: string, requestId: string | null, listingRef: string, user: AuthUser | null) {
-    const evidence = { summary: `Flipkart My Listings shows the offer in Active (checked by the portal bot, run ${id})`, marketplaceRef: listingRef };
+  private async afterLive(id: string, orgId: string, requestId: string | null, listingRef: string, user: AuthUser | null, mp: 'FLIPKART' | 'AMAZON') {
+    const MPN = mp === 'AMAZON' ? 'Amazon' : 'Flipkart';
+    const evidence = { summary: `${MPN} shows the offer as Active (${mp === 'AMAZON' ? 'Manage All Inventory' : 'My Listings'}, checked by the portal bot, run ${id})`, marketplaceRef: listingRef };
     await this.db.task.updateMany({ where: { organizationId: orgId, requestId, status: { notIn: ['COMPLETED', 'CANCELLED'] } }, data: { status: 'COMPLETED', evidence } });
     if (requestId) await this.db.serviceRequest.updateMany({ where: { id: requestId, organizationId: orgId }, data: { status: 'COMPLETED' } });
     await this.audit.log({ actor: user ?? undefined, action: 'portal_bot.mapping_live', entity: 'PortalRun', entityId: id, organizationId: orgId, after: { listingRef } });
-    const pr = await this.db.pipelineRun.findFirst({ where: { organizationId: orgId, pipeline: 'CATALOG_MAPPING', branch: 'FLIPKART_MAPPING', status: 'ACTIVE' }, orderBy: { createdAt: 'desc' } });
+    const pr = await this.db.pipelineRun.findFirst({ where: { organizationId: orgId, pipeline: 'CATALOG_MAPPING', branch: `${mp}_MAPPING`, status: 'ACTIVE' }, orderBy: { createdAt: 'desc' } });
     // Step 2 = "Flipkart confirms the listing(s)"; finishing it moves to the client step, which makes the manager tell the client.
     if (pr?.stepIndex === 2) await this.pipelines.teamAdvance(user, orgId, pr.id, { fields: { outcome: 'LIVE' } }).catch((e) => this.log.warn(`pipeline live: ${(e as Error).message}`));
-    else for (const l of this.pipelines.clientTurnListeners) await l(orgId, `Flipkart mapping (${listingRef}) is now LIVE: it shows in Flipkart My Listings → Active. Confirm this to the client.`).catch(() => undefined);
+    else for (const l of this.pipelines.clientTurnListeners) await l(orgId, `${MPN} mapping (${listingRef}) is now LIVE: ${MPN} shows it as Active. Confirm this to the client.`).catch(() => undefined);
   }
 
   /** Recent runs for Admin → Portal bot (screenshots only in the single-run view). */
@@ -148,26 +157,33 @@ export class FlipkartMappingService implements OnModuleInit {
 
   /** Values to enter: the client's mapping form for this request (validated when submitted) + the FSN. */
   private async inputFor(requestId: string) {
-    const form = await this.db.catalogForm.findFirst({ where: { requestId, marketplace: 'FLIPKART', kind: 'MAPPING' }, orderBy: { createdAt: 'desc' } });
-    if (!form) throw new NotFoundException('No Flipkart mapping form for this request');
+    const form = await this.db.catalogForm.findFirst({ where: { requestId, kind: 'MAPPING' }, orderBy: { createdAt: 'desc' } });
+    if (!form) throw new NotFoundException('No mapping form for this request');
     const data = form.data as Record<string, unknown>;
+    if (form.marketplace === 'AMAZON') {
+      const asin = productRef('AMAZON', String(data.productLink ?? ''))?.id;
+      if (!asin) throw new BadRequestException('The form has no valid ASIN / Amazon link');
+      const values: Record<string, string> = {};
+      for (const k of ['hsn', 'fulfilmentChannel', 'sellingPrice', 'mrp', 'audience']) if (data[k] !== undefined && data[k] !== null && String(data[k]).trim() !== '') values[k] = String(data[k]).trim();
+      return { orgId: form.organizationId, input: { mp: 'AMAZON', asin, sku: String(data.sellerSku), values } as RunInput };
+    }
     const fsn = productRef('FLIPKART', String(data.productLink ?? ''))?.id;
     if (!fsn) throw new BadRequestException('The form has no valid FSN / Flipkart link');
     const values: Record<string, string> = {};
     for (const r of RECIPE) if (data[r.key] !== undefined && data[r.key] !== null && String(data[r.key]).trim() !== '') values[r.key] = String(data[r.key]).trim();
-    return { orgId: form.organizationId, input: { fsn, sku: String(data.sellerSku), values } satisfies RunInput };
+    return { orgId: form.organizationId, input: { fsn, sku: String(data.sellerSku), values } as RunInput };
   }
 
   /** Stage 1 (no Submit): fill the form and wait for the owner's approval. */
-  async prepare(user: AuthUser | null, requestId: string) {
+  async prepare(user: AuthUser | null, requestId: string, review = false) {
     const { orgId, input } = await this.inputFor(requestId);
     const busy = await this.db.portalRun.findFirst({ where: { requestId, status: { in: ['RUNNING', 'SUBMITTING'] } } });
     if (busy) throw new BadRequestException('The bot is already working on this request');
-    const run = await this.db.portalRun.create({ data: { organizationId: orgId, requestId, kind: 'FLIPKART_MAPPING', input: input as unknown as Prisma.InputJsonValue } });
-    await this.audit.log({ actor: user ?? undefined, action: 'portal_bot.mapping_prepare', entity: 'PortalRun', entityId: run.id, organizationId: orgId, after: { requestId, fsn: input.fsn, sku: input.sku } });
+    const run = await this.db.portalRun.create({ data: { organizationId: orgId, requestId, kind: mpOf(input) === 'AMAZON' ? 'AMAZON_MAPPING' : 'FLIPKART_MAPPING', input: input as unknown as Prisma.InputJsonValue } });
+    await this.audit.log({ actor: user ?? undefined, action: 'portal_bot.mapping_prepare', entity: 'PortalRun', entityId: run.id, organizationId: orgId, after: { requestId, ref: refOf(input) } });
     // Owner, 21 Nov 2026: the recipe passed its live test, so the bot submits on its own (no per-listing approval).
     // PORTAL_BOT_REVIEW=on brings back safety mode (stop before Submit, owner approves in Admin → Portal bot).
-    const auto = process.env.PORTAL_BOT_REVIEW !== 'on';
+    const auto = process.env.PORTAL_BOT_REVIEW !== 'on' && !review;
     void this.execute(run.id, input, auto, user).catch((e) => this.log.error(e));
     return { id: run.id, status: run.status };
   }
@@ -179,7 +195,7 @@ export class FlipkartMappingService implements OnModuleInit {
     const { input } = await this.inputFor(run.requestId!);
     if (stable(input) !== stable(run.input)) throw new BadRequestException('The client form changed after this run. Run the bot again and review the new screenshots.');
     await this.db.portalRun.update({ where: { id }, data: { status: 'SUBMITTING', approvedById: user.id, error: null } });
-    await this.audit.log({ actor: user, action: 'portal_bot.mapping_approved', entity: 'PortalRun', entityId: id, organizationId: run.organizationId, after: { fsn: input.fsn, sku: input.sku } });
+    await this.audit.log({ actor: user, action: 'portal_bot.mapping_approved', entity: 'PortalRun', entityId: id, organizationId: run.organizationId, after: { ref: refOf(input) } });
     void this.execute(id, input, true, user).catch((e) => this.log.error(e));
     return { id, status: 'SUBMITTING' };
   }
@@ -189,7 +205,7 @@ export class FlipkartMappingService implements OnModuleInit {
     const run = await this.get(id);
     if (run.status !== 'FAILED' || !run.error?.startsWith('Submitted, but')) throw new BadRequestException('Only a run that was submitted but not verified can be confirmed');
     const input = run.input as unknown as RunInput;
-    const listingRef = `SKU ${input.sku} / FSN ${input.fsn}`;
+    const listingRef = refOf(input);
     await this.db.portalRun.update({ where: { id }, data: { status: 'SUBMITTED', error: null, listingRef } });
     await this.audit.log({ actor: user, action: 'portal_bot.mapping_confirmed', entity: 'PortalRun', entityId: id, organizationId: run.organizationId, after: { listingRef } });
     await this.afterSubmit(id, input, listingRef, user);
@@ -205,6 +221,7 @@ export class FlipkartMappingService implements OnModuleInit {
   }
 
   private async execute(id: string, input: RunInput, submit: boolean, approver: AuthUser | null) {
+    if (mpOf(input) === 'AMAZON') return this.executeAmazon(id, input, submit, approver);
     const shots: Shot[] = [];
     const snap = async (page: Page, step: string, fullPage = false) => {
       const png = await page.screenshot({ type: 'png', fullPage }).catch(() => null);
@@ -216,7 +233,7 @@ export class FlipkartMappingService implements OnModuleInit {
       close = opened.close;
       const pg = () => opened.holder.page;
       await this.bot.flipkartLogin(pg());
-      await this.openForm(pg(), input.fsn);
+      await this.openForm(pg(), input.fsn!);
       const { filled, missing } = await this.fill(pg(), input.values);
       await this.formShots(pg(), snap);
       if (missing.length) {
@@ -236,7 +253,7 @@ export class FlipkartMappingService implements OnModuleInit {
         const errors = await this.formErrors(pg());
         throw new Error(errors.length ? `Flipkart rejected the form: ${errors.join('; ').slice(0, 400)}` : 'Submitted, but Flipkart did not show "Listing added successfully". Check the screenshot before retrying.');
       }
-      const listingRef = `SKU ${input.sku} / FSN ${input.fsn}`;
+      const listingRef = refOf(input);
       await this.db.portalRun.update({ where: { id }, data: { status: 'SUBMITTED', filled, shots: shots as unknown as Prisma.InputJsonValue, listingRef } });
       await this.afterSubmit(id, input, listingRef, approver);
     } catch (e) {
@@ -246,6 +263,75 @@ export class FlipkartMappingService implements OnModuleInit {
     } finally {
       await close?.();
     }
+  }
+
+  /** Amazon: sign in → Add offer form for the ASIN → fill → (Submit → Amazon's confirmation). */
+  private async executeAmazon(id: string, input: RunInput, submit: boolean, approver: AuthUser | null) {
+    const shots: Shot[] = [];
+    const snap = async (page: Page, step: string) => { const png = await page.screenshot({ type: 'png' }).catch(() => null); if (png) shots.push({ step, png: png.toString('base64') }); };
+    const save = (data: Record<string, unknown>) => this.db.portalRun.update({ where: { id }, data: { ...data, shots: shots as unknown as Prisma.InputJsonValue } as Prisma.PortalRunUpdateInput });
+    let close: (() => Promise<void>) | undefined;
+    try {
+      const opened = await this.bot.openPage('ops-amazon');
+      close = opened.close;
+      const pg = () => opened.holder.page;
+      await this.bot.amazonLogin(pg());
+      await openOffer(pg(), input.asin!);
+      const { filled, missing } = await fillOffer(pg(), { sku: input.sku, ...input.values });
+      await pg().waitForTimeout(1500);
+      await pg().mouse.wheel(0, -5000).catch(() => undefined);
+      await snap(pg(), 'Filled offer (1)');
+      for (let i = 2; i <= 3; i++) { await pg().mouse.wheel(0, 650).catch(() => undefined); await pg().waitForTimeout(600); await snap(pg(), `Filled offer (${i})`); }
+      const problems = await offerProblems(pg());
+      for (const p of problems) missing.push({ field: p.split(':')[0], reason: p });
+      if (missing.length) { await save({ status: 'FAILED', filled, missing, error: `Could not enter ${missing.length} field(s); nothing was submitted` }); return; }
+      if (!submit) { await save({ status: 'READY', filled, missing }); return; }
+      await pg().locator(AMAZON_SUBMIT).first().click({ timeout: 15_000 });
+      // Amazon's answer: the form closes / a success message, or error alerts on the form.
+      let ok = false;
+      for (let i = 0; i < 12 && !ok; i++) {
+        await pg().waitForTimeout(2500);
+        const text = (await pg().locator('body').innerText().catch(() => '')).replace(/\s+/g, ' ');
+        ok = /submitted|successfully|has been (added|created)|offer (was|has been) (added|created)|processing your (listing|submission)/i.test(text) || !/workflow\/offer/.test(pg().url());
+        if (!ok && (await offerProblems(pg())).length) break;
+      }
+      await snap(pg(), 'After Submit');
+      if (!ok) {
+        const errs = await offerProblems(pg());
+        throw new Error(errs.length ? `Amazon rejected the offer: ${errs.join('; ').slice(0, 400)}` : 'Submitted, but Amazon did not confirm. Check the screenshot before retrying.');
+      }
+      const listingRef = refOf(input);
+      await save({ status: 'SUBMITTED', filled, listingRef });
+      await this.afterSubmit(id, input, listingRef, approver);
+    } catch (e) {
+      const msg = (e as Error).message.split('\n')[0].slice(0, 500);
+      this.log.warn(`amazon run ${id}: ${msg}`);
+      await save({ status: 'FAILED', error: msg }).catch(() => undefined);
+    } finally { await close?.(); }
+  }
+
+  /** Amazon live check: Manage All Inventory searched by SKU shows the SKU with status Active. */
+  private async checkLiveAmazon(user: AuthUser | null, runs: { id: string; organizationId: string; requestId: string | null; listingRef: string | null; input: Prisma.JsonValue; shots: Prisma.JsonValue }[]) {
+    const out: { id: string; live: boolean }[] = [];
+    const opened = await this.bot.openPage('ops-amazon');
+    try {
+      await this.bot.amazonLogin(opened.holder.page);
+      for (const run of runs) {
+        const input = run.input as unknown as RunInput;
+        const page = opened.holder.page;
+        await page.goto(`https://sellercentral.amazon.in/myinventory/inventory?fulfilledBy=all&page=1&pageSize=25&searchField=all&searchTerm=${encodeURIComponent(input.sku)}&sort=date_created_desc&status=all`, { waitUntil: 'domcontentloaded', timeout: 60_000 });
+        await page.waitForTimeout(12_000);
+        const text = (await page.locator('body').innerText().catch(() => '')).replace(/\s+/g, ' ');
+        const live = text.includes(input.sku) && /\bActive\b/.test(text) && !/\bInactive\b[^.]{0,40}\b(no|0) (quantity|inventory)/i.test(text);
+        out.push({ id: run.id, live });
+        const png = await page.screenshot({ type: 'png' }).catch(() => null);
+        if (!live) { await this.db.portalRun.update({ where: { id: run.id }, data: { error: 'live-check' } }); continue; }
+        const shots = [...((run.shots as unknown as Shot[] | null) ?? []), ...(png ? [{ step: 'Manage All Inventory (live)', png: png.toString('base64') }] : [])];
+        await this.db.portalRun.update({ where: { id: run.id }, data: { status: 'LIVE', error: null, shots: shots as unknown as Prisma.InputJsonValue } });
+        await this.afterLive(run.id, run.organizationId, run.requestId, run.listingRef ?? refOf(input), user, 'AMAZON');
+      }
+    } finally { await opened.close(); }
+    return out;
   }
 
   /** Listings in Progress → FSN search → START SELLING → wait for the Selling Information form. */
@@ -341,16 +427,18 @@ export class FlipkartMappingService implements OnModuleInit {
   private async afterSubmit(id: string, input: RunInput, listingRef: string, approver: AuthUser | null) {
     const run = await this.get(id);
     const orgId = run.organizationId;
-    await this.db.catalogMapping.updateMany({ where: { organizationId: orgId, serviceRequestId: run.requestId, marketplace: 'FLIPKART' }, data: { status: 'EXACT_VERIFIED', candidateId: input.fsn, result: { by: 'portal-bot', runId: id, submittedAt: new Date().toISOString(), listingRef } } });
-    await this.db.task.updateMany({ where: { organizationId: orgId, requestId: run.requestId, status: { in: ['NEW', 'QUEUED', 'IN_PROGRESS'] } }, data: { status: 'UNDER_MARKETPLACE_REVIEW', evidence: { summary: `Offer submitted on Flipkart Seller Hub by the portal bot (run ${id}); waiting for Flipkart QC`, marketplaceRef: listingRef } } });
+    const mp = mpOf(input);
+    const MPN = mp === 'AMAZON' ? 'Amazon' : 'Flipkart';
+    await this.db.catalogMapping.updateMany({ where: { organizationId: orgId, serviceRequestId: run.requestId, marketplace: mp }, data: { status: 'EXACT_VERIFIED', candidateId: (input.fsn ?? input.asin)!, result: { by: 'portal-bot', runId: id, submittedAt: new Date().toISOString(), listingRef } } });
+    await this.db.task.updateMany({ where: { organizationId: orgId, requestId: run.requestId, status: { in: ['NEW', 'QUEUED', 'IN_PROGRESS'] } }, data: { status: 'UNDER_MARKETPLACE_REVIEW', evidence: { summary: `Offer submitted on ${MPN} ${mp === 'AMAZON' ? 'Seller Central' : 'Seller Hub'} by the portal bot (run ${id}); waiting for ${MPN} to make it live`, marketplaceRef: listingRef } } });
     await this.db.serviceRequest.updateMany({ where: { id: run.requestId!, organizationId: orgId }, data: { status: 'UNDER_MARKETPLACE_REVIEW' } });
     await this.audit.log({ actor: approver, action: 'portal_bot.mapping_submitted', entity: 'PortalRun', entityId: id, organizationId: orgId, after: { listingRef } });
     // Pipeline: the team's "map" step is done → the manager tells the client it is with Flipkart for QC.
-    const pr = await this.db.pipelineRun.findFirst({ where: { organizationId: orgId, pipeline: 'CATALOG_MAPPING', branch: 'FLIPKART_MAPPING', status: 'ACTIVE' }, orderBy: { createdAt: 'desc' } });
+    const pr = await this.db.pipelineRun.findFirst({ where: { organizationId: orgId, pipeline: 'CATALOG_MAPPING', branch: `${mp}_MAPPING`, status: 'ACTIVE' }, orderBy: { createdAt: 'desc' } });
     if (pr && pr.stepIndex === 1) { // step 1 = "SOLLUNA maps the product(s)"
       await this.pipelines.teamAdvance(approver, orgId, pr.id, { fields: { listing_refs: listingRef } }).catch((e) => this.log.warn(`pipeline advance: ${(e as Error).message}`));
     }
     // The next step ("Flipkart confirms") is the team's, so tell the manager directly: submitted, in Flipkart QC, not live yet.
-    for (const l of this.pipelines.clientTurnListeners) await l(orgId, `Flipkart mapping (${listingRef}) has been submitted on Flipkart Seller Hub and is now in Flipkart's quality check. Tell the client it is submitted and you will confirm when Flipkart makes it live. Do not say it is live yet.`).catch(() => undefined);
+    for (const l of this.pipelines.clientTurnListeners) await l(orgId, `${MPN} mapping (${listingRef}) has been submitted on ${MPN} and is now being processed by ${MPN}. Tell the client it is submitted and you will confirm when ${MPN} makes it live. Do not say it is live yet.`).catch(() => undefined);
   }
 }

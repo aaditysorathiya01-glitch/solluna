@@ -448,7 +448,7 @@ function AmazonCheck() {
   );
 }
 
-interface PortalRunRow { id: string; client: string; requestId: string | null; status: string; input: { fsn: string; sku: string; values: Record<string, string> }; missing: { field: string; reason: string }[] | null; error: string | null; listingRef: string | null; createdAt: string; updatedAt: string }
+interface PortalRunRow { id: string; client: string; requestId: string | null; status: string; input: { fsn?: string; asin?: string; sku: string; values: Record<string, string> }; missing: { field: string; reason: string }[] | null; error: string | null; listingRef: string | null; createdAt: string; updatedAt: string }
 interface PortalRunFull extends PortalRunRow { filled: { field: string; value: string }[] | null; shots: { step: string; png: string }[] | null }
 const RUN_LABEL: Record<string, string> = { RUNNING: 'Filling the form…', READY: 'Waiting for your approval', SUBMITTING: 'Submitting…', SUBMITTED: 'Submitted · waiting for Flipkart to make it live', LIVE: 'Live on Flipkart ✓', FAILED: 'Stopped', REJECTED: 'Rejected' };
 /** Flipkart mapping bot (safety mode): the bot fills Seller Hub and stops before Submit; the owner checks the screenshots and approves. */
@@ -464,13 +464,13 @@ function PortalBotPanel({ onFlash }: { onFlash: (f: FlashMsg) => void }) {
   }
   return (
     <section className="space-y-3" aria-label="Portal bot">
-      <div className="flex items-center justify-between gap-2"><div><h2 className="font-semibold">Portal bot · Flipkart mapping</h2><p className="text-xs text-ink-3">The bot fills the Seller Hub form from the client&apos;s mapping form, submits it and waits for Flipkart&apos;s &quot;Listing added successfully&quot;. It stops before Submit if a value is not accepted by Flipkart.</p></div><button className="btn-ghost py-1.5 text-xs" onClick={rows.reload}>Refresh</button></div>
+      <div className="flex items-center justify-between gap-2"><div><h2 className="font-semibold">Portal bot · marketplace mapping</h2><p className="text-xs text-ink-3">The bot fills the Seller Hub form from the client&apos;s mapping form, submits it and waits for Flipkart&apos;s &quot;Listing added successfully&quot;. It stops before Submit if a value is not accepted by Flipkart.</p></div><button className="btn-ghost py-1.5 text-xs" onClick={rows.reload}>Refresh</button></div>
       {rows.data && !rows.data.length && <Empty>No bot runs yet. A Flipkart mapping form submitted by a client starts the bot automatically.</Empty>}
       <div className="space-y-2">
         {rows.data?.map((r) => (
           <div key={r.id} className="card flex flex-wrap items-center justify-between gap-2 p-4 text-sm">
             <div className="min-w-0">
-              <p className="font-medium">{r.client} · SKU {r.input.sku} · FSN {r.input.fsn}</p>
+              <p className="font-medium">{r.client} · SKU {r.input.sku} · {r.input.asin ? `Amazon ASIN ${r.input.asin}` : `Flipkart FSN ${r.input.fsn}`}</p>
               <p className="text-xs text-ink-3">{dt(r.createdAt)} · <span className={r.status === 'READY' ? 'font-semibold text-amber-700' : r.status === 'FAILED' ? 'text-red-700' : ''}>{RUN_LABEL[r.status] ?? r.status}</span>{r.error && r.error !== 'live-check' ? ` · ${r.error}` : ''}{r.listingRef ? ` · ${r.listingRef}` : ''}</p>
             </div>
             <div className="flex gap-2">
