@@ -321,9 +321,14 @@ export class FlipkartMappingService implements OnModuleInit {
         const page = opened.holder.page;
         await page.goto(`https://sellercentral.amazon.in/myinventory/inventory?fulfilledBy=all&page=1&pageSize=25&searchField=all&searchTerm=${encodeURIComponent(input.sku)}&sort=date_created_desc&status=all`, { waitUntil: 'domcontentloaded', timeout: 60_000 });
         await page.waitForTimeout(12_000);
-        const text = (await page.locator('body').innerText().catch(() => '')).replace(/\s+/g, ' ');
-        const missingOffer = text.includes(input.sku) && /Missing Offer/i.test(text);
-        const live = text.includes(input.sku) && !missingOffer && /\bActive\b/.test(text);
+        // "Your product space, redefined" tour and the price side panel hide the status column: close them first.
+        await page.getByRole('button', { name: /^later$/i }).first().click({ timeout: 3000 }).catch(() => undefined);
+        await page.keyboard.press('Escape').catch(() => undefined);
+        await page.waitForTimeout(1500);
+        // Evidence comes only from the row of this SKU (not from filters or menus that also say "Active").
+        const row = (await page.locator('tr, [role=row], kat-table-row').filter({ hasText: input.sku }).last().innerText({ timeout: 10_000 }).catch(() => '')).replace(/\s+/g, ' ');
+        const missingOffer = /Missing Offer/i.test(row);
+        const live = row.includes(input.sku) && !missingOffer && /\bActive\b/.test(row) && !/\bInactive\b/.test(row);
         out.push({ id: run.id, live });
         const png = await page.screenshot({ type: 'png' }).catch(() => null);
         if (missingOffer) {
