@@ -22,7 +22,7 @@ const GUIDES = {
       'Open Seller Central and click the Settings icon (gear, top right).',
       'Click Manage permissions.',
       'On Manage Employees, click Actions → Invite Employee.',
-      `Fill in Name: ${OPS.name} and E-mail: ${OPS.email}, keep sellerCentral ticked, then click Send Invite. After we accept, click Confirm next to SOLLUNA and give View & Edit permissions. Bank and payment sections are not needed.`,
+      `Fill in Name: ${OPS.name} and E-mail: ${OPS.email}, keep sellerCentral ticked, then click Send Invite. After we accept, click Confirm next to SOLLUNA and give View & Edit for Inventory (Manage Inventory/Add a Product), Products (View Products) and Orders (Manage permissions → SOLLUNA → Manage → set these to View & Edit → Continue). Bank and payment sections are not needed.`,
     ],
   },
 } as const;

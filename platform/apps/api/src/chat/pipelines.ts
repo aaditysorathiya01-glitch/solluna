@@ -29,7 +29,7 @@ const PIN = /^\d{6}$/;
 
 const ADMIN_PATH: Record<Marketplace, string> = {
   FLIPKART: `Flipkart Seller Hub: store name (top right) → Profile → Manage Users (View) → Add New User. Role "${ops.role}", Name "${ops.name}", Email Id "${ops.email}", Phone number = the client's own mobile (owner, 19 Nov 2026), then Save.`,
-  AMAZON: `Amazon Seller Central (India): Home → Settings → Manage permissions → Action → Invite employee. Invite "${ops.email}" (name "${ops.name}"). After SOLLUNA accepts, the client clicks Confirm next to SOLLUNA and gives Admin (or View & Edit) permissions; bank / payment sections are not needed.`,
+  AMAZON: `Amazon Seller Central (India): Home → Settings → Manage permissions → Action → Invite employee. Invite "${ops.email}" (name "${ops.name}"). After SOLLUNA accepts, the client clicks Confirm next to SOLLUNA and gives View & Edit for Inventory (Manage Inventory/Add a Product), Products (View Products) and Orders; bank / payment sections are not needed.`,
 };
 
 const grantAdmin = (mp: Marketplace): PipeStep[] => [
@@ -333,7 +333,7 @@ function accessGuideText(mp: Marketplace) {
     '2. Click Manage permissions.',
     '3. On Manage Employees, click Actions → Invite Employee.',
     `4. Fill in Name: ${ops.name} · E-mail: ${ops.email}, keep sellerCentral ticked → Send Invite.`,
-    'After we accept, click Confirm next to SOLLUNA and give View & Edit permissions. Bank and payment sections are not needed.',
+    'After we accept, click Confirm next to SOLLUNA and give View & Edit for Inventory (Manage Inventory/Add a Product), Products (View Products) and Orders (Manage permissions → SOLLUNA → Manage → set these to View & Edit → Continue). Bank and payment sections are not needed.',
     'Screenshots of each step are below 👇',
   ].join('\n');
 }
