@@ -7,11 +7,11 @@ import type { Page } from 'playwright-core';
  */
 export const offerUrl = (asin: string) => `https://sellercentral.amazon.in/interactive/listing/workflow/offer?asin=${asin}&conditionType=new`;
 
-const SKU = 'kat-input[name="contribution_sku-0-value"] input';
-const HSN = 'kat-input[name="external_product_information-0-value"] input';
+const SKU = 'kat-input[name="contribution_sku-0-value"]';
+const HSN = 'kat-input[name="external_product_information-0-value"]';
 const HSN_ENTITY = 'kat-dropdown[name="external_product_information-0-entity"]';
-const PRICE = 'kat-input[name="purchasable_offer[audience=ALL]-0-our_price-0-schedule-0-value_with_tax"] input';
-const MRP = 'kat-input[name="purchasable_offer[audience=ALL]-0-maximum_retail_price-0-schedule-0-value_with_tax"] input';
+const PRICE = 'kat-input[name="purchasable_offer[audience=ALL]-0-our_price-0-schedule-0-value_with_tax"]';
+const MRP = 'kat-input[name="purchasable_offer[audience=ALL]-0-maximum_retail_price-0-schedule-0-value_with_tax"]';
 const FBA = 'kat-radiobutton[data-testid="mewtwoMedeaBoolean-AMAZON_IN"]';
 const MFN = 'kat-radiobutton[data-testid="mewtwoMedeaBoolean-DEFAULT"]';
 const B2B = 'kat-toggle[data-testid="audiencesToggle-B2B"]';
@@ -22,7 +22,7 @@ export interface AmazonValues { sku: string; hsn?: string; fulfilmentChannel?: s
 /** Opens the offer form; a clear reason when Amazon blocks it (permission, brand/category approval, already selling). */
 export async function openOffer(page: Page, asin: string) {
   await page.goto(offerUrl(asin), { waitUntil: 'domcontentloaded', timeout: 60_000 });
-  const ok = await page.locator(SKU).first().waitFor({ state: 'attached', timeout: 45_000 }).then(() => true).catch(() => false);
+  const ok = await page.locator(SKU).first().waitFor({ state: 'visible', timeout: 45_000 }).then(() => true).catch(() => false);
   if (ok) { await page.waitForTimeout(2000); return; }
   const text = (await page.locator('body').innerText().catch(() => '')).replace(/\s+/g, ' ');
   if (/access required|right permissions/i.test(text)) throw new Error('Amazon: SOLLUNA user lacks the "Inventory → Manage Inventory/Add a Product" permission on this seller account');
@@ -31,13 +31,17 @@ export async function openOffer(page: Page, asin: string) {
   throw new Error(`Amazon: the offer form did not open for ${asin}`);
 }
 
+/** Katal kat-input: a hidden light-DOM input shadows the real one, so click the component and type with the keyboard. */
 async function type(page: Page, sel: string, v: string) {
-  const el = page.locator(sel).first();
-  await el.scrollIntoViewIfNeeded({ timeout: 5000 }).catch(() => undefined);
-  await el.click({ timeout: 10_000 });
-  await el.fill('');
-  await el.pressSequentially(v, { delay: 30 });
-  await el.press('Tab').catch(() => undefined);
+  const host = page.locator(sel).first();
+  await host.scrollIntoViewIfNeeded({ timeout: 5000 }).catch(() => undefined);
+  await host.click({ timeout: 10_000 });
+  await page.keyboard.press('Control+A');
+  await page.keyboard.press('Backspace');
+  await page.keyboard.type(v, { delay: 30 });
+  await page.keyboard.press('Tab');
+  const got = await host.evaluate((el: any) => String(el.value ?? '')).catch(() => '');
+  if (got.trim() !== v.trim()) throw new Error(`Typed "${v}" but the box shows "${got}"`);
 }
 
 /** Fills the offer; returns what was entered and what could not be (the run stops before Submit if anything is missing). */
