@@ -232,12 +232,23 @@ export class PortalBotService {
     const started = new Date();
     const pw = process.env.OPS_AMAZON_PASSWORD;
     if (!pw) throw new Error('OPS_AMAZON_PASSWORD is not set');
+    const pwBox = page.locator('#ap_password');
     if (await page.locator('#ap_email').isVisible().catch(() => false)) {
-      await page.locator('#ap_email').fill(config.opsUser.email);
-      if (await page.locator('#continue').isVisible().catch(() => false)) await page.locator('#continue').click();
+      await page.locator('#ap_email').click();
+      await page.locator('#ap_email').fill('');
+      await page.locator('#ap_email').pressSequentially(config.opsUser.email, { delay: 40 });
+      await page.waitForTimeout(600);
+      // The unified sign-in page ignores a too-early click on Continue: press Enter, then click, until the password box shows.
+      for (const go of [() => page.keyboard.press('Enter'), () => page.locator('#continue').first().click({ timeout: 5000 })]) {
+        await go().catch(() => undefined);
+        if (await pwBox.waitFor({ state: 'visible', timeout: 8000 }).then(() => true).catch(() => false)) break;
+      }
     }
-    await page.locator('#ap_password').fill(pw, { timeout: 15_000 });
-    await page.locator('#signInSubmit').click();
+    if (await page.locator('#auth-captcha-guess, #captchacharacters').count()) throw new Error('Amazon asked for a captcha: the team must sign in once by hand (captchas are never solved by the bot)');
+    await pwBox.click({ timeout: 15_000 });
+    await pwBox.pressSequentially(pw, { delay: 40 });
+    await page.locator('#auth-remember-me, input[name=rememberMe]').first().check().catch(() => undefined);
+    await page.keyboard.press('Enter');
     await page.waitForTimeout(4000);
     if (await page.locator('#auth-captcha-guess, #captchacharacters').count()) throw new Error('Amazon asked for a captcha: the team must sign in once by hand (captchas are never solved by the bot)');
     const otpBox = page.locator('#auth-mfa-otpcode, input[name=otpCode], input[name=code]').first();
