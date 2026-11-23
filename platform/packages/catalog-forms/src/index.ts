@@ -248,6 +248,7 @@ export const FORMS: FormDef[] = [
         amazonSku,
         amazonHsn,
         amazonFulfilment,
+        { key: 'quantity', label: 'Quantity (stock)', type: 'number', required: true, min: 0, max: 1_000_000, help: 'Units you have ready to ship. Needed for Self Ship / Easy Ship; for FBA enter 0 (Amazon counts your FBA stock)' },
         amazonPrice,
         amazonMrp,
       ] },

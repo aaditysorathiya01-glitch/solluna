@@ -164,7 +164,7 @@ export class FlipkartMappingService implements OnModuleInit {
       const asin = productRef('AMAZON', String(data.productLink ?? ''))?.id;
       if (!asin) throw new BadRequestException('The form has no valid ASIN / Amazon link');
       const values: Record<string, string> = {};
-      for (const k of ['hsn', 'fulfilmentChannel', 'sellingPrice', 'mrp', 'audience']) if (data[k] !== undefined && data[k] !== null && String(data[k]).trim() !== '') values[k] = String(data[k]).trim();
+      for (const k of ['hsn', 'fulfilmentChannel', 'quantity', 'sellingPrice', 'mrp', 'audience']) if (data[k] !== undefined && data[k] !== null && String(data[k]).trim() !== '') values[k] = String(data[k]).trim();
       return { orgId: form.organizationId, input: { mp: 'AMAZON', asin, sku: String(data.sellerSku), values } as RunInput };
     }
     const fsn = productRef('FLIPKART', String(data.productLink ?? ''))?.id;

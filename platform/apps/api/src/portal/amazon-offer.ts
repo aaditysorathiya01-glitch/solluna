@@ -14,9 +14,10 @@ const PRICE = 'kat-input[name="purchasable_offer[audience=ALL]-0-our_price-0-sch
 const MRP = 'kat-input[name="purchasable_offer[audience=ALL]-0-maximum_retail_price-0-schedule-0-value_with_tax"]';
 const FBA = 'kat-radiobutton[data-testid="mewtwoMedeaBoolean-AMAZON_IN"]';
 const MFN = 'kat-radiobutton[data-testid="mewtwoMedeaBoolean-DEFAULT"]';
+const QTY = 'kat-input[name="fulfillment_availability-0-quantity"]';
 export const SUBMIT = 'kat-button#form-submit-button';
 
-export interface AmazonValues { sku: string; hsn?: string; fulfilmentChannel?: string; sellingPrice?: string; mrp?: string; audience?: string }
+export interface AmazonValues { sku: string; quantity?: string; hsn?: string; fulfilmentChannel?: string; sellingPrice?: string; mrp?: string; audience?: string }
 
 /** Opens the offer form; a clear reason when Amazon blocks it (permission, brand/category approval, already selling). */
 export async function openOffer(page: Page, asin: string) {
@@ -60,6 +61,8 @@ export async function fillOffer(page: Page, v: AmazonValues) {
   });
   const fba = /FBA|Fulfilled by Amazon/i.test(v.fulfilmentChannel ?? '');
   await step('Fulfillment Channel', v.fulfilmentChannel, async () => { await page.locator(fba ? FBA : MFN).first().click({ timeout: 10_000 }); await page.waitForTimeout(1500); });
+  // Self Ship / Easy Ship shows a Quantity box after the channel is chosen (learned 23 Nov 2026); FBA has none.
+  if (!fba) await step('Quantity', v.quantity, () => type(page, QTY, v.quantity!));
   await step('Your Price', v.sellingPrice, () => type(page, PRICE, v.sellingPrice!));
   await step('Maximum Retail Price', v.mrp, () => type(page, MRP, v.mrp!));
   // Amazon Business (B2B) toggle crashed the form for a seller without Amazon Business set up (23 Nov 2026): the offer goes
