@@ -75,3 +75,12 @@ Assessment (to decide only if the Amazon / Flipkart API applications fail):
 - Risk: lower than a server-side bot (the client's real browser, IP and session, client present), but automated actions still break marketplace rules, so no bulk or write actions.
 - Limits: desktop Chrome only (many sellers work on mobile), the client's computer must be on, Chrome Web Store review, and it must be fixed whenever the portal pages change.
 - Effort: about 1–2 weeks (Manifest V3, unlisted listing, reuse the existing parsers).
+
+## 8. Least-privilege marketplace permissions per plan — TO DO after Amazon listing works (owner, 23 Nov 2026)
+Owner: "client se saari permission nahi le sakte, zarurat wali hi lenge, tier wise." Today INFINITE gave SOLLUNA Admin on Amazon (test only).
+- Build a per-plan permission list for Amazon (User Permissions, View vs View & Edit) and Flipkart (user roles):
+  - Reseller: Inventory → Manage Inventory/Add a Product, Products → View Products (mapping + new listings).
+  - Growth adds: Orders (labels, daily label processing), Advertising (ads), Promotions/Deals, Reports (business + inventory), Pricing.
+  - Premium adds: whatever the 6 strategy services read (reports, brand analytics) — View only where possible.
+  - Never: bank / payment / settlement / user permissions (also blocked in the bot).
+- The add-user guide, help page screenshots and the access-verification step then show the client's plan's list, and the bot reports "Access Required" pages as a clear missing-permission message instead of failing.
