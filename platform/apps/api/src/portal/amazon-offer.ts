@@ -14,7 +14,6 @@ const PRICE = 'kat-input[name="purchasable_offer[audience=ALL]-0-our_price-0-sch
 const MRP = 'kat-input[name="purchasable_offer[audience=ALL]-0-maximum_retail_price-0-schedule-0-value_with_tax"]';
 const FBA = 'kat-radiobutton[data-testid="mewtwoMedeaBoolean-AMAZON_IN"]';
 const MFN = 'kat-radiobutton[data-testid="mewtwoMedeaBoolean-DEFAULT"]';
-const B2B = 'kat-toggle[data-testid="audiencesToggle-B2B"]';
 export const SUBMIT = 'kat-button#form-submit-button';
 
 export interface AmazonValues { sku: string; hsn?: string; fulfilmentChannel?: string; sellingPrice?: string; mrp?: string; audience?: string }
@@ -41,7 +40,8 @@ async function type(page: Page, sel: string, v: string) {
   await page.keyboard.type(v, { delay: 30 });
   await page.keyboard.press('Tab');
   const got = await host.evaluate((el: any) => String(el.value ?? '')).catch(() => '');
-  if (got.trim() !== v.trim()) throw new Error(`Typed "${v}" but the box shows "${got}"`);
+  const same = got.trim() === v.trim() || (/^\d+(\.\d+)?$/.test(v.trim()) && Number(got.replace(/,/g, '')) === Number(v));
+  if (!same) throw new Error(`Typed "${v}" but the box shows "${got}"`);
 }
 
 /** Fills the offer; returns what was entered and what could not be (the run stops before Submit if anything is missing). */
@@ -62,17 +62,16 @@ export async function fillOffer(page: Page, v: AmazonValues) {
   await step('Fulfillment Channel', v.fulfilmentChannel, async () => { await page.locator(fba ? FBA : MFN).first().click({ timeout: 10_000 }); await page.waitForTimeout(1500); });
   await step('Your Price', v.sellingPrice, () => type(page, PRICE, v.sellingPrice!));
   await step('Maximum Retail Price', v.mrp, () => type(page, MRP, v.mrp!));
-  if (/B2B|Business/i.test(v.audience ?? '')) {
-    await step('Audience: Amazon Business (B2B)', 'on', async () => {
-      const t = page.locator(B2B).first();
-      if ((await t.getAttribute('checked')) === null) await t.click({ timeout: 10_000 });
-    });
-  }
+  // Amazon Business (B2B) toggle crashed the form for a seller without Amazon Business set up (23 Nov 2026): the offer goes
+  // live for "Sell on Amazon" and B2B is noted for the team instead of being switched on by the bot.
+  if (/B2B|Business/i.test(v.audience ?? '')) filled.push({ field: 'Audience: Amazon Business (B2B)', value: 'not switched on by the bot (needs Amazon Business setup); listed for Sell on Amazon' });
   return { filled, missing };
 }
 
 /** Required fields Amazon added after our values (e.g. a quantity box) that are still empty, and visible error messages. */
 export async function offerProblems(page: Page) {
+  const crash = await page.getByText('We encountered an unexpected error').first().isVisible().catch(() => false);
+  if (crash) return ['Amazon error: "We encountered an unexpected error" on the offer form'];
   return page.evaluate(() => {
     const out: string[] = [];
     const walk = (root: any) => {
