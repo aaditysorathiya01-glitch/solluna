@@ -725,8 +725,6 @@ test('ops workspace: verify marketplace with evidence, mark listing live, publis
   const got = await (await import('node:fs/promises')).readFile(await dl.path());
   assert.deepEqual(got, pdf, 'client receives the official label byte-for-byte');
   await c.goto(`${webBase}/dashboard?tab=notifications`);
-  await c.getByText('Jute Table Runner (Amazon): Live', { exact: false }).first().waitFor();
-  await c.goto(`${webBase}/dashboard?tab=notifications`);
   await c.getByText(/Ticket #\d+: Resolved/).first().waitFor();
   assert.deepEqual(errors, []);
 });

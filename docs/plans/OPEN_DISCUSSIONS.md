@@ -84,3 +84,8 @@ Owner: "client se saari permission nahi le sakte, zarurat wali hi lenge, tier wi
   - Premium adds: whatever the 6 strategy services read (reports, brand analytics) — View only where possible.
   - Never: bank / payment / settlement / user permissions (also blocked in the bot).
 - The add-user guide, help page screenshots and the access-verification step then show the client's plan's list, and the bot reports "Access Required" pages as a clear missing-permission message instead of failing.
+
+## 9. Before the website launch (owner, 24 Nov 2026) — REMIND THE OWNER
+Must be done before solluna.co.in switches to the platform / public launch:
+1. Least-privilege permissions per plan (§8).
+2. FBF onboarding A/B decision.

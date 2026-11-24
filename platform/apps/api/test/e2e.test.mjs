@@ -697,7 +697,7 @@ test('chat: auto-assigned manager, live delivery both ways, internal notes stay 
   const clientView = ok(await call('GET', '/chat', { token: S.d })).messages;
   assert.ok(!clientView.some((m) => m.id === note.id), 'internal note never in client history');
   assert.ok(ok(await call('GET', `/ops/chats/${S.dOrg}`, { token: S.sup1.token })).messages.some((m) => m.id === note.id));
-  assert.ok(ok(await call('GET', '/notifications', { token: S.d })).some((n) => n.type === 'chat.message'));
+  assert.ok(!ok(await call('GET', '/notifications', { token: S.d })).some((n) => n.type === 'chat.message'), 'manager messages stay in Manager Chat, not in Notifications');
   assert.ok(connectorEvents.some((e) => e.body.type === 'chat.message' && e.body.organizationId === S.dOrg), 'reply goes to the connector (Zapier → Gmail)');
   assert.ok(!connectorEvents.some((e) => e.body.type === 'chat.message' && JSON.stringify(e.body).includes('INTERNAL:')), 'internal note never sent to the connector');
 
@@ -1025,7 +1025,7 @@ test('products + listings: validated product, plan/quota via orchestrator, per-m
   assert.equal(after.find((l) => l.id === fk.id).status, 'REJECTED', 'marketplaces tracked separately');
   assert.ok(after.find((l) => l.id === amz.id).history.length >= 3);
   assert.equal((await call('GET', '/listings', { token: S.c })).body.some?.((l) => l.id === amz.id), false, 'tenant isolation');
-  assert.ok(ok(await call('GET', '/notifications', { token: S.b })).some((n) => n.type === 'listing.status_changed' && n.body.includes('amazon.in')));
+  assert.ok(!ok(await call('GET', '/notifications', { token: S.b })).some((n) => n.type === 'listing.status_changed'), 'listing updates stay in Listings & Mapping');
 });
 
 test('quota via listings: Reseller limit of 3 per marketplace per month blocks the 4th listing', async () => {
@@ -1050,7 +1050,7 @@ test('catalog mapping: client submits identifiers, staff record confidence resul
   ok(await call('PATCH', `/ops/mappings/${rows[0].id}`, { token: S.ops.token, body: { status: 'EXACT_VERIFIED', candidateId: 'B07ABC1234' } }));
   assert.equal((await call('PATCH', `/ops/mappings/${rows[1].id}`, { token: S.ops.token, body: { status: 'NO_MATCH_FOUND' } })).status, 400, 'explanation needed');
   ok(await call('PATCH', `/ops/mappings/${rows[1].id}`, { token: S.ops.token, body: { status: 'NO_MATCH_FOUND', note: 'No existing ASIN — needs a new listing' } }));
-  assert.ok(ok(await call('GET', '/notifications', { token: S.b })).some((n) => n.type === 'mapping.updated'));
+  assert.ok(!ok(await call('GET', '/notifications', { token: S.b })).some((n) => n.type === 'mapping.updated' || /catalog mapping/i.test(n.title)), 'mapping updates stay in Listings & Mapping');
 });
 
 test('labels: Growth gets official labels (unaltered, delivered on download); Reseller blocked; Premium adds approved thank-you inserts', async () => {

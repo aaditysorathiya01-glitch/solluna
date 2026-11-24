@@ -10,7 +10,7 @@ import { parse } from '../common/zod';
 import { config } from '../common/config';
 import { EntitlementsService } from '../features/entitlements.service';
 import { SkillsService } from '../features/skills.service';
-import { DispatcherService } from '../connectors/dispatcher.service';
+import { DispatcherService, LISTING_FEATURES } from '../connectors/dispatcher.service';
 import { BillingService } from '../billing/billing.service';
 import type { AuthUser } from '../auth/auth.types';
 import { FIXED_MARKETPLACE, MARKETPLACE_REQUIRED, Step, workflowFor } from './workflows';
@@ -94,7 +94,7 @@ export class OrchestratorService implements OnModuleInit {
     }, { timeout: 15_000 });
 
     const update = await this.clientUpdate(request.id, orgId);
-    await this.dispatch.emit({ type: 'request.created', organizationId: orgId, title: `Request received: ${request.title}`, body: update.text, data: { requestId: request.id, status: request.status } });
+    await this.dispatch.emit({ type: 'request.created', organizationId: orgId, title: `Request received: ${request.title}`, body: update.text, data: { requestId: request.id, status: request.status }, inApp: !LISTING_FEATURES.includes(request.featureKey) });
     return { request, update };
   }
 
@@ -179,7 +179,7 @@ export class OrchestratorService implements OnModuleInit {
         await this.expand(tx, p.id);
       });
       const u = await this.clientUpdate(p.id, orgId);
-      await this.dispatch.emit({ type: 'request.status_changed', organizationId: orgId, title: `Update: ${p.title}`, body: u.text, data: { requestId: p.id } });
+      await this.dispatch.emit({ type: 'request.status_changed', organizationId: orgId, title: `Update: ${p.title}`, body: u.text, data: { requestId: p.id }, inApp: !LISTING_FEATURES.includes(p.featureKey) });
     }
   }
 

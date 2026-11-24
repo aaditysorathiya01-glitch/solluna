@@ -18,7 +18,16 @@ export interface PlatformEvent {
   title: string;
   body: string;
   data?: Record<string, unknown>;
+  /** false = email / webhook only, no in-app notification (the client already sees it in chat or Listings & Mapping). */
+  inApp?: boolean;
 }
+
+/**
+ * Owner, 24 Nov 2026: the Notifications tab must not repeat what the client already sees elsewhere. Manager messages live in
+ * Manager Chat; listing and mapping requests live in Listings & Mapping. These still go out by email / webhook.
+ */
+export const IN_APP_HIDDEN_TYPES = ['chat.message', 'listing.status_changed', 'mapping.updated'];
+export const LISTING_FEATURES = ['CATALOG_MAPPING', 'NEW_LISTING_AMAZON', 'NEW_LISTING_FLIPKART'];
 
 /**
  * Connector-first delivery. Every event:
@@ -34,6 +43,7 @@ export class DispatcherService {
   constructor(private readonly db: PrismaService) {}
 
   async emit(e: PlatformEvent): Promise<{ inApp: number; webhook: 'sent' | 'failed' | 'not_configured' }> {
+    if (e.inApp === false || IN_APP_HIDDEN_TYPES.includes(e.type)) return { inApp: 0, webhook: await this.sendWebhook(e) };
     const users = await this.db.user.findMany({ where: { organizationId: e.organizationId, isActive: true }, select: { id: true } });
     await this.db.notification.createMany({
       data: users.map((u) => ({ organizationId: e.organizationId, userId: u.id, type: e.type, title: e.title, body: e.body })),
