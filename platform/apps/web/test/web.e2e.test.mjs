@@ -417,10 +417,10 @@ test('monthly reporting: staff inputs → client costs & expenses → P&L publis
   await c.goto(`${webBase}/dashboard?tab=reports`);
   await c.getByRole('heading', { name: 'Reports', exact: true }).waitFor();
   await c.fill('#period', '2026-10');
-  for (const [sku, cost] of [['JR-01', '400'], ['JR-02', '300']]) {
-    await c.fill('#c-sku', sku); await c.fill('#c-cost', cost); await c.fill('#c-from', '2026-10-01');
-    await c.click('form[aria-label="Add product cost"] button:has-text("Save")');
-    await c.getByText('Cost saved.').waitFor();
+  // SKU costs for this (older) report are saved through the API; the Reports page edits item costs in the Flipkart profit dashboard.
+  for (const [sku, cost] of [['JR-01', 40000], ['JR-02', 30000]]) {
+    const r = await c.request.post(`${webBase}/api/costs`, { data: { sku, costPaise: cost, includesGst: false, effectiveFrom: '2026-10-01' } });
+    assert.ok(r.ok(), await r.text());
   }
   await c.selectOption('#x-cat', 'RENT'); await c.fill('#x-desc', 'Warehouse rent'); await c.fill('#x-amt', '10000');
   await c.click('form[aria-label="Add expense"] button:has-text("Add")');
@@ -596,7 +596,7 @@ test('client: onboarding checklist, marketplace details (no passwords), product 
   assert.equal(await c.getByText('Sellers who accepted Flipkart recommended price', { exact: false }).count(), 0, 'recommended-price note removed');
   // Amazon mapping: only the owner's fields.
   await c.getByRole('tab', { name: 'Amazon' }).click(); await c.getByRole('tab', { name: 'Mapping' }).click();
-  assert.deepEqual(await c.locator('fieldset label.label').allTextContents().then((l) => l.map((x) => x.replace(/\*$/, '').trim())), ['Amazon product link or ASIN', 'Audience', 'SKU', 'External Product Information (HSN)', 'Fulfillment Channel', 'Your Price', 'Maximum Retail Price']);
+  assert.deepEqual(await c.locator('fieldset label.label').allTextContents().then((l) => l.map((x) => x.replace(/\*$/, '').trim())), ['Amazon product link or ASIN', 'Audience', 'SKU', 'External Product Information (HSN)', 'Fulfillment Channel', 'Quantity (stock)', 'Your Price', 'Maximum Retail Price']);
   await c.getByRole('checkbox', { name: 'Sell on Amazon' }).check(); await c.getByRole('checkbox', { name: 'Amazon Business (B2B)' }).check();
   assert.equal(await c.getByRole('group', { name: 'Audience' }).getByRole('checkbox', { checked: true }).count(), 2, 'both audiences can be enabled');
   await c.getByRole('tab', { name: 'Flipkart' }).click();
