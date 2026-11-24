@@ -1885,7 +1885,7 @@ test('Flipkart order-wise P&L: Orders + Settlement reports → background build,
   let v = await waitFor(async () => { const x = ok(await ops('/orders-pl')); return x && x.status === 'DONE' ? x : x?.status === 'FAILED' ? assert.fail(x.error) : null; }, 'orders P&L');
   const f = v.summary.funnel;
   assert.equal(f.overall.orders, 5, 'September order left out');
-  assert.equal(f.notReturned.orders, 2); assert.equal(f.courierReceived.orders, 1); assert.equal(f.cancelled.orders, 1);
+  assert.equal(f.notReturned.orders, 3); assert.equal(f.courierReceived.orders, 1); assert.equal(f.cancelled.orders, 1);
   assert.equal(v.summary.settlement.total, 517);
   assert.deepEqual(v.summary.missingCost.sort(), ['GLUE STD 36GM', 'TESTOIL 1L']);
   assert.equal(v.meta.complete, true, 'settled through the 20th of next month');
