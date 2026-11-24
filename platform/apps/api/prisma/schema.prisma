@@ -1302,3 +1302,38 @@ model PortalRun {
   @@index([organizationId, createdAt])
   @@index([status])
 }
+
+/// Flipkart order-level P&L for one month (owner's method, 24 Nov 2026): Orders report + Settlement reports → one line per
+/// order item (lines, compact). Purchase cost and SKU → item mapping are applied when the report is read, so edits show at once.
+model OrdersPl {
+  id             String    @id @default(cuid())
+  organizationId String
+  marketplace    String    @default("FLIPKART")
+  periodMonth    DateTime
+  documentIds    String[]
+  status         String    @default("QUEUED") // QUEUED | RUNNING | DONE | FAILED
+  lines          Json?
+  meta           Json? // settlement periods, row counts
+  error          String?
+  startedById    String
+  publishedAt    DateTime?
+  publishedById  String?
+  finishedAt     DateTime?
+  createdAt      DateTime  @default(now())
+
+  @@index([organizationId, periodMonth])
+  @@index([status])
+}
+
+/// Client's SKU → item and pack size (e.g. "1L X 2 - 3" = item 1L, pack of 2). Suggested automatically; the client can change it.
+model SkuItem {
+  id             String   @id @default(cuid())
+  organizationId String
+  sku            String // upper-case, single spaces
+  item           String
+  packQty        Int      @default(1)
+  updatedById    String
+  updatedAt      DateTime @updatedAt
+
+  @@unique([organizationId, sku])
+}

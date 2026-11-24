@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { api } from '@/lib/api';
 import { uploadFile } from './Chat';
 import { Conf, rs } from './ReportView';
+import { ClientFlipkartProfit, OpsOrdersPl } from './OrdersPl';
 
 const lastMonth = () => { const d = new Date(); d.setDate(1); d.setMonth(d.getMonth() - 1); return d.toISOString().slice(0, 7); };
 const toPaise = (v: FormDataEntryValue | null) => { const s = String(v ?? '').trim(); return s === '' ? null : Math.round(Number(s) * 100); };
@@ -39,6 +40,8 @@ export function ClientReporting() {
       <section className="space-y-3">
         <h1 className="font-display text-3xl">Reports</h1>
         <p className="text-sm text-ink-3">Every month: the month closes → Amazon and Flipkart publish their reports on the 5th → your manager prepares your report from them and shares it here.</p>
+        {/* Owner, 24 Nov 2026: the order-wise Flipkart profit dashboard is the main report. */}
+        <ClientFlipkartProfit />
         {cycle.length > 0 && (
           <div className="card divide-y divide-ink/5" aria-label="Monthly report schedule">
             {cycle.map((c) => (
@@ -65,11 +68,7 @@ export function ClientReporting() {
         <label className="label mb-0" htmlFor="period">Month</label>
         <input id="period" type="month" className="input w-auto" value={period} max={new Date().toISOString().slice(0, 7)} onChange={(e) => setPeriod(e.target.value)} />
       </div>
-      <ClientSkuProfit period={period} />
-      <div className="grid gap-6 lg:grid-cols-2">
-        <ProductCosts />
-        <Expenses period={period} />
-      </div>
+      <Expenses period={period} />
       <CaPack period={period} />
     </div>
   );
@@ -277,7 +276,7 @@ export function OpsReporting() {
       </div>
       <Msg ok={m.ok} err={m.err} />
       {!clients.length && <p className="card p-6 text-sm text-ink-3">No clients available for reporting.</p>}
-      {orgId && <OpsSkuProfit orgId={orgId} period={period} />}
+      {orgId && <OpsOrdersPl orgId={orgId} period={period} />}
       {wb && (
         <div className="grid gap-6 xl:grid-cols-[minmax(0,3fr)_minmax(0,2fr)]">
           <div className="space-y-6">

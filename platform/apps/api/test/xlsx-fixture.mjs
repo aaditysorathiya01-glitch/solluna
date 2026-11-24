@@ -45,3 +45,19 @@ export function flipkartPl(period = '2026-10', completeness = 98.2) {
     'Report Help': [['Report Description']],
   });
 }
+
+/** Flipkart Orders report shape (sheet "Orders"), made-up orders. */
+export function flipkartOrders(rows) {
+  const head = ['order_item_id', 'order_id', 'fulfilment_source', 'fulfilment_type', 'order_date', 'order_approval_date', 'order_item_status', 'sku', 'fsn', 'product_title', 'quantity', 'order_delivery_date'];
+  return makeXlsx({ Help: [['Orders report']], Orders: [head, ...rows.map((r) => [`OI:${r.id}`, `OD${r.id}`, 'seller', 'easy_ship', `${r.date} 10:00:00`, `${r.date} 10:05:00`, r.status, `"""SKU:${r.sku}"""`, 'FSNTEST', 'Test product', String(r.qty ?? 1), r.delivered ? r.date : ''])] });
+}
+
+/** Flipkart Settlement report shape (summary + sheet "Orders": group row, header row, blank row, data). */
+export function flipkartSettlement(from, to, lines) {
+  const head = ['NEFT ID', 'Neft Type', ' Payment Date', 'Bank Settlement Value (Rs.) \n= SUM(J:R)', 'Input GST + TCS Credits (Rs.)', 'Income Tax Credits (Rs.)', null, 'Order ID', 'Order item ID', 'Sale Amount (Rs.)', 'Total Offer Amount (Rs.)', 'My share (Rs.)', 'Customer Add-ons Amount (Rs.)', 'Marketplace Fee (Rs.)\n= SUM (V:AI)', 'Taxes (Rs.)', 'Offer Adjustments (Rs.)', 'Protection Fund (Rs.)', 'Refund (Rs.)'];
+  const data = lines.map((l) => { const bank = (l.sale ?? 0) + (l.fee ?? 0) + (l.tax ?? 0) + (l.refund ?? 0); return ['NFT-TEST', 'Postpaid', to, bank, 0, 0, null, `OD${l.id}`, String(l.id), l.sale ?? 0, 0, 0, 0, l.fee ?? 0, l.tax ?? 0, 0, 0, l.refund ?? 0]; });
+  return makeXlsx({
+    'Summary of report': [[null, 'Settlement Report Summary'], [], [null, 'Payment Duration ', `${from} - ${to}`]],
+    Orders: [[ 'Payment Details', null, null, null, null, null, null, 'Transaction Summary'], head, [], ...data],
+  });
+}

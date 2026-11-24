@@ -32,7 +32,7 @@ const ADMIN = { email: 'admin@solluna.test', password: 'Admin-Passw0rd-123' };
 
 let api, base, db, rzpServer, sinkServer, claude;
 import { startClaudeMock, PRODUCT } from './claude-mock.mjs';
-import { flipkartPl } from './xlsx-fixture.mjs';
+import { flipkartPl, flipkartOrders, flipkartSettlement } from './xlsx-fixture.mjs';
 import { createServer as createSpapiServer } from 'node:http';
 // Stand-in for Login with Amazon + SP-API (never the real Amazon).
 const spapiCalls = [];
@@ -1860,6 +1860,55 @@ test('Flipkart P&L report → SKU profit: parsed in the background, purchase pri
   assert.ok(await db.notification.findFirst({ where: { organizationId: org.id, type: 'report.published', title: { contains: 'updated' } } }), 'client told');
   const other = await registerCustomer('Kabir'); await pay(other, 'RESELLER');
   assert.ok(!ok(await call('GET', '/reports/sku-profit?period=2026-10', { token: other })), 'isolated per client');
+});
+
+test('Flipkart order-wise P&L: Orders + Settlement reports → background build, item costs editable, SKU mapping, publish, Excel', async () => {
+  const c = await registerCustomer('Neha'); await pay(c, 'RESELLER');
+  const org = ok(await call('GET', '/auth/me', { token: c })).organization;
+  const waitFor = async (fn, what) => { for (let i = 0; i < 60; i++) { const v = await fn(); if (v) return v; await new Promise((x) => setTimeout(x, 250)); } throw new Error(`timed out: ${what}`); };
+  const ops = (path, opts = {}) => call(opts.method ?? 'GET', `/ops/reports/${org.id}/2026-10${path}`, { token: S.admin, body: opts.body });
+  const orders = flipkartOrders([
+    { id: 1000000001, date: '2026-10-02', status: 'DELIVERED', sku: 'TESTOIL 1L - 1', delivered: true },
+    { id: 1000000002, date: '2026-10-03', status: 'DELIVERED', sku: 'TESTOIL 1L X 2 - 3', delivered: true },
+    { id: 1000000003, date: '2026-10-04', status: 'RETURNED', sku: 'TESTOIL 1L - 1' },
+    { id: 1000000004, date: '2026-10-05', status: 'CANCELLED', sku: 'GLUE-STD-36GM-2' },
+    { id: 1000000005, date: '2026-10-30', status: 'DELIVERED', sku: 'GLUE-STD-36GM-2', delivered: true },
+    { id: 1000000006, date: '2026-09-30', status: 'DELIVERED', sku: 'TESTOIL 1L - 1', delivered: true },
+  ]);
+  const oct = flipkartSettlement('2026-10-01', '2026-10-31', [{ id: 1000000001, sale: 200, fee: -50, tax: -5 }, { id: 1000000002, sale: 380, fee: -60, tax: -6 }, { id: 1000000003, sale: 200, fee: -20, refund: -200 }]);
+  const nov = flipkartSettlement('2026-11-01', '2026-11-20', [{ id: 1000000005, sale: 100, fee: -20, tax: -2 }]);
+  const d1 = await upload(S.admin, 'orders.xlsx', orders, { organizationId: org.id, kind: 'FLIPKART_ORDERS_REPORT', period: '2026-10' });
+  const d2 = await upload(S.admin, 'settle-oct.xlsx', oct, { organizationId: org.id, kind: 'FLIPKART_SETTLEMENT_REPORT', period: '2026-10' });
+  const d3 = await upload(S.admin, 'settle-nov.xlsx', nov, { organizationId: org.id, kind: 'FLIPKART_SETTLEMENT_REPORT', period: '2026-10' });
+  assert.equal((await ops('/orders-pl', { method: 'POST', body: { documentIds: [d2.body.id, d3.body.id] } })).status, 400, 'the Orders report is required');
+  ok(await ops('/orders-pl', { method: 'POST', body: { documentIds: [d1.body.id, d2.body.id, d3.body.id] } }));
+  let v = await waitFor(async () => { const x = ok(await ops('/orders-pl')); return x && x.status === 'DONE' ? x : x?.status === 'FAILED' ? assert.fail(x.error) : null; }, 'orders P&L');
+  const f = v.summary.funnel;
+  assert.equal(f.overall.orders, 5, 'September order left out');
+  assert.equal(f.notReturned.orders, 2); assert.equal(f.courierReceived.orders, 1); assert.equal(f.cancelled.orders, 1);
+  assert.equal(v.summary.settlement.total, 517);
+  assert.deepEqual(v.summary.missingCost.sort(), ['GLUE STD 36GM', 'TESTOIL 1L']);
+  assert.equal(v.meta.complete, true, 'settled through the 20th of next month');
+  assert.ok(!ok(await call('GET', '/reports/orders-pl?period=2026-10', { token: c })), 'client sees nothing before publish');
+  // The client enters costs per item; a pack of 2 counts 2 units.
+  ok(await ops('/orders-pl/publish', { method: 'POST' }));
+  ok(await call('PUT', '/reports/orders-pl/cost?period=2026-10', { token: c, body: { item: 'TESTOIL 1L', cost: 100 } }));
+  v = ok(await call('GET', '/reports/orders-pl?period=2026-10', { token: c }));
+  assert.equal(v.summary.profit.purchase, 300); assert.deepEqual(v.summary.missingCost, ['GLUE STD 36GM']);
+  ok(await call('PUT', '/reports/orders-pl/cost?period=2026-10', { token: c, body: { item: 'glue std 36gm', cost: 30 } }));
+  v = ok(await call('GET', '/reports/orders-pl?period=2026-10', { token: c }));
+  assert.equal(v.summary.profit.purchase, 330); assert.equal(v.summary.profit.profit, 187); assert.deepEqual(v.summary.missingCost, []);
+  assert.equal(v.items.find((i) => i.item === 'TESTOIL 1L').netUnits, 3);
+  // Mapping change: the X 2 SKU is really a pack of 3 → purchase +100.
+  ok(await call('PUT', '/reports/orders-pl/sku-item', { token: c, body: { sku: 'TESTOIL 1L X 2 - 3', item: 'TESTOIL 1L', packQty: 3 } }));
+  v = ok(await call('GET', '/reports/orders-pl?period=2026-10', { token: c }));
+  assert.equal(v.summary.profit.purchase, 430); assert.ok(v.skus.find((s) => s.sku === 'TESTOIL 1L X 2 - 3').mapped);
+  assert.deepEqual(ok(await call('GET', '/reports/orders-pl/months', { token: c })).map((m) => m.period), ['2026-10']);
+  const x = await fetch(`${base}/reports/orders-pl.xlsx?period=2026-10`, { headers: { authorization: `Bearer ${c}` } });
+  assert.equal(x.status, 200); assert.match(x.headers.get('content-type'), /spreadsheetml/);
+  const bytes = Buffer.from(await x.arrayBuffer()); assert.equal(bytes.subarray(0, 2).toString(), 'PK', 'a real .xlsx (zip)');
+  const other = await registerCustomer('Ira'); await pay(other, 'RESELLER');
+  assert.ok(!ok(await call('GET', '/reports/orders-pl?period=2026-10', { token: other })), 'isolated per client');
 });
 
 test('Amazon SP-API: admin connection test uses LWA + marketplace participations; keys never returned', async () => {

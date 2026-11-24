@@ -5,7 +5,12 @@ import type { AuthUser } from '../auth/auth.types';
 import { ReportsService } from './reports.service';
 import { ReportCycleService } from './report-cycle.service';
 import { PlImportService } from './pl-import.service';
+import { OrdersPlService } from './orders-pl.service';
 
+const sendXlsx = (res: Response, f: { fileName: string; buf: Buffer }) => {
+  res.set({ 'content-type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', 'content-disposition': `attachment; filename="${f.fileName}"`, 'cache-control': 'private, no-store' });
+  res.send(f.buf);
+};
 const sendCsv = (res: Response, f: { fileName: string; csv: string }) => {
   res.set({ 'content-type': 'text/csv; charset=utf-8', 'content-disposition': `attachment; filename="${f.fileName}"`, 'cache-control': 'private, no-store' });
   res.send(f.csv);
@@ -15,12 +20,19 @@ const sendCsv = (res: Response, f: { fileName: string; csv: string }) => {
 @Controller()
 @CustomerOnly()
 export class ClientReportsController {
-  constructor(private readonly reports: ReportsService, private readonly cycle: ReportCycleService, private readonly pl: PlImportService) {}
+  constructor(private readonly reports: ReportsService, private readonly cycle: ReportCycleService, private readonly pl: PlImportService, private readonly opl: OrdersPlService) {}
   /** Monthly cycle: month end → marketplace reports on the 5th → report ready by the 7th. */
   @Get('reports/schedule') schedule(@CurrentUser() u: AuthUser) { return this.cycle.schedule(u.organizationId!); }
   /** SKU-wise profit from Flipkart's P&L report (published months only). */
   @Get('reports/sku-profit') skuProfit(@CurrentUser() u: AuthUser, @Query('period') p: string) { return this.pl.view(u, u.organizationId!, p); }
   @Get('reports/sku-profit.csv') async skuProfitCsv(@CurrentUser() u: AuthUser, @Query('period') p: string, @Res() res: Response) { sendCsv(res, await this.pl.csv(u, u.organizationId!, p)); }
+
+  /** Flipkart order-wise P&L (owner's method): months, the report, Excel, purchase cost per item, SKU → item. */
+  @Get('reports/orders-pl/months') oplMonths(@CurrentUser() u: AuthUser) { return this.opl.months(u, u.organizationId!); }
+  @Get('reports/orders-pl') oplView(@CurrentUser() u: AuthUser, @Query('period') p: string) { return this.opl.view(u, u.organizationId!, p); }
+  @Get('reports/orders-pl.xlsx') async oplXlsx(@CurrentUser() u: AuthUser, @Query('period') p: string, @Res() res: Response) { sendXlsx(res, await this.opl.xlsx(u, u.organizationId!, p)); }
+  @Put('reports/orders-pl/cost') oplCost(@CurrentUser() u: AuthUser, @Query('period') p: string, @Body() b: unknown) { return this.opl.setCost(u, u.organizationId!, p, b); }
+  @Put('reports/orders-pl/sku-item') oplSku(@CurrentUser() u: AuthUser, @Body() b: unknown) { return this.opl.setSkuItem(u, u.organizationId!, b); }
 
   @Get('reports') list(@CurrentUser() u: AuthUser) { return this.reports.list(u, u.organizationId!); }
   @Get('reports/:id') get(@CurrentUser() u: AuthUser, @Param('id') id: string) { return this.reports.get(u, id); }
@@ -41,7 +53,16 @@ export class ClientReportsController {
 @Controller('ops/reports')
 @StaffOnly('ACCOUNTS_EXECUTIVE', 'OPERATIONS_MANAGER')
 export class OpsReportsController {
-  constructor(private readonly reports: ReportsService, private readonly cycle: ReportCycleService, private readonly pl: PlImportService) {}
+  constructor(private readonly reports: ReportsService, private readonly cycle: ReportCycleService, private readonly pl: PlImportService, private readonly opl: OrdersPlService) {}
+
+  /** Flipkart order-wise P&L: Orders report + Settlement reports (import runs in the background), review, publish. */
+  @Get('orders-pl/:orgId/months') oplMonths(@CurrentUser() u: AuthUser, @Param('orgId') o: string) { return this.opl.months(u, o); }
+  @Post(':orgId/:period/orders-pl') oplStart(@CurrentUser() u: AuthUser, @Param('orgId') o: string, @Param('period') p: string, @Body() b: unknown) { return this.opl.start(u, o, p, b); }
+  @Get(':orgId/:period/orders-pl') oplView(@CurrentUser() u: AuthUser, @Param('orgId') o: string, @Param('period') p: string) { return this.opl.view(u, o, p); }
+  @Get(':orgId/:period/orders-pl.xlsx') async oplXlsx(@CurrentUser() u: AuthUser, @Param('orgId') o: string, @Param('period') p: string, @Res() res: Response) { sendXlsx(res, await this.opl.xlsx(u, o, p)); }
+  @Post(':orgId/:period/orders-pl/publish') @HttpCode(200) oplPublish(@CurrentUser() u: AuthUser, @Param('orgId') o: string, @Param('period') p: string) { return this.opl.publish(u, o, p); }
+  @Put(':orgId/:period/orders-pl/cost') oplCost(@CurrentUser() u: AuthUser, @Param('orgId') o: string, @Param('period') p: string, @Body() b: unknown) { return this.opl.setCost(u, o, p, b); }
+  @Put(':orgId/orders-pl/sku-item') oplSku(@CurrentUser() u: AuthUser, @Param('orgId') o: string, @Body() b: unknown) { return this.opl.setSkuItem(u, o, b); }
 
   /** Flipkart P&L report → SKU profit (import runs in the background), then publish to the client. */
   @Post(':orgId/:period/flipkart-pl') importPl(@CurrentUser() u: AuthUser, @Param('orgId') o: string, @Param('period') p: string, @Body() b: unknown) { return this.pl.start(u, o, p, b); }
