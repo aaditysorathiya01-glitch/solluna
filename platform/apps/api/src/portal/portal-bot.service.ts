@@ -27,6 +27,9 @@ export function totp(secret: string, now = Date.now()) {
   return String(((h.readUInt32BE(o) & 0x7fffffff) % 1_000_000)).padStart(6, '0');
 }
 const BLOCKED = /(bank|payment|settlement|payout|manage-?users|user-?permissions|account-?settings\/(users|password))/i;
+/** Seller Hub Reports Centre is allowed even though its links name "Payment Reports" (owner, 25 Nov 2026: the bot downloads the Orders and Settled Transactions reports there). */
+const REPORTS_CENTRE = /^https:\/\/seller\.flipkart\.com\/index\.html#dashboard\/metrics\/report-centre(\?|$)/;
+export const isBlocked = (url: string) => !REPORTS_CENTRE.test(url) && BLOCKED.test(url);
 const SECRETS: Record<string, () => string | undefined> = {
   OPS_EMAIL: () => config.opsUser.email,
   OPS_FLIPKART_PASSWORD: () => process.env.OPS_FLIPKART_PASSWORD,
@@ -90,7 +93,7 @@ export class PortalBotService {
     const browser = await chromium.connectOverCDP(session.connectUrl, { timeout: 30_000 });
     const ctx = browser.contexts()[0];
     const holder = { page: ctx.pages()[0] ?? await ctx.newPage() };
-    const guard = (p: Page) => p.on('framenavigated', (f) => { if (f === p.mainFrame() && BLOCKED.test(f.url())) void p.close().catch(() => undefined); });
+    const guard = (p: Page) => p.on('framenavigated', (f) => { if (f === p.mainFrame() && isBlocked(f.url())) void p.close().catch(() => undefined); });
     guard(holder.page);
     ctx.on('page', (p) => { guard(p); holder.page = p; });
     const close = async () => {
@@ -103,7 +106,7 @@ export class PortalBotService {
   async startProbe(user: AuthUser, input: unknown) {
     if (!this.configured) throw new BadRequestException('Add BROWSERBASE_API_KEY and BROWSERBASE_PROJECT_ID in the server environment.');
     const d = parse(ProbeSchema, input);
-    for (const s of d.steps) if ('goto' in s && BLOCKED.test(s.goto)) throw new BadRequestException('That page is blocked for the bot (bank / payment / user settings).');
+    for (const s of d.steps) if ('goto' in s && isBlocked(s.goto)) throw new BadRequestException('That page is blocked for the bot (bank / payment / user settings).');
     const job: Job = { id: randomUUID(), status: 'RUNNING', shots: [], startedAt: new Date() };
     this.jobs.set(job.id, job);
     await this.audit.log({ actor: user, action: 'portal_bot.probe', entity: 'PortalBot', entityId: job.id, after: { profile: d.profile, steps: d.steps.map((s) => Object.keys(s)[0]) } });
@@ -129,7 +132,7 @@ export class PortalBotService {
       const ctx = browser.contexts()[0];
       let page = ctx.pages()[0] ?? await ctx.newPage();
       // Links that open a new tab: follow the newest tab (blocked pages are closed at once).
-      const guard = (p: Page) => p.on('framenavigated', (f) => { if (f === p.mainFrame() && BLOCKED.test(f.url())) void p.close().catch(() => undefined); });
+      const guard = (p: Page) => p.on('framenavigated', (f) => { if (f === p.mainFrame() && isBlocked(f.url())) void p.close().catch(() => undefined); });
       guard(page);
       ctx.on('page', (p) => { guard(p); page = p; });
       const started = new Date();
