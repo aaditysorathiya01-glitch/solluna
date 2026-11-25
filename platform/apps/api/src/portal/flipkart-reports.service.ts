@@ -7,6 +7,9 @@ import { AuditService } from '../common/audit.service';
 import { StorageService } from '../documents/storage.service';
 import { OrdersPlService } from '../reports/orders-pl.service';
 import { PipelineService } from '../chat/pipeline.service';
+import { ManagerAgentService } from '../chat/manager-agent.service';
+import { DispatcherService } from '../connectors/dispatcher.service';
+import { CaFilesService, lastMonthIst, monthLabel } from '../reports/ca-files.service';
 import type { AuthUser } from '../auth/auth.types';
 import { PortalBotService } from './portal-bot.service';
 
@@ -67,9 +70,11 @@ export class FlipkartReportsService implements OnModuleInit {
   constructor(
     private readonly db: PrismaService, private readonly audit: AuditService, private readonly storage: StorageService,
     private readonly bot: PortalBotService, private readonly opl: OrdersPlService, private readonly pipelines: PipelineService,
+    private readonly agent: ManagerAgentService, private readonly dispatch: DispatcherService, private readonly ca: CaFilesService,
   ) {}
 
   onModuleInit() {
+    this.agent.caFiles = (orgId, mp, period) => this.managerCa(orgId, mp, period);
     setInterval(() => this.tick().catch((e) => this.log.warn(`tick: ${(e as Error).message}`)), 60_000).unref();
   }
 
@@ -208,8 +213,38 @@ export class FlipkartReportsService implements OnModuleInit {
     return null; // not generated yet (or not on the first page)
   }
 
+  /**
+   * Manager chat (owner, 25 Nov 2026): last month → the client downloads it from Reports themselves; an older month →
+   * fetched the same way and delivered as a download in Notifications.
+   */
+  private async managerCa(orgId: string, mp: 'FLIPKART' | 'AMAZON', period: string) {
+    const last = lastMonthIst();
+    if (period > last) return `${monthLabel(period)} is not over yet; its CA files come on the 5th of the next month. Tell the client.`;
+    if (period < new Date(Date.UTC(Number(last.slice(0, 4)) - 2, Number(last.slice(5, 7)) - 1, 1)).toISOString().slice(0, 7)) return 'That month is more than two years back; escalate_to_team so the team checks what the marketplace still has.';
+    if (period === last) return `This is last month: tell the client to open Reports → "Send reports to your CA", choose ${mp === 'FLIPKART' ? 'Flipkart' : 'Amazon'}, and download all files in one click.`;
+    if (mp === 'AMAZON') return 'Amazon CA files are not fetched automatically yet; escalate_to_team so the team prepares them, and tell the client the team will share them.';
+    const have = await this.ca.files(orgId, mp, period);
+    if (have.every((f) => f.id)) { await this.notifyCa(orgId, mp, period); return `The ${monthLabel(period)} Flipkart CA files are ready: a download was put in the client's Notifications. Tell them to download it from the Notifications tab.`; }
+    const row = await this.db.reportFetch.upsert({
+      where: { organizationId_marketplace_purpose_period: { organizationId: orgId, marketplace: 'FLIPKART', purpose: 'CA', period } },
+      create: { organizationId: orgId, purpose: 'CA', period, files: filesFor(period, 'CA') as unknown as Prisma.InputJsonValue },
+      update: { status: 'REQUEST', files: filesFor(period, 'CA') as unknown as Prisma.InputJsonValue, checks: 0, nextAt: new Date(), error: null },
+    });
+    await this.audit.log({ action: 'portal_bot.report_fetch', entity: 'ReportFetch', entityId: row.id, organizationId: orgId, after: { period, purpose: 'CA', by: 'manager-chat' } });
+    setImmediate(() => this.tick().catch(() => undefined));
+    return `Requested the ${monthLabel(period)} Flipkart CA files (GSTR return, Sales, TDS) from Flipkart. They usually arrive within minutes, sometimes a few hours. Tell the client they will get a notification with the download in the Notifications tab.`;
+  }
+
+  private async notifyCa(orgId: string, mp: 'FLIPKART' | 'AMAZON', period: string) {
+    const name = mp === 'FLIPKART' ? 'Flipkart' : 'Amazon';
+    await this.dispatch.emit({ type: 'ca.files_ready', organizationId: orgId, title: `${monthLabel(period)} ${name} CA files are ready`, body: `GSTR return report, Sales report and TDS report for ${monthLabel(period)}: one download for your CA.`, link: `/api/reports/ca-files.zip?mp=${mp}&period=${period}`, data: { period, marketplace: mp } });
+  }
+
   /** CA files are in: the CA pipeline's team step for that month is done (the manager then tells the client). */
   private async caDone(orgId: string, period: string) {
+    await this.notifyCa(orgId, 'FLIPKART', period);
+    // An older month was asked for in chat: the manager tells the client it is in Notifications.
+    if (period !== lastMonthIst()) await this.agent.enqueue(orgId, `The ${monthLabel(period)} Flipkart CA files the client asked for are ready as a download in their Notifications tab. Tell them briefly.`);
     const runs = await this.db.pipelineRun.findMany({ where: { organizationId: orgId, pipeline: 'CA_DOCUMENTATION', branch: 'FLIPKART_CA', status: 'ACTIVE' } });
     for (const r of runs.filter((x) => (x.data as Record<string, string>)?.period === period)) {
       await this.pipelines.teamAdvance(null, orgId, r.id, {}).catch((e) => this.log.warn(`CA pipeline ${r.id}: ${(e as Error).message}`));

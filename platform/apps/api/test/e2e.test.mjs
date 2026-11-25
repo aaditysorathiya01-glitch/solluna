@@ -1797,6 +1797,12 @@ test('manager pipeline: CA documents — opened on the 5th per marketplace, team
   assert.equal((await runs()).find((r) => r.id === fk.id).step.title, 'Tell the client the CA files are ready');
   const msgs = await waitFor(async () => { const m = ok(await call('GET', '/chat', { token: c })).messages; return m.length > before ? m : null; }, 'proactive message');
   assert.match(msgs.at(-1).body, /files are ready in Reports → CA pack/, 'manager messages the client without being asked');
+  // One-click CA files (owner, 25 Nov 2026): the month's three Flipkart files as one zip.
+  const caList = ok(await call('GET', '/reports/ca-files?mp=FLIPKART&period=2026-09', { token: c }));
+  assert.deepEqual(caList.files.map((f) => [f.label, Boolean(f.id)]), [['GSTR return report', true], ['Sales report', true], ['TDS report', true]]);
+  const caZip = await fetch(`${base}/reports/ca-files.zip?mp=FLIPKART&period=2026-09`, { headers: { authorization: `Bearer ${c}` } });
+  assert.equal(caZip.status, 200); assert.equal(Buffer.from(await caZip.arrayBuffer()).subarray(0, 2).toString(), 'PK');
+  assert.equal((await call('GET', '/reports/ca-files?mp=AMAZON&period=2026-09', { token: c })).body.any, false);
   const pack = ok(await call('GET', '/ca-pack?period=2026-09', { token: c }));
   assert.ok(['Flipkart GSTR return report', 'Flipkart sales report', 'Flipkart TDS report'].every((l) => pack.index.some((i) => i.source === l)), JSON.stringify(pack.index));
   assert.ok(pack.missing.some((m) => m.required === 'Amazon Merchant Tax Report (B2B)'), 'Amazon files still missing');

@@ -858,6 +858,7 @@ model Notification {
   type           String
   title          String
   body           String
+  link           String? // e.g. a one-click download (CA files)
   channel        String        @default("IN_APP") // IN_APP | EMAIL | SMS | WHATSAPP
   readAt         DateTime?
   createdAt      DateTime      @default(now())

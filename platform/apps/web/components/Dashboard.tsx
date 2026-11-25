@@ -32,7 +32,7 @@ interface Billing {
 interface PlanFeatureRow { key: string; label: string; section: string; enabled: boolean; limit: number | null; meta: { mode?: string } | null }
 interface Plan { code: string; name: string; pricePaise: number; features: PlanFeatureRow[] }
 interface ChatSummary { managerPending: { assignBy: string } | null; managers: { id: string; name: string; staffRole: string }[]; messages: { id: string; body: string; senderType: string; createdAt: string; sender: { id: string; name: string } }[] }
-interface Notification { id: string; title: string; body: string; createdAt: string; readAt: string | null }
+interface Notification { id: string; title: string; body: string; createdAt: string; readAt: string | null; link?: string | null }
 
 /** Client navigation: five work areas. Settings, plan & billing and documents live in the account menu (top right). */
 const TABS = ['chat', 'listings', 'labels', 'reports', 'notifications'] as const;
@@ -263,6 +263,7 @@ function NotificationsCenter({ approvals, onDecide, onRead }: { approvals: Appro
                 <span className="mt-0.5 block whitespace-pre-line text-xs text-ink-3">{n.body.replace(/\*\*/g, '')}</span>
               </span>
             </button>
+            {n.link && <div className="-mt-2 px-4 pb-4 pl-9"><a className="btn-gold py-1.5 text-xs" href={n.link} onClick={() => readOne(n)} data-testid="notification-download">Download</a></div>}
           </li>
         ))}
         {items && !shown.length && <li className="p-4 text-sm text-ink-3">No updates here yet.</li>}
@@ -273,37 +274,52 @@ function NotificationsCenter({ approvals, onDecide, onRead }: { approvals: Appro
 }
 
 /** Asks SOLLUNA to prepare the month's CA documentation pack and share it with the client's Chartered Accountant. */
-function CaRequest({ onDone }: { onDone: (m: { kind: 'ok' | 'err'; text: string }) => void }) {
+interface CaList { marketplace: 'FLIPKART' | 'AMAZON'; period: string; label: string; files: { kind: string; label: string; id: string | null; fileName: string | null; sizeBytes: number | null }[]; ready: boolean; any: boolean }
+/**
+ * "Send reports to your CA" (owner, 25 Nov 2026): pick Flipkart or Amazon → last month's CA files (fetched on the 5th)
+ * → one click downloads all of them. Older months: ask the manager.
+ */
+function CaRequest(_: { onDone: (m: { kind: 'ok' | 'err'; text: string }) => void }) {
   const [open, setOpen] = useState(false);
-  const [busy, setBusy] = useState(false);
-  const last = new Date(); last.setMonth(last.getMonth() - 1);
-  async function submit(e: React.FormEvent<HTMLFormElement>) {
-    e.preventDefault();
-    const f = new FormData(e.currentTarget);
-    const period = String(f.get('caPeriod'));
-    const month = new Date(`${period}-01T00:00:00`).toLocaleDateString('en-IN', { month: 'long', year: 'numeric' });
-    setBusy(true);
-    try {
-      await api('/requests', { method: 'POST', body: { featureKey: 'CA_DOCUMENTATION', title: `Send ${month} documents to my CA`, priority: 'P3', details: { period, caName: f.get('caName') || undefined, caEmail: f.get('caEmail') || undefined, notes: f.get('caNotes') || undefined } } });
-      onDone({ kind: 'ok', text: `Request sent. Your manager will prepare the ${month} CA pack and share it with your CA.` });
-      setOpen(false);
-    } catch (err) { onDone({ kind: 'err', text: (err as Error).message }); }
-    setBusy(false);
-  }
+  const [mp, setMp] = useState<'FLIPKART' | 'AMAZON' | null>(null);
+  const [d, setD] = useState<CaList | null>(null);
+  const [err, setErr] = useState<string | null>(null);
+  useEffect(() => { if (!mp) return; setD(null); setErr(null); api<CaList>(`/reports/ca-files?mp=${mp}`).then(setD).catch((e) => setErr((e as Error).message)); }, [mp]);
+  const kb = (b: number | null) => (b === null ? '' : b > 1_048_576 ? `${(b / 1_048_576).toFixed(1)} MB` : `${Math.max(1, Math.round(b / 1024))} KB`);
   return (
     <section className="card p-6" aria-label="Send to my CA">
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <div><h2 className="font-semibold">Send reports to your CA</h2><p className="text-xs text-ink-3">We prepare the month&apos;s reports, settlements and invoices as one pack for your Chartered Accountant.</p></div>
+        <div><h2 className="font-semibold">Send reports to your CA</h2><p className="text-xs text-ink-3">Last month&apos;s marketplace tax files (GSTR return, Sales and TDS reports) for your Chartered Accountant, in one download.</p></div>
         {!open && <button className="btn-gold" onClick={() => setOpen(true)}>Request CA pack</button>}
       </div>
       {open && (
-        <form onSubmit={submit} className="mt-4 grid gap-3 sm:grid-cols-2">
-          <div><label className="label" htmlFor="caPeriod">Month</label><input id="caPeriod" name="caPeriod" type="month" className="input" required defaultValue={last.toISOString().slice(0, 7)} max={new Date().toISOString().slice(0, 7)} /></div>
-          <div><label className="label" htmlFor="caName">CA name (optional)</label><input id="caName" name="caName" className="input" /></div>
-          <div><label className="label" htmlFor="caEmail">CA email (optional)</label><input id="caEmail" name="caEmail" type="email" className="input" placeholder="ca@firm.in" /></div>
-          <div><label className="label" htmlFor="caNotes">Anything specific?</label><input id="caNotes" name="caNotes" className="input" placeholder="e.g. GSTR-1 filing this week" /></div>
-          <div className="flex gap-2 sm:col-span-2"><button className="btn-primary" disabled={busy}>{busy ? 'Sending…' : 'Send request'}</button><button type="button" className="btn-ghost" onClick={() => setOpen(false)}>Cancel</button></div>
-        </form>
+        <div className="mt-4 space-y-4">
+          <div className="inline-flex rounded-xl border border-ink/15 bg-ivory p-1" role="tablist" aria-label="Marketplace for CA files">
+            {(['FLIPKART', 'AMAZON'] as const).map((k) => (
+              <button key={k} role="tab" aria-selected={mp === k} onClick={() => setMp(k)} className={`rounded-lg px-5 py-1.5 text-sm font-semibold transition ${mp === k ? 'bg-ink text-ivory shadow' : 'text-ink-2 hover:text-ink'}`}>{k === 'FLIPKART' ? 'Flipkart' : 'Amazon'}</button>
+            ))}
+          </div>
+          {!mp && <p className="text-sm text-ink-3">Choose Flipkart or Amazon.</p>}
+          {err && <p className="text-sm text-red-700" role="alert">{err}</p>}
+          {mp && d && (
+            <div className="space-y-3" data-testid="ca-files">
+              <p className="text-sm font-medium">{d.marketplace === 'FLIPKART' ? 'Flipkart' : 'Amazon'} · {d.label}</p>
+              <ul className="divide-y divide-ink/5 rounded-xl border border-ink/10">
+                {d.files.map((f) => (
+                  <li key={f.kind} className="flex items-center justify-between gap-3 px-4 py-2.5 text-sm">
+                    <span>{f.label}</span>
+                    <span className={`text-xs ${f.id ? 'text-emerald-700' : 'text-ink-3'}`}>{f.id ? `Ready · ${kb(f.sizeBytes)}` : 'Being prepared'}</span>
+                  </li>
+                ))}
+              </ul>
+              {d.any
+                ? <a className="btn-primary inline-flex" href={`/api/reports/ca-files.zip?mp=${d.marketplace}&period=${d.period}`} data-testid="ca-download">Download all ({d.files.filter((f) => f.id).length} files)</a>
+                : <p className="text-sm text-ink-3">{d.marketplace === 'AMAZON' ? 'Amazon CA files are being set up; your manager will share them.' : 'These files are fetched from Flipkart on the 5th of every month; they will appear here soon.'}</p>}
+            </div>
+          )}
+          <p className="text-xs text-ink-3">Need the files for an older month? Tell your manager in Manager Chat Support which month and marketplace you need.</p>
+          <button className="btn-ghost py-1.5 text-xs" onClick={() => { setOpen(false); setMp(null); }}>Close</button>
+        </div>
       )}
     </section>
   );

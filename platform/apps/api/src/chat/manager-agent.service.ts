@@ -83,6 +83,9 @@ export class ManagerAgentService implements OnModuleInit {
     pipelines.clientTurnListeners.push((orgId, info) => this.enqueue(orgId, info));
   }
 
+  /** Set by the portal bot's report service (avoids a module cycle): fetch / point to CA files for a month. */
+  caFiles?: (orgId: string, mp: 'FLIPKART' | 'AMAZON', period: string) => Promise<string>;
+
   get enabled() { return Boolean(process.env.ANTHROPIC_API_KEY) && process.env.MANAGER_AGENT !== 'off'; }
 
   onModuleInit() {
@@ -409,6 +412,11 @@ export class ManagerAgentService implements OnModuleInit {
       const g = accessGuide(d.marketplace);
       await this.chat.typeAndPost(b.orgId, a.managerId, g.text, { byAgent: true, images: g.images });
       return `The exact ${d.marketplace === 'FLIPKART' ? 'Flipkart' : 'Amazon'} steps with screenshots were sent to the client. Do not repeat them; add at most one short line.`;
+    }
+    if (name === 'get_ca_files') {
+      const d = z.object({ marketplace: z.enum(['AMAZON', 'FLIPKART']), period: z.string().regex(/^\d{4}-(0[1-9]|1[0-2])$/) }).parse(input);
+      if (!this.caFiles) return 'CA files cannot be fetched right now; use escalate_to_team so the team prepares them.';
+      return this.caFiles(b.orgId, d.marketplace, d.period);
     }
     if (name === 'escalate_to_team') {
       const d = z.object({ reason: z.string().trim().min(3).max(1000), priority: z.enum(['P1', 'P2', 'P3', 'P4']) }).parse(input);

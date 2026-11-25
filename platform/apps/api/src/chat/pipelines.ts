@@ -247,7 +247,7 @@ const caDocumentation = (mp: Marketplace): PipeStep[] => [
     instructions: 'The team is collecting this month\'s marketplace tax files for the CA pack. If the client asks, tell them the files are being prepared.',
     fields: [{ key: 'files', label: 'Tax files uploaded', kind: 'teamdocs', required: true, docKinds: CA_FILES[mp], hint: CA_PATH[mp] }] },
   { key: 'deliver', title: 'Tell the client the CA files are ready', by: 'client',
-    instructions: 'Tell the client the marketplace tax files for the period are ready in Reports → CA pack (and in Documents). Offer to send the pack to their CA: they can use "Request CA pack" in Reports with the CA\'s email. Then save informed = yes.',
+    instructions: 'Tell the client the marketplace tax files (GSTR return report, Sales report, TDS) for the period are ready: one click downloads all of them from Reports → "Send reports to your CA", and the Notifications tab has the same download. Then save informed = yes.',
     fields: [{ key: 'informed', label: 'Client informed', kind: 'confirm', required: true }] },
 ];
 

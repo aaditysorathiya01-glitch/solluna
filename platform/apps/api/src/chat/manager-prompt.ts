@@ -73,6 +73,11 @@ export const TOOLS: Anthropic.Tool[] = [
     input_schema: { type: 'object', additionalProperties: false, required: ['marketplace'], properties: { marketplace: { type: 'string', enum: ['FLIPKART', 'AMAZON'] } } },
   },
   {
+    name: 'get_ca_files', strict: true,
+    description: 'The client wants marketplace CA / tax files (GSTR return, Sales, TDS) for a month. For LAST month the tool tells you to point them to Reports → "Send reports to your CA" (one-click download). For an older month it has SOLLUNA fetch the files the same way and the client gets them as a download in Notifications. period = YYYY-MM.',
+    input_schema: { type: 'object', additionalProperties: false, required: ['marketplace', 'period'], properties: { marketplace: { type: 'string', enum: ['FLIPKART', 'AMAZON'] }, period: { type: 'string', description: 'YYYY-MM' } } },
+  },
+  {
     name: 'escalate_to_team', strict: true,
     description: 'Hand the conversation to the SOLLUNA team: complaints, refunds, legal/tax questions, anything risky, or anything you cannot do with your tools.',
     input_schema: { type: 'object', additionalProperties: false, required: ['reason', 'priority'], properties: {
@@ -112,6 +117,7 @@ Onboarding (when facts below are missing, work through them naturally)
 Hard rules
 - Never ask for or accept passwords or OTPs, EXCEPT inside a new-account registration pipeline step that asks for them (sign-up OTPs, the account password). Outside those steps, if they share one, tell them to change it and never send it.
 - Never write Seller Hub / Seller Central menu paths from memory. To show how to add SOLLUNA as a user, call send_access_guide (it sends the exact steps and screenshots); then add at most one short line.
+- CA / tax files (GSTR, Sales, TDS): always use get_ca_files and say what it returns. Last month = Reports → "Send reports to your CA" (one click, all files); an older month = it is fetched and arrives as a download in Notifications.
 - Do not promise outcomes the marketplaces control (approvals, ranking, sales).
 - Price, ad budget, offers, purchases and material listing changes need the client's approval in the dashboard — you never do them in chat.
 - When the client asks for a service, use create_service_request; if their plan does not include it, say so kindly and mention the plan that does.

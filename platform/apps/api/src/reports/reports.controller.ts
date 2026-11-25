@@ -6,9 +6,14 @@ import { ReportsService } from './reports.service';
 import { ReportCycleService } from './report-cycle.service';
 import { PlImportService } from './pl-import.service';
 import { OrdersPlService } from './orders-pl.service';
+import { CaFilesService } from './ca-files.service';
 
 const sendXlsx = (res: Response, f: { fileName: string; buf: Buffer }) => {
   res.set({ 'content-type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', 'content-disposition': `attachment; filename="${f.fileName}"`, 'cache-control': 'private, no-store' });
+  res.send(f.buf);
+};
+const sendZip = (res: Response, f: { fileName: string; buf: Buffer }) => {
+  res.set({ 'content-type': 'application/zip', 'content-disposition': `attachment; filename="${f.fileName}"`, 'cache-control': 'private, no-store' });
   res.send(f.buf);
 };
 const sendCsv = (res: Response, f: { fileName: string; csv: string }) => {
@@ -20,7 +25,7 @@ const sendCsv = (res: Response, f: { fileName: string; csv: string }) => {
 @Controller()
 @CustomerOnly()
 export class ClientReportsController {
-  constructor(private readonly reports: ReportsService, private readonly cycle: ReportCycleService, private readonly pl: PlImportService, private readonly opl: OrdersPlService) {}
+  constructor(private readonly reports: ReportsService, private readonly cycle: ReportCycleService, private readonly pl: PlImportService, private readonly opl: OrdersPlService, private readonly ca: CaFilesService) {}
   /** Monthly cycle: month end → marketplace reports on the 5th → report ready by the 7th. */
   @Get('reports/schedule') schedule(@CurrentUser() u: AuthUser) { return this.cycle.schedule(u.organizationId!); }
   /** SKU-wise profit from Flipkart's P&L report (published months only). */
@@ -28,6 +33,9 @@ export class ClientReportsController {
   @Get('reports/sku-profit.csv') async skuProfitCsv(@CurrentUser() u: AuthUser, @Query('period') p: string, @Res() res: Response) { sendCsv(res, await this.pl.csv(u, u.organizationId!, p)); }
 
   /** Flipkart order-wise P&L (owner's method): months, the report, Excel, purchase cost per item, SKU → item. */
+  /** "Send reports to your CA": last month's CA files for Flipkart or Amazon, one-click zip. */
+  @Get('reports/ca-files') caFiles(@CurrentUser() u: AuthUser, @Query() q: Record<string, string>) { return this.ca.list(u, u.organizationId!, q); }
+  @Get('reports/ca-files.zip') async caZip(@CurrentUser() u: AuthUser, @Query() q: Record<string, string>, @Res() res: Response) { sendZip(res, await this.ca.zip(u, u.organizationId!, q)); }
   @Get('reports/orders-pl/range') oplRange(@CurrentUser() u: AuthUser, @Query() q: Record<string, string>) { return this.opl.range(u, u.organizationId!, q); }
   @Get('reports/orders-pl/range.xlsx') async oplRangeXlsx(@CurrentUser() u: AuthUser, @Query() q: Record<string, string>, @Res() res: Response) { sendXlsx(res, await this.opl.rangeXlsx(u, u.organizationId!, q)); }
   @Get('reports/orders-pl/months') oplMonths(@CurrentUser() u: AuthUser) { return this.opl.months(u, u.organizationId!); }

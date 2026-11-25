@@ -7,7 +7,7 @@ export type EventType =
   | 'request.created' | 'request.status_changed' | 'task.status_changed' | 'approval.requested' | 'approval.decided'
   | 'subscription.activated' | 'payment.failed' | 'chat.message' | 'report.published' | 'report.preparing' | 'subscription.renewal_reminder' | 'subscription.grace_period' | 'subscription.past_due'
   | 'subscription.cancel_scheduled' | 'subscription.expired' | 'ticket.created' | 'ticket.status_changed' | 'ticket.reply' | 'listing.status_changed' | 'mapping.updated'
-  | 'labels.ready' | 'stock.alert' | 'thank_you.review' | 'thank_you.decided' | 'marketplace.status_changed' | 'announcement' | 'account.suspended' | 'manager.pending';
+  | 'labels.ready' | 'stock.alert' | 'thank_you.review' | 'thank_you.decided' | 'marketplace.status_changed' | 'announcement' | 'account.suspended' | 'manager.pending' | 'ca.files_ready';
 
 /** Events addressed to one person by email (no organization), e.g. password reset links. */
 export interface DirectEvent { type: 'auth.password_reset' | 'auth.verify_email' | 'auth.password_changed' | 'auth.login_code' | 'auth.signup_code'; to: string; name: string; title: string; body: string; link?: string }
@@ -18,6 +18,8 @@ export interface PlatformEvent {
   title: string;
   body: string;
   data?: Record<string, unknown>;
+  /** In-app link, e.g. a one-click download. */
+  link?: string;
   /** false = email / webhook only, no in-app notification (the client already sees it in chat or Listings & Mapping). */
   inApp?: boolean;
 }
@@ -46,7 +48,7 @@ export class DispatcherService {
     if (e.inApp === false || IN_APP_HIDDEN_TYPES.includes(e.type)) return { inApp: 0, webhook: await this.sendWebhook(e) };
     const users = await this.db.user.findMany({ where: { organizationId: e.organizationId, isActive: true }, select: { id: true } });
     await this.db.notification.createMany({
-      data: users.map((u) => ({ organizationId: e.organizationId, userId: u.id, type: e.type, title: e.title, body: e.body })),
+      data: users.map((u) => ({ organizationId: e.organizationId, userId: u.id, type: e.type, title: e.title, body: e.body, link: e.link ?? null })),
     });
     return { inApp: users.length, webhook: await this.sendWebhook(e) };
   }

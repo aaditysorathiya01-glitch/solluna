@@ -646,10 +646,11 @@ test('client: onboarding checklist, marketplace details (no passwords), product 
   const cycleRow = (await c.locator('[aria-label="Monthly report schedule"] [data-testid^="cycle-"]').first().innerText()).replace(/\s+/g, ' ');
   assert.ok(cycleRow.includes('Month in progress'), cycleRow);
   assert.match(cycleRow, /on 5 .* Your report: by 7 /);
+  // Send reports to your CA (owner, 25 Nov 2026): pick a marketplace → last month's files → one-click download.
   await c.click('button:has-text("Request CA pack")');
-  await c.fill('#caEmail', 'ca@firm.test');
-  await c.click('button:has-text("Send request")');
-  await c.getByText('Request sent. Your manager will prepare the', { exact: false }).waitFor();
+  await c.getByRole('tablist', { name: 'Marketplace for CA files' }).getByRole('tab', { name: 'Flipkart' }).click();
+  await c.getByTestId('ca-files').getByText('GSTR return report').waitFor();
+  await c.getByText('Need the files for an older month? Tell your manager', { exact: false }).waitFor();
 
   await accountMenu(c, 'Settings');
   await c.click('button:has-text("Send verification email")');
