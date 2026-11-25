@@ -1337,3 +1337,23 @@ model SkuItem {
 
   @@unique([organizationId, sku])
 }
+
+/// Portal bot: the month's Flipkart report files (owner, 25 Nov 2026). Requested in Reports Centre on/after the 25th, checked
+/// after 2, 10, 30 minutes and then every 30 minutes, downloaded when generated, then the order-wise P&L is built (draft).
+model ReportFetch {
+  id             String    @id @default(cuid())
+  organizationId String
+  marketplace    String    @default("FLIPKART")
+  period         String // YYYY-MM (the month reported)
+  status         String    @default("REQUEST") // REQUEST | WAITING | DONE | FAILED
+  files          Json // [{ kind, from, to, requestedAt?, documentId? }]
+  checks         Int       @default(0)
+  nextAt         DateTime  @default(now())
+  error          String?
+  ordersPlId     String?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  @@unique([organizationId, marketplace, period])
+  @@index([status, nextAt])
+}

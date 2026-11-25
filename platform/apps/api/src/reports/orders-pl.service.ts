@@ -68,6 +68,14 @@ export class OrdersPlService implements OnModuleInit {
     return { id: row.id, status: row.status };
   }
 
+  /** Portal bot: the files it downloaded → build the month (draft; the team reviews and publishes). */
+  async startSystem(orgId: string, period: string, documentIds: string[]) {
+    const row = await this.db.ordersPl.create({ data: { organizationId: orgId, periodMonth: periodDate(period), documentIds, startedById: 'portal-bot' } });
+    await this.audit.log({ action: 'report.orders_pl_import', entity: 'OrdersPl', entityId: row.id, organizationId: orgId, after: { period, files: documentIds.length, by: 'portal-bot' } });
+    setImmediate(() => this.tick().catch((e) => this.log.error(e)));
+    return row.id;
+  }
+
   async tick() {
     if (this.busy) return;
     this.busy = true;

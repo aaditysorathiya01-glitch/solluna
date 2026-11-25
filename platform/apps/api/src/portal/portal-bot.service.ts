@@ -43,6 +43,7 @@ const Step = z.union([
   z.object({ hover: z.string().min(1).max(300) }),
   z.object({ fields: z.literal(true) }),
   z.object({ deepFields: z.literal(true) }),
+  z.object({ download: z.string().min(1).max(300) }),
   z.object({ scroll: z.number().int().min(-20000).max(20000) }),
   z.object({ type: z.string().min(1).max(300), value: z.string().max(300) }),
   // OTP first: a union picks the first matching shape, and the plain fill would swallow it.
@@ -157,6 +158,25 @@ export class PortalBotService {
             }
             return rows.join('\n');
           });
+          else if ('download' in s) {
+            // Learning how Reports Centre hands out a file: the download event, and every response seen meanwhile.
+            const seen: string[] = [];
+            const onResp = (r: import('playwright-core').Response) => { const ct = r.headers()['content-type'] ?? ''; if (!/image|font|css|javascript/.test(ct)) seen.push(`${r.status()} ${ct.slice(0, 60)} ${r.headers()['content-disposition'] ?? ''} ${r.url().slice(0, 160)}`); };
+            page.on('response', onResp);
+            const dl = page.waitForEvent('download', { timeout: 25_000 }).catch((e) => e as Error);
+            await this.target(page, s.download).click({ timeout: 15_000 });
+            const got = await dl;
+            await page.waitForTimeout(3000);
+            page.off('response', onResp);
+            let info = 'no download event';
+            if (!(got instanceof Error)) {
+              const stream = await got.createReadStream().catch(() => null);
+              let size = -1;
+              if (stream) { size = 0; for await (const c of stream) size += (c as Buffer).length; }
+              info = `download: ${got.suggestedFilename()} url=${got.url().slice(0, 200)} size=${size}`;
+            } else info += `: ${got.message.slice(0, 120)}`;
+            inspected = [info, ...seen.slice(-25)].join('\n');
+          }
           else if ('scroll' in s) await page.mouse.wheel(0, s.scroll);
           else if ('deepFields' in s) inspected = await page.evaluate(() => {
             // Amazon's Katal components (kat-input, kat-radiobutton…) live in shadow roots: walk them all.
