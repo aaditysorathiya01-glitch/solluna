@@ -149,14 +149,29 @@ export class FlipkartReportsService implements OnModuleInit {
     await page.getByText('Select Date Range').first().waitFor({ timeout: 30_000 });
     await page.waitForTimeout(1500);
     await this.bot.dismissPopups(page);
-    await page.locator('label[for="dateRange"] + div .form-control, label[for="dateRange"] ~ div .form-control').first().click({ timeout: 10_000 });
-    await page.locator('button:has-text("custom")').first().click({ timeout: 10_000 });
-    await page.waitForTimeout(800);
-    for (const day of [f.from, f.to]) await this.pickDay(page, day);
+    const field = page.locator('label[for="dateRange"] ~ div .form-control').first();
     const a = ymd(f.from), b = ymd(f.to);
     const want = [`${SHORT[a.m - 1]} ${String(a.d).padStart(2, '0')}, ${a.y}`, `${SHORT[b.m - 1]} ${String(b.d).padStart(2, '0')}, ${b.y}`];
-    const shown = (await page.locator('label[for="dateRange"] ~ div .form-control').first().innerText().catch(() => '')).replace(/\s+/g, ' ');
-    if (!want.every((w) => shown.includes(w))) throw new Error(`Date range not set (wanted ${want.join(' – ')}, Flipkart shows "${shown}")`);
+    const shown = async () => (await field.innerText().catch(() => '')).replace(/\s+/g, ' ');
+    // Flipkart pre-fills last month; when that is the range wanted, nothing to pick.
+    const pre = await shown();
+    if (!want.every((w) => pre.includes(w))) {
+      await field.click({ timeout: 10_000 });
+      await page.waitForTimeout(800);
+      const custom = page.locator('button:has-text("custom")').first();
+      const wholeMonth = f.from.slice(0, 7) === f.to.slice(0, 7) && a.d === 1 && b.d === new Date(Date.UTC(b.y, b.m, 0)).getUTCDate();
+      if (await custom.isVisible().catch(() => false)) {
+        await custom.click({ timeout: 10_000 });
+        await page.waitForTimeout(800);
+        for (const day of [f.from, f.to]) await this.pickDay(page, day);
+      } else if (wholeMonth) {
+        // Monthly tiles only (some tax reports): year header, then the month tile.
+        await page.locator(`text=/^${SHORT[a.m - 1]}$/`).first().click({ timeout: 10_000 });
+        await page.waitForTimeout(600);
+      } else throw new Error('Flipkart offers no custom dates for this report');
+    }
+    const now = await shown();
+    if (!want.every((w) => now.includes(w))) throw new Error(`Date range not set (wanted ${want.join(' – ')}, Flipkart shows "${now}")`);
     await page.getByRole('button', { name: /^submit$/i }).first().click({ timeout: 10_000 });
     await page.waitForTimeout(4000);
   }
