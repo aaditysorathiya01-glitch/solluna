@@ -32,7 +32,6 @@ const CYCLE_TEXT: Record<Cycle['status'], (c: Cycle) => string> = {
 
 export function ClientReporting() {
   const [reports, setReports] = useState<any[]>([]);
-  const [period, setPeriod] = useState(lastMonth());
   const [cycle, setCycle] = useState<Cycle[]>([]);
   useEffect(() => { api<any[]>('/reports').then(setReports).catch(() => {}); api<Cycle[]>('/reports/schedule').then(setCycle).catch(() => {}); }, []);
   return (
@@ -64,12 +63,7 @@ export function ClientReporting() {
           {!reports.length && <p className="p-4 text-sm text-ink-3">Your monthly reports will appear here once your manager publishes them.</p>}
         </div>
       </section>
-      <div className="flex flex-wrap items-center gap-3">
-        <label className="label mb-0" htmlFor="period">Month</label>
-        <input id="period" type="month" className="input w-auto" value={period} max={new Date().toISOString().slice(0, 7)} onChange={(e) => setPeriod(e.target.value)} />
-      </div>
-      <Expenses period={period} />
-      <CaPack period={period} />
+      {/* Owner, 25 Nov 2026: Operating expenses and the CA pack are not shown to the client here (the CA flow comes later). */}
     </div>
   );
 }

@@ -28,6 +28,8 @@ export class ClientReportsController {
   @Get('reports/sku-profit.csv') async skuProfitCsv(@CurrentUser() u: AuthUser, @Query('period') p: string, @Res() res: Response) { sendCsv(res, await this.pl.csv(u, u.organizationId!, p)); }
 
   /** Flipkart order-wise P&L (owner's method): months, the report, Excel, purchase cost per item, SKU → item. */
+  @Get('reports/orders-pl/range') oplRange(@CurrentUser() u: AuthUser, @Query() q: Record<string, string>) { return this.opl.range(u, u.organizationId!, q); }
+  @Get('reports/orders-pl/range.xlsx') async oplRangeXlsx(@CurrentUser() u: AuthUser, @Query() q: Record<string, string>, @Res() res: Response) { sendXlsx(res, await this.opl.rangeXlsx(u, u.organizationId!, q)); }
   @Get('reports/orders-pl/months') oplMonths(@CurrentUser() u: AuthUser) { return this.opl.months(u, u.organizationId!); }
   @Get('reports/orders-pl') oplView(@CurrentUser() u: AuthUser, @Query('period') p: string) { return this.opl.view(u, u.organizationId!, p); }
   @Get('reports/orders-pl.xlsx') async oplXlsx(@CurrentUser() u: AuthUser, @Query('period') p: string, @Res() res: Response) { sendXlsx(res, await this.opl.xlsx(u, u.organizationId!, p)); }

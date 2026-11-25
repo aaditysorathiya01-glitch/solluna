@@ -12,7 +12,7 @@ interface Grp { orders: number; units: number }
 interface ItemRow { item: string; grossUnits: number; returnedUnits: number; netUnits: number; purchase: number; sale: number; profit: number; unitCost: number | null; costConfirmed: boolean | null }
 interface SkuRow { sku: string; item: string; packQty: number; grossQty: number; grossUnits: number; returnedUnits: number; netUnits: number; purchase: number; sale: number; profit: number; orders: number; note: string; mapped: boolean }
 interface View {
-  id: string; period: string; label: string; status: string; error: string | null; published: boolean;
+  id: string; period: string; label: string; status: string; error: string | null; published: boolean; mp?: Mp; marketplaces?: string[];
   meta?: { settlements: { from: string | null; to: string | null; rows: number }[]; settledThrough: string | null; recommendedThrough: string; complete: boolean } | null;
   summary?: {
     funnel: Record<'overall' | 'delivered' | 'notReturned' | 'returned' | 'returnRequested' | 'undelivered' | 'courierReturn' | 'courierReceived' | 'courierInTransit' | 'cancelled' | 'rejected' | 'readyToShip', Grp>;
@@ -33,19 +33,72 @@ export interface OrdersPlPaths { view: string; xlsx: string; cost: string; sku: 
 export const clientPaths = (period: string): OrdersPlPaths => ({ view: `/reports/orders-pl?period=${period}`, xlsx: `/api/reports/orders-pl.xlsx?period=${period}`, cost: `/reports/orders-pl/cost?period=${period}`, sku: '/reports/orders-pl/sku-item' });
 export const opsPaths = (orgId: string, period: string): OrdersPlPaths => ({ view: `/ops/reports/${orgId}/${period}/orders-pl`, xlsx: `/api/ops/reports/${orgId}/${period}/orders-pl.xlsx`, cost: `/ops/reports/${orgId}/${period}/orders-pl/cost`, sku: `/ops/reports/${orgId}/orders-pl/sku-item` });
 
-/** Client Reports: month picker + the dashboard. */
+type Mp = 'FLIPKART' | 'AMAZON' | 'ALL';
+const MP_TABS: [Mp, string][] = [['FLIPKART', 'Flipkart'], ['AMAZON', 'Amazon'], ['ALL', 'Both']];
+const iso = (d: Date) => d.toISOString().slice(0, 10);
+const monthRange = (p: string) => { const y = Number(p.slice(0, 4)), m = Number(p.slice(5, 7)); return { from: `${p}-01`, to: iso(new Date(Date.UTC(y, m, 0))) }; };
+const shiftMonth = (p: string, n: number) => { const d = new Date(Date.UTC(Number(p.slice(0, 4)), Number(p.slice(5, 7)) - 1 + n, 1)); return d.toISOString().slice(0, 7); };
+/** Indian financial year (April–March) that contains month p. */
+const fyOf = (p: string) => { const y = Number(p.slice(0, 4)), m = Number(p.slice(5, 7)); const start = m >= 4 ? y : y - 1; return { from: `${start}-04-01`, to: `${start + 1}-03-31`, label: `FY ${start}-${String(start + 1).slice(2)}` }; };
+
+/** Client Reports: marketplace (Flipkart / Amazon / both) and any period (owner, 25 Nov 2026). */
 export function ClientFlipkartProfit() {
   const [months, setMonths] = useState<{ period: string; label: string }[] | null>(null);
-  const [period, setPeriod] = useState('');
-  useEffect(() => { api<{ period: string; label: string }[]>('/reports/orders-pl/months').then((m) => { setMonths(m); if (m[0]) setPeriod(m[0].period); }).catch(() => setMonths([])); }, []);
+  const [mp, setMp] = useState<Mp>('FLIPKART');
+  const [preset, setPreset] = useState('');
+  const [custom, setCustom] = useState({ from: '', to: '' });
+  useEffect(() => { api<{ period: string; label: string }[]>('/reports/orders-pl/months').then((m) => { setMonths(m); if (m[0]) { setPreset(`m:${m[0].period}`); setCustom(monthRange(m[0].period)); } }).catch(() => setMonths([])); }, []);
+  const range = useMemo(() => {
+    if (!months?.length) return null;
+    const latest = months[0].period;
+    if (preset.startsWith('m:')) return monthRange(preset.slice(2));
+    if (preset === 'last3') return { from: monthRange(shiftMonth(latest, -2)).from, to: monthRange(latest).to };
+    if (preset === 'last6') return { from: monthRange(shiftMonth(latest, -5)).from, to: monthRange(latest).to };
+    if (preset === 'fy') { const f = fyOf(latest); return { from: f.from, to: f.to }; }
+    if (preset === 'custom' && custom.from && custom.to) return custom;
+    return null;
+  }, [months, preset, custom]);
   if (!months) return null;
   if (!months.length) return (
-    <section className="card p-6" aria-label="Flipkart profit">
-      <h2 className="font-display text-2xl">Flipkart profit</h2>
-      <p className="mt-1 text-sm text-ink-3">Your order-wise Flipkart profit appears here once your manager publishes the month (after Flipkart settles the month&rsquo;s orders, around the 20th of the next month).</p>
+    <section className="card p-6" aria-label="Profit report">
+      <h2 className="font-display text-2xl">Profit report</h2>
+      <p className="mt-1 text-sm text-ink-3">Your order-wise profit appears here once your manager publishes the month (after the marketplace settles the month&rsquo;s orders, around the 20th of the next month).</p>
     </section>
   );
-  return <OrdersPlDashboard paths={clientPaths(period)} months={months} period={period} onPeriod={setPeriod} />;
+  const q = range ? `from=${range.from}&to=${range.to}&mp=${mp}` : '';
+  return (
+    <div className="space-y-4">
+      <div className="card flex flex-wrap items-end gap-4 p-4" aria-label="Report filters">
+        <div>
+          <span className="label">Marketplace</span>
+          <div className="inline-flex rounded-xl border border-ink/15 bg-ivory p-1" role="tablist" aria-label="Marketplace">
+            {MP_TABS.map(([k, l]) => (
+              <button key={k} role="tab" aria-selected={mp === k} onClick={() => setMp(k)} className={`rounded-lg px-4 py-1.5 text-sm font-semibold transition ${mp === k ? 'bg-ink text-ivory shadow' : 'text-ink-2 hover:text-ink'}`}>{l}</button>
+            ))}
+          </div>
+        </div>
+        <div>
+          <label className="label" htmlFor="pl-period">Period</label>
+          <select id="pl-period" className="input w-auto py-2" value={preset} onChange={(e) => setPreset(e.target.value)}>
+            <optgroup label="Month">{months.map((m) => <option key={m.period} value={`m:${m.period}`}>{m.label}</option>)}</optgroup>
+            <optgroup label="Longer">
+              <option value="last3">Last 3 months</option>
+              <option value="last6">Last 6 months</option>
+              <option value="fy">{fyOf(months[0].period).label} (Apr–Mar)</option>
+              <option value="custom">Custom dates…</option>
+            </optgroup>
+          </select>
+        </div>
+        {preset === 'custom' && (
+          <div className="flex items-end gap-2">
+            <div><label className="label" htmlFor="pl-from">From</label><input id="pl-from" type="date" className="input w-auto py-2" value={custom.from} max={custom.to || undefined} onChange={(e) => setCustom((c) => ({ ...c, from: e.target.value }))} /></div>
+            <div><label className="label" htmlFor="pl-to">To</label><input id="pl-to" type="date" className="input w-auto py-2" value={custom.to} min={custom.from || undefined} onChange={(e) => setCustom((c) => ({ ...c, to: e.target.value }))} /></div>
+          </div>
+        )}
+      </div>
+      {range && <OrdersPlDashboard key={q} paths={{ view: `/reports/orders-pl/range?${q}`, xlsx: `/api/reports/orders-pl/range.xlsx?${q}`, cost: `/reports/orders-pl/cost?period=${range.to.slice(0, 7)}`, sku: '/reports/orders-pl/sku-item' }} period={range.to.slice(0, 7)} />}
+    </div>
+  );
 }
 
 export function OrdersPlDashboard({ paths, months, period, onPeriod, staffActions, reloadKey }: {
@@ -59,6 +112,12 @@ export function OrdersPlDashboard({ paths, months, period, onPeriod, staffAction
 
   if (v === undefined) return <section className="card p-6 text-sm text-ink-3">Loading Flipkart profit…</section>;
   if (!v) return err ? <p className="text-sm text-red-700">{err}</p> : null;
+  if (v.status === 'EMPTY') return (
+    <section className="card p-6" aria-label="Profit report" data-testid="orders-pl-empty">
+      <h2 className="font-display text-2xl">{v.mp === 'AMAZON' ? 'Amazon' : v.mp === 'ALL' ? 'Amazon + Flipkart' : 'Flipkart'} · {v.label}</h2>
+      <p className="mt-1 text-sm text-ink-3">{v.mp === 'AMAZON' && !v.marketplaces?.includes('AMAZON') ? 'Your Amazon profit report is being set up. Your manager will publish it here once Amazon\'s order and settlement reports are connected.' : 'No published report covers this period yet. Choose another period.'}</p>
+    </section>
+  );
   if (v.status !== 'DONE' || !v.summary) return (
     <section className="card p-6 text-sm" aria-label="Flipkart profit">
       {v.status === 'FAILED' ? <p className="text-red-700">Could not read the files: {v.error}</p> : <p className="text-ink-3">Reading the Flipkart files for {v.label}…</p>}
@@ -73,10 +132,10 @@ export function OrdersPlDashboard({ paths, months, period, onPeriod, staffAction
       <div className="overflow-hidden rounded-2xl bg-ink text-ivory">
         <div className="flex flex-wrap items-end justify-between gap-4 p-6">
           <div>
-            <p className="text-xs uppercase tracking-[0.2em] text-sun-2">Flipkart · orders of the month</p>
+            <p className="text-xs uppercase tracking-[0.2em] text-sun-2">{v.mp === 'ALL' ? (v.marketplaces?.includes('AMAZON') ? 'Amazon + Flipkart' : 'Amazon + Flipkart · Amazon not set up yet, Flipkart shown') : v.mp === 'AMAZON' ? 'Amazon' : 'Flipkart'} · orders of the period</p>
             <h2 className="font-display text-3xl">{v.label} profit</h2>
             <p className="mt-1 text-xs text-ivory/70">
-              Orders dated in {v.label} · Flipkart bank settlement {v.meta?.settlements.map((x) => `${dmy(x.from)}–${dmy(x.to)}`).join(' + ')} · amounts incl. GST
+              Orders dated {v.label} · bank settlement {v.meta?.settlements.map((x) => `${dmy(x.from)}–${dmy(x.to)}`).join(' + ')} · amounts incl. GST
             </p>
           </div>
           <div className="flex flex-wrap items-center gap-2">

@@ -22,6 +22,19 @@ const nextMonth20 = (p: string) => { const d = new Date(Date.UTC(Number(p.slice(
 
 const StartSchema = z.object({ documentIds: z.array(z.string().min(5)).min(2).max(6) });
 const CostSchema = z.object({ item: z.string().trim().min(1).max(120), cost: z.number().min(0).max(10_000_000) });
+const DATE = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Use YYYY-MM-DD');
+const RangeSchema = z.object({ from: DATE, to: DATE, mp: z.enum(['FLIPKART', 'AMAZON', 'ALL']).default('FLIPKART') });
+const MP_LABEL = { FLIPKART: 'Flipkart', AMAZON: 'Amazon', ALL: 'Amazon + Flipkart' } as const;
+const SHORT = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+const lastDay = (p: string) => new Date(Date.UTC(Number(p.slice(0, 4)), Number(p.slice(5, 7)), 0)).getUTCDate();
+const dayLabel = (d: string) => `${Number(d.slice(8, 10))} ${SHORT[Number(d.slice(5, 7)) - 1]} ${d.slice(0, 4)}`;
+/** "October 2026" for a whole month, "October – December 2026" for whole months, else "1 Oct 2026 – 15 Nov 2026". */
+function rangeLabel(from: string, to: string) {
+  const whole = from.endsWith('-01') && Number(to.slice(8, 10)) === lastDay(to.slice(0, 7));
+  if (whole && from.slice(0, 7) === to.slice(0, 7)) return monthName(from.slice(0, 7));
+  if (whole) return from.slice(0, 4) === to.slice(0, 4) ? `${MONTHS[Number(from.slice(5, 7)) - 1]} – ${monthName(to.slice(0, 7))}` : `${monthName(from.slice(0, 7))} – ${monthName(to.slice(0, 7))}`;
+  return `${dayLabel(from)} – ${dayLabel(to)}`;
+}
 const MapSchema = z.object({ sku: z.string().trim().min(1).max(200), item: z.string().trim().min(1).max(120), packQty: z.number().int().min(1).max(1000) });
 
 /**
@@ -141,6 +154,50 @@ export class OrdersPlService implements OnModuleInit {
     return { ...base, summary: v.summary, items: v.items, skus: v.skus };
   }
 
+  /**
+   * Client view for any period and marketplace (owner, 25 Nov 2026): published months that overlap the period, each with
+   * the purchase costs of its own month, order lines filtered to the dates asked. Amazon has no order report yet.
+   */
+  async range(user: AuthUser, orgId: string, q: unknown) {
+    await this.access.assertOrg(user, orgId);
+    const d = parse(RangeSchema, q);
+    if (d.from > d.to) throw new BadRequestException('"From" date is after "To" date');
+    if ((Date.parse(d.to) - Date.parse(d.from)) / 86_400_000 > 400) throw new BadRequestException('Choose a period of up to 13 months');
+    const label = rangeLabel(d.from, d.to);
+    const v = await this.collect(user, orgId, d.from, d.to, d.mp);
+    const available = await this.db.ordersPl.findMany({ where: { organizationId: orgId, status: 'DONE', ...(user.type === 'CUSTOMER' ? { publishedAt: { not: null } } : {}) }, select: { marketplace: true }, distinct: ['marketplace'] });
+    const base = { id: `${d.mp}:${d.from}:${d.to}`, period: d.to.slice(0, 7), from: d.from, to: d.to, mp: d.mp, label, published: true, error: null, costPeriod: d.to.slice(0, 7), marketplaces: available.map((a) => a.marketplace) };
+    if (!v.rows.length || !v.lines.length) return { ...base, status: 'EMPTY' as const, meta: null };
+    return { ...base, status: 'DONE' as const, meta: v.meta, summary: v.summary, items: v.items, skus: v.skus };
+  }
+
+  private async collect(user: AuthUser, orgId: string, from: string, to: string, mp: 'FLIPKART' | 'AMAZON' | 'ALL') {
+    const rows = await this.db.ordersPl.findMany({
+      where: { organizationId: orgId, status: 'DONE', periodMonth: { gte: periodDate(from.slice(0, 7)), lte: periodDate(to.slice(0, 7)) }, ...(mp === 'ALL' ? {} : { marketplace: mp }), ...(user.type === 'CUSTOMER' ? { publishedAt: { not: null } } : {}) },
+      orderBy: { createdAt: 'desc' },
+    });
+    const latest = new Map<string, typeof rows[number]>();
+    for (const r of rows) { const k = `${r.marketplace}:${r.periodMonth.toISOString()}`; if (!latest.has(k)) latest.set(k, r); }
+    const map = await this.mapping(orgId);
+    const lines: PlLine[] = [];
+    const settlements: { from: string | null; to: string | null; rows: number }[] = [];
+    let complete = true;
+    let lastCosts: Map<string, { cost: number; confirmed: boolean }> | null = null;
+    for (const r of [...latest.values()].sort((a, b) => a.periodMonth.getTime() - b.periodMonth.getTime())) {
+      const costs = await this.costs(orgId, r.periodMonth);
+      lastCosts = costs;
+      const stored = (r.lines as unknown as StoredLine[]).filter((x) => x.d >= from && x.d <= to);
+      lines.push(...buildLines(stored, map.get, (item) => costs.get(itemKey(item))?.cost ?? null));
+      const m = r.meta as { settlements?: typeof settlements; complete?: boolean } | null;
+      settlements.push(...(m?.settlements ?? []));
+      if (m && m.complete === false) complete = false;
+    }
+    const items = byItem(lines).map((i) => ({ ...i, costConfirmed: lastCosts?.get(itemKey(i.item))?.confirmed ?? null }));
+    const skus = bySku(lines).map((x) => ({ ...x, mapped: map.saved.has(skuKey(x.sku)) }));
+    const uniq = [...new Map(settlements.map((x) => [`${x.from}-${x.to}`, x])).values()].sort((a, b) => (a.from ?? '').localeCompare(b.from ?? ''));
+    return { rows: [...latest.values()], lines, summary: summarize(lines), items, skus, meta: { settlements: uniq, complete, settledThrough: uniq.at(-1)?.to ?? null, recommendedThrough: nextMonth20(to.slice(0, 7)) } };
+  }
+
   async publish(user: AuthUser, orgId: string, period: string) {
     if (user.type !== 'STAFF') throw new ForbiddenException();
     const row = await this.row(user, orgId, period);
@@ -171,15 +228,28 @@ export class OrdersPlService implements OnModuleInit {
     return { sku: row.sku, item: row.item, packQty: row.packQty };
   }
 
-  /** Excel download: summary, items, SKUs, every order line, purchase cost list. */
+  /** Excel download (one month, staff or client). */
   async xlsx(user: AuthUser, orgId: string, period: string) {
     const row = await this.row(user, orgId, period);
     if (!row || row.status !== 'DONE' || !row.lines) throw new NotFoundException('No Flipkart profit report for this month');
     const v = await this.compute(orgId, row.periodMonth, row.lines as unknown as StoredLine[]);
+    return { fileName: `SOLLUNA-Flipkart-${period}-orders-PL.xlsx`, buf: this.workbook(`Flipkart | ${monthName(period)} orders`, `Orders dated in ${monthName(period)}`, v) };
+  }
+
+  /** Excel download of the period / marketplace the client picked. */
+  async rangeXlsx(user: AuthUser, orgId: string, q: unknown) {
+    const r = await this.range(user, orgId, q);
+    if (r.status !== 'DONE') throw new NotFoundException('No profit report for this period');
+    const v = await this.collect(user, orgId, r.from, r.to, r.mp);
+    return { fileName: `SOLLUNA-${r.mp === 'ALL' ? 'Amazon-Flipkart' : r.mp === 'AMAZON' ? 'Amazon' : 'Flipkart'}-${r.from}-to-${r.to}-PL.xlsx`, buf: this.workbook(`${MP_LABEL[r.mp]} | ${r.label}`, `Orders dated ${r.label}`, v) };
+  }
+
+  /** Summary, items, SKUs, every order line, purchase cost list. */
+  private workbook(title: string, scope: string, v: { lines: PlLine[]; summary: ReturnType<typeof summarize>; items: ReturnType<typeof byItem>; skus: ReturnType<typeof bySku> }) {
     const s = v.summary; const f = s.funnel; const pct = (a: number, b: number) => (b ? Math.round((a / b) * 1000) / 10 : 0);
     const summary = [
-      [`SOLLUNA – Flipkart | ${monthName(period)} orders`, null, null, null],
-      [`Orders dated in ${monthName(period)}. Sources: Flipkart Orders report + Settlement reports. Amounts in ₹ including GST.`],
+      [`SOLLUNA – ${title}`, null, null, null],
+      [`${scope}. Sources: marketplace Orders report + Settlement reports. Amounts in ₹ including GST.`],
       [],
       ['ORDERS', 'Orders', 'Units', '% of orders'],
       ['All orders', f.overall.orders, f.overall.units, 100],
@@ -214,13 +284,12 @@ export class OrdersPlService implements OnModuleInit {
     const L = (l: PlLine) => [l.orderItemId, l.orderId, l.orderDate, l.status, l.delivered ? 'Y' : 'N', l.returnType ?? '', l.sku, l.item, l.packQty, l.qty, l.itemUnits, l.settled ? 'Y' : 'N', l.grossUnits, l.returnedUnits, l.netUnits, l.sale, l.offer, l.myShare, l.addons, l.spf, l.fee, l.taxes, l.refund, l.bank, l.unitCost, l.purchase, l.profit, l.bucket];
     const orders = [['Order item ID', 'Order ID', 'Order date', 'Status', 'Delivered', 'Return type', 'SKU', 'Item', 'Pack qty', 'Qty', 'Item units', 'Settled', 'Gross units', 'Returned / cancelled', 'Net units', 'Sale', 'Offer', 'My share (info)', 'Customer add-ons', 'SPF', 'Marketplace fee', 'Taxes', 'Refund', 'Bank settlement', 'Unit cost', 'Purchase', 'Profit', 'Bucket'], ...v.lines.map(L)];
     const costList = [['Item', 'Cost per single unit (₹)'], ...v.items.map((i) => [i.item, i.unitCost])];
-    const buf = writeXlsx([
-      { name: `${monthName(period)} summary`, rows: summary, widths: [46, 16, 12, 12], boldRows: [0, 3, 16, 29], moneyCols: [1] },
+    return writeXlsx([
+      { name: 'Summary', rows: summary, widths: [46, 16, 12, 12], boldRows: [0, 3, 16, 29], moneyCols: [1] },
       { name: 'Item-wise', rows: items, widths: [30, 12, 18, 10, 13, 16, 26, 14], boldRows: [0, items.length - 1], moneyCols: [4, 5, 6, 7] },
       { name: 'SKU-wise', rows: skus, widths: [34, 28, 9, 16, 16, 18, 10, 16, 26, 14, 30], moneyCols: [7, 8, 9] },
       { name: 'Orders', rows: orders, widths: [22, 24, 12, 18, 9, 16, 30, 26, 8, 6, 10, 8, 11, 18, 10, 10, 9, 14, 15, 8, 14, 10, 10, 15, 10, 11, 11, 26], moneyCols: [15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26] },
       { name: 'Purchase cost', rows: costList, widths: [32, 22], moneyCols: [1] },
     ]);
-    return { fileName: `SOLLUNA-Flipkart-${period}-orders-PL.xlsx`, buf };
   }
 }

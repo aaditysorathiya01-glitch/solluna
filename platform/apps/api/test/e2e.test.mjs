@@ -1907,8 +1907,18 @@ test('Flipkart order-wise P&L: Orders + Settlement reports → background build,
   const x = await fetch(`${base}/reports/orders-pl.xlsx?period=2026-10`, { headers: { authorization: `Bearer ${c}` } });
   assert.equal(x.status, 200); assert.match(x.headers.get('content-type'), /spreadsheetml/);
   const bytes = Buffer.from(await x.arrayBuffer()); assert.equal(bytes.subarray(0, 2).toString(), 'PK', 'a real .xlsx (zip)');
+  // Any period and marketplace (owner, 25 Nov 2026).
+  const half = ok(await call('GET', '/reports/orders-pl/range?from=2026-10-01&to=2026-10-15&mp=FLIPKART', { token: c }));
+  assert.equal(half.status, 'DONE'); assert.equal(half.summary.funnel.overall.orders, 4, 'orders of 1–15 Oct only'); assert.equal(half.label, '1 Oct 2026 – 15 Oct 2026');
+  const month = ok(await call('GET', '/reports/orders-pl/range?from=2026-10-01&to=2026-10-31&mp=ALL', { token: c }));
+  assert.equal(month.label, 'October 2026'); assert.equal(month.summary.profit.purchase, 430);
+  assert.equal(ok(await call('GET', '/reports/orders-pl/range?from=2026-10-01&to=2026-10-31&mp=AMAZON', { token: c })).status, 'EMPTY', 'no Amazon report yet');
+  assert.equal((await call('GET', '/reports/orders-pl/range?from=2026-10-31&to=2026-10-01', { token: c })).status, 400);
+  const rx = await fetch(`${base}/reports/orders-pl/range.xlsx?from=2026-10-01&to=2026-10-15&mp=FLIPKART`, { headers: { authorization: `Bearer ${c}` } });
+  assert.equal(rx.status, 200); assert.match(rx.headers.get('content-disposition'), /Flipkart-2026-10-01-to-2026-10-15/);
   const other = await registerCustomer('Ira'); await pay(other, 'RESELLER');
   assert.ok(!ok(await call('GET', '/reports/orders-pl?period=2026-10', { token: other })), 'isolated per client');
+  assert.equal(ok(await call('GET', '/reports/orders-pl/range?from=2026-10-01&to=2026-10-31&mp=FLIPKART', { token: other })).status, 'EMPTY', 'range isolated per client');
 });
 
 test('Amazon SP-API: admin connection test uses LWA + marketplace participations; keys never returned', async () => {

@@ -416,17 +416,18 @@ test('monthly reporting: staff inputs → client costs & expenses → P&L publis
   const c = S.customer;
   await c.goto(`${webBase}/dashboard?tab=reports`);
   await c.getByRole('heading', { name: 'Reports', exact: true }).waitFor();
-  await c.fill('#period', '2026-10');
+  assert.equal(await c.getByRole('region', { name: 'CA documentation pack' }).count(), 0, 'CA pack not on the client Reports page (owner, 25 Nov 2026)');
+  assert.equal(await c.getByText('Operating expenses', { exact: false }).count(), 0, 'expenses not on the client Reports page');
   // SKU costs for this (older) report are saved through the API; the Reports page edits item costs in the Flipkart profit dashboard.
   for (const [sku, cost] of [['JR-01', 40000], ['JR-02', 30000]]) {
     const r = await c.request.post(`${webBase}/api/costs`, { data: { sku, costPaise: cost, includesGst: false, effectiveFrom: '2026-10-01' } });
     assert.ok(r.ok(), await r.text());
   }
-  await c.selectOption('#x-cat', 'RENT'); await c.fill('#x-desc', 'Warehouse rent'); await c.fill('#x-amt', '10000');
-  await c.click('form[aria-label="Add expense"] button:has-text("Add")');
-  await c.getByRole('cell', { name: /Warehouse rent/ }).waitFor();
-  await c.click('button:has-text("Confirm this list is complete")');
-  await c.getByText('Expenses confirmed as complete for this month.').waitFor();
+  // Expenses for this (older) report go through the API; the client Reports page no longer shows them.
+  for (const [path, data] of [['/api/expenses', { category: 'RENT', description: 'Warehouse rent', amountPaise: 1000000, period: '2026-10' }], ['/api/expenses/confirm', { period: '2026-10' }]]) {
+    const r = await c.request.post(`${webBase}${path}`, { data });
+    assert.ok(r.ok(), await r.text());
+  }
 
   // Staff: preview now verified → generate → publish.
   await st.fill('#rep-period', '2026-09'); await st.fill('#rep-period', '2026-10');
@@ -453,19 +454,6 @@ test('monthly reporting: staff inputs → client costs & expenses → P&L publis
   assert.equal(csv.status(), 200);
   assert.match(await csv.text(), /CONSOLIDATED,Operating result,24000\.00,VERIFIED/);
 
-  // CA pack: add the month's Amazon settlement.
-  await c.goto(`${webBase}/dashboard?tab=reports`);
-  await c.fill('#period', '2026-10');
-  const pack = c.getByRole('region', { name: 'CA documentation pack' });
-  await pack.getByRole('listitem').filter({ hasText: 'Amazon settlement report' }).waitFor(); // listed as still needed
-  await c.selectOption('#ca-kind', 'AMAZON_SETTLEMENT');
-  await c.setInputFiles('#ca-file', { name: 'amazon-settlement-oct.csv', mimeType: 'text/csv', buffer: Buffer.from('settlement_id,amount\nS1,70000\n') });
-  await c.click('form[aria-label="Add to CA pack"] button:has-text("Add")');
-  await c.getByText('Added to the CA pack.').waitFor();
-  await pack.getByRole('cell', { name: /amazon-settlement-oct\.csv/ }).waitFor();
-  assert.ok(await pack.getByRole('cell', { name: 'Received' }).first().isVisible());
-  assert.equal(await pack.getByRole('listitem').filter({ hasText: 'Amazon settlement report' }).count(), 0, 'no longer listed as missing');
-  assert.ok(await pack.getByText('Tax filing, audit and certification are not included', { exact: false }).isVisible());
 });
 
 test('public site: services, about, FAQ, legal pages render from the shared header; contact form reaches the admin inbox', async () => {
