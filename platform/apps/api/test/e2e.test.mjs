@@ -1916,6 +1916,10 @@ test('Flipkart order-wise P&L: Orders + Settlement reports → background build,
   assert.equal((await call('GET', '/reports/orders-pl/range?from=2026-10-31&to=2026-10-01', { token: c })).status, 400);
   const rx = await fetch(`${base}/reports/orders-pl/range.xlsx?from=2026-10-01&to=2026-10-15&mp=FLIPKART`, { headers: { authorization: `Bearer ${c}` } });
   assert.equal(rx.status, 200); assert.match(rx.headers.get('content-disposition'), /Flipkart-2026-10-01-to-2026-10-15/);
+  // Portal bot: a month's Flipkart files = Orders + Settled Transactions for the month + next month 1st–20th (owner, 25 Nov 2026).
+  assert.equal((await call('POST', '/admin/portal-bot/reports', { token: (await staff('OPERATIONS_MANAGER', S.admin)).token, body: { organizationId: org.id, period: '2026-10' } })).status, 403, 'super admin only');
+  const fetchRow = ok(await call('POST', '/admin/portal-bot/reports', { token: S.admin, body: { organizationId: org.id, period: '2026-10' } }));
+  assert.deepEqual(fetchRow.files.map((f) => `${f.kind} ${f.from}..${f.to}`), ['ORDERS 2026-10-01..2026-10-31', 'SETTLEMENT 2026-10-01..2026-10-31', 'SETTLEMENT 2026-11-01..2026-11-20']);
   const other = await registerCustomer('Ira'); await pay(other, 'RESELLER');
   assert.ok(!ok(await call('GET', '/reports/orders-pl?period=2026-10', { token: other })), 'isolated per client');
   assert.equal(ok(await call('GET', '/reports/orders-pl/range?from=2026-10-01&to=2026-10-31&mp=FLIPKART', { token: other })).status, 'EMPTY', 'range isolated per client');
