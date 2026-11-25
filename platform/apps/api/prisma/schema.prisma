@@ -1344,6 +1344,7 @@ model ReportFetch {
   id             String    @id @default(cuid())
   organizationId String
   marketplace    String    @default("FLIPKART")
+  purpose        String    @default("PL") // PL (Orders + Settled Transactions, from the 25th) | CA (GSTR, Sales, TDS, from the 5th)
   period         String // YYYY-MM (the month reported)
   status         String    @default("REQUEST") // REQUEST | WAITING | DONE | FAILED
   files          Json // [{ kind, from, to, requestedAt?, documentId? }]
@@ -1354,6 +1355,6 @@ model ReportFetch {
   createdAt      DateTime  @default(now())
   updatedAt      DateTime  @updatedAt
 
-  @@unique([organizationId, marketplace, period])
+  @@unique([organizationId, marketplace, purpose, period])
   @@index([status, nextAt])
 }

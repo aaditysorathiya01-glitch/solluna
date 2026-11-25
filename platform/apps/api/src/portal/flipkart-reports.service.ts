@@ -6,6 +6,7 @@ import { PrismaService } from '../common/prisma.service';
 import { AuditService } from '../common/audit.service';
 import { StorageService } from '../documents/storage.service';
 import { OrdersPlService } from '../reports/orders-pl.service';
+import { PipelineService } from '../chat/pipeline.service';
 import type { AuthUser } from '../auth/auth.types';
 import { PortalBotService } from './portal-bot.service';
 
@@ -15,8 +16,11 @@ import { PortalBotService } from './portal-bot.service';
  * Requested in Reports Centre through direct links (custom date range), then checked after 2, 10, 30 minutes and every
  * 30 minutes; each file is taken from Flipkart's own download response when its row says Generated. With all three the
  * order-wise P&L is built as a draft for the team to review and publish.
+ * CA files (owner, 25 Nov 2026), same method from the 5th: Tax Reports → GSTR return report, Sales Report and TDS for the
+ * whole of last month; they go into the client's CA pack and the CA pipeline's team step is completed.
  */
-type Kind = 'ORDERS' | 'SETTLEMENT';
+type Kind = 'ORDERS' | 'SETTLEMENT' | 'GSTR' | 'SALES' | 'TDS';
+type Purpose = 'PL' | 'CA';
 interface FileSpec { kind: Kind; from: string; to: string; requestedAt?: string; documentId?: string }
 const RC = 'https://seller.flipkart.com/index.html#dashboard/metrics/report-centre?query=';
 const link = (type: string | null, sub: string | null) => RC + encodeURIComponent(JSON.stringify({
@@ -25,10 +29,10 @@ const link = (type: string | null, sub: string | null) => RC + encodeURIComponen
   pagination: { page_size: 10, starting_page: 1 },
   request_report: { create_request: Boolean(type), report_type: type, report_subtype: sub, repeat_report: false },
 }));
-const LINKS: Record<Kind, string> = { ORDERS: link('Fulfilment Reports', 'Orders'), SETTLEMENT: link('Payment Reports', 'Settled Transactions') };
+const LINKS: Record<Kind, string> = { ORDERS: link('Fulfilment Reports', 'Orders'), SETTLEMENT: link('Payment Reports', 'Settled Transactions'), GSTR: link('Tax Reports', 'GSTR return report'), SALES: link('Tax Reports', 'Sales Report'), TDS: link('Tax Reports', 'TDS') };
 const LIST = link(null, null);
-const SUBTYPE: Record<Kind, string> = { ORDERS: 'Orders', SETTLEMENT: 'Settled Transactions' };
-const DOC_KIND: Record<Kind, string> = { ORDERS: 'FLIPKART_ORDERS_REPORT', SETTLEMENT: 'FLIPKART_SETTLEMENT_REPORT' };
+const SUBTYPE: Record<Kind, string> = { ORDERS: 'Orders', SETTLEMENT: 'Settled Transactions', GSTR: 'GSTR return report', SALES: 'Sales Report', TDS: 'TDS' };
+const DOC_KIND: Record<Kind, string> = { ORDERS: 'FLIPKART_ORDERS_REPORT', SETTLEMENT: 'FLIPKART_SETTLEMENT_REPORT', GSTR: 'FLIPKART_GSTR_REPORT', SALES: 'FLIPKART_SALES_REPORT', TDS: 'FLIPKART_TDS' };
 const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
 const SHORT = MONTHS.map((m) => m.slice(0, 3));
 const ymd = (d: string) => ({ y: Number(d.slice(0, 4)), m: Number(d.slice(5, 7)), d: Number(d.slice(8, 10)) });
@@ -37,10 +41,11 @@ const rowRange = (f: FileSpec) => { const a = ymd(f.from), b = ymd(f.to); return
 /** Backoff after a request: 2, 10, 30 minutes, then every 30 minutes; give up after 48 hours. */
 const WAIT_MIN = [2, 10, 30];
 
-export function filesFor(period: string): FileSpec[] {
+export function filesFor(period: string, purpose: Purpose = 'PL'): FileSpec[] {
   const y = Number(period.slice(0, 4)), m = Number(period.slice(5, 7));
   const last = new Date(Date.UTC(y, m, 0)).toISOString().slice(0, 10);
   const next = new Date(Date.UTC(y, m, 1)).toISOString().slice(0, 7);
+  if (purpose === 'CA') return (['GSTR', 'SALES', 'TDS'] as Kind[]).map((kind) => ({ kind, from: `${period}-01`, to: last }));
   return [
     { kind: 'ORDERS', from: `${period}-01`, to: last },
     { kind: 'SETTLEMENT', from: `${period}-01`, to: last },
@@ -48,10 +53,10 @@ export function filesFor(period: string): FileSpec[] {
   ];
 }
 
-/** The month to report on a given day (IST): the previous month, from the 25th on (owner: data is 100% by then). */
-export function dueMonth(now = new Date()) {
+/** The month to fetch on a given day (IST): last month — P&L files from the 25th (100% settled), CA files from the 5th. */
+export function dueMonth(now = new Date(), purpose: Purpose = 'PL') {
   const ist = new Date(now.getTime() + 5.5 * 3_600_000);
-  if (ist.getUTCDate() < 25) return null;
+  if (ist.getUTCDate() < (purpose === 'CA' ? 5 : 25)) return null;
   return new Date(Date.UTC(ist.getUTCFullYear(), ist.getUTCMonth() - 1, 1)).toISOString().slice(0, 7);
 }
 
@@ -61,7 +66,7 @@ export class FlipkartReportsService implements OnModuleInit {
   private running = false;
   constructor(
     private readonly db: PrismaService, private readonly audit: AuditService, private readonly storage: StorageService,
-    private readonly bot: PortalBotService, private readonly opl: OrdersPlService,
+    private readonly bot: PortalBotService, private readonly opl: OrdersPlService, private readonly pipelines: PipelineService,
   ) {}
 
   onModuleInit() {
@@ -73,10 +78,11 @@ export class FlipkartReportsService implements OnModuleInit {
     if (this.running || !this.bot.configured || process.env.PORTAL_BOT_REPORTS === 'off') return;
     this.running = true;
     try {
-      const period = dueMonth(now);
-      if (period) {
+      for (const purpose of ['CA', 'PL'] as Purpose[]) {
+        const period = dueMonth(now, purpose);
+        if (!period) continue;
         const orgs = await this.db.marketplaceAccount.findMany({ where: { marketplace: 'FLIPKART', status: 'CONNECTED', organization: { subscriptions: { some: { status: { in: ['ACTIVE', 'GRACE_PERIOD'] } } } } }, select: { organizationId: true } });
-        for (const o of orgs) await this.db.reportFetch.upsert({ where: { organizationId_marketplace_period: { organizationId: o.organizationId, marketplace: 'FLIPKART', period } }, create: { organizationId: o.organizationId, period, files: filesFor(period) as unknown as Prisma.InputJsonValue }, update: {} });
+        for (const o of orgs) await this.db.reportFetch.upsert({ where: { organizationId_marketplace_purpose_period: { organizationId: o.organizationId, marketplace: 'FLIPKART', purpose, period } }, create: { organizationId: o.organizationId, purpose, period, files: filesFor(period, purpose) as unknown as Prisma.InputJsonValue }, update: {} });
       }
       const due = await this.db.reportFetch.findMany({ where: { status: { in: ['REQUEST', 'WAITING'] }, nextAt: { lte: now } }, orderBy: { nextAt: 'asc' }, take: 3 });
       for (const f of due) await this.run(f.id).catch((e) => this.log.warn(`fetch ${f.id}: ${(e as Error).message}`));
@@ -84,14 +90,15 @@ export class FlipkartReportsService implements OnModuleInit {
   }
 
   /** Super admin: start (or restart) a month for one client now. */
-  async start(user: AuthUser, orgId: string, period: string) {
+  async start(user: AuthUser, orgId: string, period: string, purpose: Purpose = 'PL') {
     if (!/^\d{4}-\d{2}$/.test(period)) throw new BadRequestException('Period must be YYYY-MM');
+    if (!['PL', 'CA'].includes(purpose)) throw new BadRequestException('Purpose must be PL or CA');
     const row = await this.db.reportFetch.upsert({
-      where: { organizationId_marketplace_period: { organizationId: orgId, marketplace: 'FLIPKART', period } },
-      create: { organizationId: orgId, period, files: filesFor(period) as unknown as Prisma.InputJsonValue },
-      update: { status: 'REQUEST', files: filesFor(period) as unknown as Prisma.InputJsonValue, checks: 0, nextAt: new Date(), error: null, ordersPlId: null },
+      where: { organizationId_marketplace_purpose_period: { organizationId: orgId, marketplace: 'FLIPKART', purpose, period } },
+      create: { organizationId: orgId, purpose, period, files: filesFor(period, purpose) as unknown as Prisma.InputJsonValue },
+      update: { status: 'REQUEST', files: filesFor(period, purpose) as unknown as Prisma.InputJsonValue, checks: 0, nextAt: new Date(), error: null, ordersPlId: null },
     });
-    await this.audit.log({ actor: user, action: 'portal_bot.report_fetch', entity: 'ReportFetch', entityId: row.id, organizationId: orgId, after: { period } });
+    await this.audit.log({ actor: user, action: 'portal_bot.report_fetch', entity: 'ReportFetch', entityId: row.id, organizationId: orgId, after: { period, purpose } });
     setImmediate(() => this.tick().catch(() => undefined));
     return row;
   }
@@ -119,8 +126,9 @@ export class FlipkartReportsService implements OnModuleInit {
       const done = files.every((f) => f.documentId);
       const checks = row.checks + 1;
       if (done) {
-        const ordersPlId = await this.opl.startSystem(row.organizationId, row.period, files.map((f) => f.documentId!));
+        const ordersPlId = row.purpose === 'PL' ? await this.opl.startSystem(row.organizationId, row.period, files.map((f) => f.documentId!)) : null;
         await this.db.reportFetch.update({ where: { id }, data: { status: 'DONE', files: files as unknown as Prisma.InputJsonValue, checks, ordersPlId } });
+        if (row.purpose === 'CA') await this.caDone(row.organizationId, row.period);
         return;
       }
       const ageH = (Date.now() - row.createdAt.getTime()) / 3_600_000;
@@ -179,18 +187,32 @@ export class FlipkartReportsService implements OnModuleInit {
       const resp = page.waitForResponse((r) => r.url().includes('/napi/metrics/bizReport/downloadReport/') && r.status() === 200, { timeout: 60_000 });
       await rows.nth(i).getByRole('button', { name: /download/i }).first().click({ timeout: 10_000 });
       const buf = await (await resp).body();
-      if (buf.length < 100 || buf.subarray(0, 2).toString() !== 'PK') throw new Error(`Flipkart download for ${SUBTYPE[f.kind]} ${rowRange(f)} is not an .xlsx`);
+      if (buf.length < 20) throw new Error(`Flipkart download for ${SUBTYPE[f.kind]} ${rowRange(f)} is empty`);
       return buf;
     }
     return null; // not generated yet (or not on the first page)
   }
 
+  /** CA files are in: the CA pipeline's team step for that month is done (the manager then tells the client). */
+  private async caDone(orgId: string, period: string) {
+    const runs = await this.db.pipelineRun.findMany({ where: { organizationId: orgId, pipeline: 'CA_DOCUMENTATION', branch: 'FLIPKART_CA', status: 'ACTIVE' } });
+    for (const r of runs.filter((x) => (x.data as Record<string, string>)?.period === period)) {
+      await this.pipelines.teamAdvance(null, orgId, r.id, {}).catch((e) => this.log.warn(`CA pipeline ${r.id}: ${(e as Error).message}`));
+    }
+    await this.audit.log({ action: 'portal_bot.ca_files', entity: 'Organization', entityId: orgId, organizationId: orgId, after: { period } });
+  }
+
   private async save(orgId: string, period: string, f: FileSpec, buf: Buffer) {
     const sha256 = createHash('sha256').update(buf).digest('hex');
-    const name = `flipkart-${f.kind === 'ORDERS' ? 'orders' : 'settlement'}-${f.from}-to-${f.to}.xlsx`;
+    const zip = buf.subarray(0, 2).toString() === 'PK';
+    const xlsx = zip && buf.includes(Buffer.from('xl/workbook'));
+    const ext = xlsx ? 'xlsx' : zip ? 'zip' : buf.subarray(0, 4).toString() === '%PDF' ? 'pdf' : 'csv';
+    const mime = { xlsx: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', zip: 'application/zip', pdf: 'application/pdf', csv: 'text/csv' }[ext];
+    const name = `flipkart-${SUBTYPE[f.kind].toLowerCase().replace(/\s+/g, '-')}-${f.from}-to-${f.to}.${ext}`;
+    const ca = ['GSTR', 'SALES', 'TDS'].includes(f.kind);
     const doc = await this.db.$transaction(async (tx) => {
       const fileKey = await this.storage.put(buf, tx);
-      return tx.document.create({ data: { organizationId: orgId, kind: DOC_KIND[f.kind], title: `Flipkart ${SUBTYPE[f.kind]} ${f.from} to ${f.to}`, fileName: name, visibility: 'INTERNAL', fileKey, sha256, mimeType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', sizeBytes: buf.length, uploadedById: 'portal-bot', periodMonth: new Date(`${period}-01T00:00:00Z`) } });
+      return tx.document.create({ data: { organizationId: orgId, kind: DOC_KIND[f.kind], title: `Flipkart ${SUBTYPE[f.kind]} ${f.from} to ${f.to}`, fileName: name, visibility: ca ? 'CLIENT' : 'INTERNAL', fileKey, sha256, mimeType: mime, sizeBytes: buf.length, uploadedById: 'portal-bot', periodMonth: new Date(`${period}-01T00:00:00Z`) } });
     });
     await this.audit.log({ action: 'document.upload', entity: 'Document', entityId: doc.id, organizationId: orgId, after: { kind: doc.kind, size: buf.length, sha256, by: 'portal-bot' } });
     return doc.id;

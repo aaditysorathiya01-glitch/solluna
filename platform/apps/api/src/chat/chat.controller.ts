@@ -91,7 +91,7 @@ export class AdminClientsController {
 
   /** Flipkart mapping bot (safety mode): runs stop before Submit; the owner approves or rejects each run here. */
   /** Flipkart report files (Orders + Settled Transactions) for a month: start now / list. */
-  @Post('portal-bot/reports') @HttpCode(200) @StaffOnly('SUPER_ADMIN') fetchReports(@CurrentUser() u: AuthUser, @Body() b: { organizationId?: string; period?: string }) { return this.fkReports.start(u, String(b?.organizationId ?? ''), String(b?.period ?? '')); }
+  @Post('portal-bot/reports') @HttpCode(200) @StaffOnly('SUPER_ADMIN') fetchReports(@CurrentUser() u: AuthUser, @Body() b: { organizationId?: string; period?: string; purpose?: 'PL' | 'CA' }) { return this.fkReports.start(u, String(b?.organizationId ?? ''), String(b?.period ?? ''), b?.purpose ?? 'PL'); }
   @Get('portal-bot/reports') @StaffOnly('SUPER_ADMIN') reportFetches() { return this.fkReports.list(); }
   @Get('portal-bot/runs') @StaffOnly('SUPER_ADMIN') runs() { return this.fkMap.list(); }
   @Get('portal-bot/runs/:id') @StaffOnly('SUPER_ADMIN') run(@Param('id') id: string) { return this.fkMap.get(id); }
