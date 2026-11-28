@@ -87,7 +87,8 @@ export class CatalogFormsService {
   private async checkImages(user: AuthUser, def: ReturnType<typeof formFor>, data: Record<string, string | number>, errors: Record<string, string>) {
     for (const f of def.sections.flatMap((s) => s.fields).filter((x) => x.type === 'images')) {
       const ids = typeof data[f.key] === 'string' ? String(data[f.key]).split(',').filter(Boolean) : [];
-      if (!ids.length) { if (f.required) errors[f.key] = `${f.label}: upload at least 1 image`; continue; }
+      if (errors[f.key]) continue; // the form check already explained it (e.g. fewer photos than needed)
+      if (!ids.length) { if (f.required) errors[f.key] = `${f.label}: upload at least ${f.minItems ?? 1} image${(f.minItems ?? 1) > 1 ? 's' : ''}`; continue; }
       const found = await this.db.document.count({ where: { id: { in: ids }, organizationId: user.organizationId!, deletedAt: null, kind: 'LISTING_ASSETS', mimeType: { startsWith: 'image/' } } });
       if (found !== ids.length) errors[f.key] = `${f.label}: some images are missing — upload them again`;
     }
