@@ -95,6 +95,7 @@ export class AdminClientsController {
   @Post('portal-bot/reports') @HttpCode(200) @StaffOnly('SUPER_ADMIN') fetchReports(@CurrentUser() u: AuthUser, @Body() b: { organizationId?: string; period?: string; purpose?: 'PL' | 'CA' }) { return this.fkReports.start(u, String(b?.organizationId ?? ''), String(b?.period ?? ''), b?.purpose ?? 'PL'); }
   @Get('portal-bot/reports') @StaffOnly('SUPER_ADMIN') reportFetches() { return this.fkReports.list(); }
   /** Flipkart new listing (being built step by step): preview what the bot does so far for a request. */
+  @Post('portal-bot/new-listing-try') @HttpCode(200) @StaffOnly('SUPER_ADMIN') newListingTry(@CurrentUser() u: AuthUser, @Body() b: { organizationId?: string; vertical?: string; title?: string; description?: string }) { return this.fkListing.tryVertical(u, b); }
   @Post('portal-bot/new-listing/:requestId') @HttpCode(200) @StaffOnly('SUPER_ADMIN') newListingPreview(@CurrentUser() u: AuthUser, @Param('requestId') requestId: string) { return this.fkListing.preview(u, requestId); }
   @Get('portal-bot/runs') @StaffOnly('SUPER_ADMIN') runs() { return this.fkMap.list(); }
   @Get('portal-bot/runs/:id') @StaffOnly('SUPER_ADMIN') run(@Param('id') id: string) { return this.fkMap.get(id); }

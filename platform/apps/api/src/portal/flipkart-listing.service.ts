@@ -49,6 +49,17 @@ export class FlipkartListingService {
     return { id: run.id, status: run.status };
   }
 
+  /** Super admin: try the vertical choice with any values (no request needed), e.g. "bulb" + a product name. */
+  async tryVertical(user: AuthUser, body: { organizationId?: string; vertical?: string; title?: string; description?: string }) {
+    const orgId = String(body?.organizationId ?? '');
+    if (!orgId || !body?.vertical) throw new BadRequestException('organizationId and vertical are required');
+    const f = { orgId, vertical: String(body.vertical).slice(0, 120), brand: '', title: String(body.title ?? '').slice(0, 200), description: String(body.description ?? '').slice(0, 3000), sku: '', data: {} };
+    const run = await this.db.portalRun.create({ data: { organizationId: orgId, kind: 'FLIPKART_NEW_LISTING', status: 'RUNNING', input: { mp: 'FLIPKART', sku: '', title: `try: ${f.vertical} / ${f.title}`, values: { vertical: f.vertical } } as Prisma.InputJsonValue } });
+    await this.audit.log({ actor: user, action: 'portal_bot.new_listing_try', entity: 'PortalRun', entityId: run.id, organizationId: orgId, after: { vertical: f.vertical, title: f.title } });
+    void this.runPreview(run.id, f).catch((e) => this.log.error(e));
+    return { id: run.id, status: run.status };
+  }
+
   private async runPreview(id: string, f: Awaited<ReturnType<FlipkartListingService['form']>>) {
     const shots: { step: string; png: string }[] = [];
     let close: (() => Promise<void>) | undefined;
