@@ -19,6 +19,8 @@ export interface Field {
   suggestions?: string[];
   /** list: most values; images: most files. */
   maxItems?: number;
+  /** images: fewest files. */
+  minItems?: number;
 }
 export interface Section { title: string; note?: string; fields: Field[] }
 export interface FormDef { marketplace: Marketplace; kind: FormKind; title: string; intro: string; draft: boolean; sections: Section[];
@@ -75,7 +77,7 @@ const flipkartCommercial: Section[] = [
   {
     title: 'Inventory details',
     fields: [
-      { key: 'procurementType', label: 'Procurement type', type: 'select', required: true, options: ['Instock', 'Express', 'Domestic procurement', 'International procurement', 'Made to order'] },
+      { key: 'procurementType', label: 'Procurement type', type: 'select', required: true, options: ['Instock', 'Express', 'Domestic procurement'] },
       { key: 'procurementSlaDays', label: 'Procurement SLA', type: 'number', required: true, unit: 'days', min: 0, max: 60 },
       { key: 'stock', label: 'Stock', type: 'number', required: true, min: 0, max: 1_000_000, help: 'Minimum 5 quantity required for listing visibility' },
     ],
@@ -107,33 +109,20 @@ const flipkartNewListing: Section[] = [
   { title: 'Product', fields: [
     { key: 'vertical', label: 'Select The Vertical For Your Product', type: 'text', required: true, maxLength: 120, placeholder: 'e.g. Floor Cleaner', suggestions: ['Floor Cleaner', 'Toilet Cleaner', 'Bathroom Cleaner', 'Kitchen Cleaner', 'Glass Cleaner', 'Multi-Surface Cleaner', 'Room Freshener', 'Dishwash Liquid', 'Detergent'] },
     { key: 'brand', label: 'Brand', type: 'text', required: true, maxLength: 80 },
-    { key: 'images', label: 'Product images', type: 'images', required: true, maxItems: 5, help: 'Up to 5 images (JPG, PNG or WEBP). First image = main image: white background, at least 1000 px' },
+    { key: 'images', label: 'Product images', type: 'images', required: true, minItems: 3, maxItems: 5, help: 'Add at least 3 clear photos of the product from different angles (front, back, side), up to 5. JPG, PNG or WEBP. First image = main image: white background, at least 1000 px' },
   ] },
   ...flipkartCommercial,
+  // Owner, 28 Nov 2026: one free-text box instead of the vertical's detail fields; SOLLUNA fills Flipkart's form from it.
   { title: 'Product details', fields: [
-    { key: 'modelName', label: 'Model Name', type: 'text', required: true, maxLength: 120 },
-    { key: 'brandFragrance', label: 'Brand Fragrance', type: 'text', required: true, maxLength: 80, suggestions: ['Lavender', 'Lemon', 'Rose', 'Jasmine', 'Pine', 'Floral', 'Citrus', 'Unscented'] },
-    { key: 'quantityL', label: 'Quantity', type: 'number', required: true, unit: 'L', min: 0.001, max: 1000 },
-    { key: 'suitableFor', label: 'Suitable For', type: 'text', required: true, maxLength: 120, suggestions: ['Floor', 'Tiles', 'Bathroom', 'Toilet', 'Kitchen', 'Glass', 'Multi-surface'] },
-    { key: 'formFactor', label: 'Form Factor', type: 'text', required: true, maxLength: 60, suggestions: ['Liquid', 'Gel', 'Powder', 'Spray', 'Tablet', 'Wipes'] },
-    { key: 'packOf', label: 'Pack of', type: 'number', required: true, min: 1, max: 1000 },
-    { key: 'containerType', label: 'Container Type', type: 'text', required: true, maxLength: 60, suggestions: ['Bottle', 'Spray Bottle', 'Can', 'Pouch', 'Jar', 'Sachet', 'Box'] },
+    { key: 'productTitle', label: 'Product name', type: 'text', required: true, maxLength: 200, placeholder: 'e.g. Roff Cera Clean Floor Cleaner, Lavender, 1 L' },
+    { key: 'productDescription', label: 'Product description', type: 'textarea', required: true, maxLength: 5000, placeholder: 'What the product is, what it is used for, size / quantity, pack, fragrance or colour, material, how to use…', help: 'Write as much as you like about your product: every detail you give helps us fill Flipkart’s listing form correctly.' },
   ] },
-  { title: 'General', fields: [
+  { title: 'General', note: 'Optional: fill these only if you want something specific. Anything you leave blank, our team fills in.', fields: [
     many('eanUpc', 'EAN/UPC', { maxLength: 600 }),
-    { key: 'fragranceForRefiner', label: 'Fragrance For Refiner', type: 'text', maxLength: 80, suggestions: ['Lavender', 'Lemon', 'Rose', 'Jasmine', 'Pine', 'Floral', 'Citrus'] },
     many('keyFeatures', 'Key Features'),
-    many('usageInstructions', 'Usage Instructions'),
-    { key: 'videoUrl', label: 'Video URL', type: 'url', maxLength: 500 },
-    { key: 'description', label: 'Description', type: 'textarea', maxLength: 5000 },
-    many('composition', 'Composition'),
     many('searchKeywords', 'Search Keywords'),
-    many('certification', 'Certification'),
-    { key: 'usedFor', label: 'Used For', type: 'text', maxLength: 120, suggestions: ['Cleaning', 'Disinfecting', 'Stain Removal', 'Descaling', 'Fragrance'] },
-    { key: 'phValue', label: 'pH Value', type: 'number', min: 0, max: 14 },
     { key: 'maxShelfLifeMonths', label: 'Maximum Shelf Life', type: 'number', unit: 'Months', min: 0, max: 600 },
     { key: 'manufacturingProcess', label: 'Manufacturing Process', type: 'text', maxLength: 80, suggestions: ['Chemical', 'Natural', 'Herbal', 'Handmade'] },
-    { key: 'organic', label: 'Organic', type: 'select', options: ['Yes', 'No'] },
   ] },
   { title: 'Dimensions', note: 'Product size (not the package).', fields: [
     { key: 'productHeightCm', label: 'Height', type: 'number', unit: 'cm', min: 0, max: 1000 },
@@ -322,6 +311,7 @@ export function validateForm(def: FormDef, input: Record<string, unknown>, { par
       const ids = [...new Set(str.split(',').map((x) => x.trim()).filter(Boolean))];
       if (ids.some((x) => !/^[a-z0-9]{20,40}$/i.test(x))) { errors[f.key] = `${f.label}: upload the images again`; continue; }
       if (f.maxItems && ids.length > f.maxItems) { errors[f.key] = `${f.label}: at most ${f.maxItems} images`; continue; }
+      if (f.minItems && ids.length < f.minItems) { errors[f.key] = `${f.label}: add at least ${f.minItems} photos from different angles`; continue; }
       data[f.key] = ids.join(',');
     } else if (f.type === 'date') {
       if (!/^\d{4}-\d{2}-\d{2}$/.test(str) || Number.isNaN(Date.parse(str))) { errors[f.key] = `${f.label} must be a date`; continue; }

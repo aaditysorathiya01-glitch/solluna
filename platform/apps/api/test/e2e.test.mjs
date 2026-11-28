@@ -1334,16 +1334,20 @@ test('listing & mapping forms: validation, mapping + new-listing workflow record
   // Flipkart new listing: owner's field list, up to 5 uploaded images (client's own image documents only), list fields.
   const img1 = (await upload(c, 'front.png', PNG, { kind: 'LISTING_ASSETS' })).body.id;
   const img2 = (await upload(c, 'back.png', PNG, { kind: 'LISTING_ASSETS' })).body.id;
+  const img3 = (await upload(c, 'side.png', PNG, { kind: 'LISTING_ASSETS' })).body.id;
   const pdf = (await upload(c, 'spec.pdf', PDF, { kind: 'LISTING_ASSETS' })).body.id;
-  const fk = { ...base, sellerSku: 'FC-500', vertical: 'Floor Cleaner', brand: 'Roff', modelName: 'Floor Cleaner Lavender', brandFragrance: 'Lavender', quantityL: 0.5, suitableFor: 'Floor', formFactor: 'Liquid', packOf: 1, containerType: 'Bottle', keyFeatures: 'Kills 99.9% germs, Streak-free\nKills 99.9% germs', description: 'Floor cleaner' };
-  const noImg = await call('POST', '/catalog-forms', { token: c, body: { marketplace: 'FLIPKART', kind: 'NEW_LISTING', data: { ...fk, modelName: '' } } });
-  assert.equal(noImg.status, 400); assert.ok(noImg.body.fieldErrors.images && noImg.body.fieldErrors.modelName, JSON.stringify(noImg.body.fieldErrors));
-  assert.ok((await call('POST', '/catalog-forms', { token: c, body: { marketplace: 'FLIPKART', kind: 'NEW_LISTING', data: { ...fk, images: `${img1},${pdf}` } } })).body.fieldErrors.images, 'a PDF is not an image');
+  // Owner, 28 Nov 2026: product name + one description box instead of the vertical's detail fields; at least 3 photos.
+  const fk = { ...base, sellerSku: 'FC-500', vertical: 'Floor Cleaner', brand: 'Roff', productTitle: 'Floor Cleaner Lavender', productDescription: 'Lavender floor cleaner, 500 ml bottle, for tiles and marble', keyFeatures: 'Kills 99.9% germs, Streak-free\nKills 99.9% germs' };
+  const noImg = await call('POST', '/catalog-forms', { token: c, body: { marketplace: 'FLIPKART', kind: 'NEW_LISTING', data: { ...fk, productTitle: '' } } });
+  assert.equal(noImg.status, 400); assert.ok(noImg.body.fieldErrors.images && noImg.body.fieldErrors.productTitle, JSON.stringify(noImg.body.fieldErrors));
+  assert.match((await call('POST', '/catalog-forms', { token: c, body: { marketplace: 'FLIPKART', kind: 'NEW_LISTING', data: { ...fk, images: `${img1},${img2}` } } })).body.fieldErrors.images, /at least 3 photos/);
+  assert.ok((await call('POST', '/catalog-forms', { token: c, body: { marketplace: 'FLIPKART', kind: 'NEW_LISTING', data: { ...fk, procurementType: 'Made to order', images: `${img1},${img2},${img3}` } } })).body.fieldErrors.procurementType, 'Made to order is not offered');
+  assert.ok((await call('POST', '/catalog-forms', { token: c, body: { marketplace: 'FLIPKART', kind: 'NEW_LISTING', data: { ...fk, images: `${img1},${img2},${pdf}` } } })).body.fieldErrors.images, 'a PDF is not an image');
   assert.ok((await call('POST', '/catalog-forms', { token: c, body: { marketplace: 'FLIPKART', kind: 'NEW_LISTING', data: { ...fk, images: Array(6).fill(0).map((_, i) => `img${i}aaaaaaaaaaaaaaaaaaaaa`).join(',') } } })).body.fieldErrors.images, 'at most 5 images');
-  const fkr = ok(await call('POST', '/catalog-forms', { token: c, body: { marketplace: 'FLIPKART', kind: 'NEW_LISTING', data: { ...fk, images: `${img1},${img2}` } } }));
+  const fkr = ok(await call('POST', '/catalog-forms', { token: c, body: { marketplace: 'FLIPKART', kind: 'NEW_LISTING', data: { ...fk, images: `${img1},${img2},${img3}` } } }));
   const fkReq = await db.serviceRequest.findUnique({ where: { id: fkr.request.id } });
-  assert.equal(fkReq.featureKey, 'NEW_LISTING_FLIPKART'); assert.match(fkReq.title, /Flipkart new listing: Roff Floor Cleaner Lavender \(SKU FC-500\)/);
-  assert.equal(fkReq.details.fields.images, `${img1},${img2}`); assert.equal(fkReq.details.fields.keyFeatures, 'Kills 99.9% germs\nStreak-free', 'list values split and de-duplicated');
+  assert.equal(fkReq.featureKey, 'NEW_LISTING_FLIPKART'); assert.match(fkReq.title, /Flipkart new listing: Floor Cleaner Lavender \(SKU FC-500\)/);
+  assert.equal(fkReq.details.fields.images, `${img1},${img2},${img3}`); assert.equal(fkReq.details.fields.keyFeatures, 'Kills 99.9% germs\nStreak-free', 'list values split and de-duplicated');
   assert.equal(fkReq.details.fields.fulfilmentBy, 'Seller');
 
   // Amazon mapping: owner's list only; condition always New, audience / pricing rule default, HSN 6–8 digits.

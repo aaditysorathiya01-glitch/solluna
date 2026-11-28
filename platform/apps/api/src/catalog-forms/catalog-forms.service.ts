@@ -64,7 +64,7 @@ export class CatalogFormsService {
       const product = {
         name: String(productName(data)), brand: String(data.brand), category: String(data.category ?? data.vertical ?? data.productType), sku: String(data.sellerSku), hsn: String(data.hsn),
         gstRate: gst ? Number(gst) : undefined, mrp: Number(data.mrp), sellingPrice: Number(data.sellingPrice),
-        specs: [data.keyFeatures, data.itemHighlight, data.specialFeatures, data.description, data.usageInstructions].filter(Boolean).join('\n\n').slice(0, 5000), variations: data.variants ? String(data.variants) : undefined,
+        specs: [data.productDescription, data.keyFeatures, data.itemHighlight, data.specialFeatures, data.description, data.usageInstructions].filter(Boolean).join('\n\n').slice(0, 5000), variations: data.variants ? String(data.variants) : undefined,
       };
       const existing = await this.db.product.findFirst({ where: { organizationId: orgId, sku: product.sku } });
       const productId = existing ? (await this.catalog.updateProduct(user, existing.id, product)).id : (await this.catalog.createProduct(user, product)).id;
