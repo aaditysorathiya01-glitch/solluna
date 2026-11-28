@@ -43,6 +43,7 @@ import { PortalBotService } from './portal/portal-bot.service';
 import { OrdersPlService } from './reports/orders-pl.service';
 import { CaFilesService } from './reports/ca-files.service';
 import { FlipkartReportsService } from './portal/flipkart-reports.service';
+import { FlipkartListingService } from './portal/flipkart-listing.service';
 import { FlipkartMappingService } from './portal/flipkart-mapping.service';
 import { OpsMailController, OpsMailInboundController } from './ops-mail/ops-mail.controller';
 import { ManagerAgentService } from './chat/manager-agent.service';
@@ -63,7 +64,7 @@ import { LabelCropsService } from './labels/label-crops.service';
   ],
   controllers: [HealthController, AuthController, AccountController, AdminUsersController, PublicController, AdminController, AdminPaymentsController, TicketsController, OpsTicketsController, CatalogController, OpsCatalogController, FulfilmentController, OpsFulfilmentController, BillingController, FeaturesController, NotificationsController, RequestsController, ApprovalsController, OpsController, DocumentsController, ChatController, OpsChatController, AdminClientsController, ClientReportsController, OpsReportsController, OpsDocumentsCaController, LabelCropsController, CatalogFormsController, OpsMailInboundController, OpsMailController],
   providers: [
-    PrismaService, AuditService, AuthService, RazorpayClient, BillingService, SkillsService, EntitlementsService, DispatcherService, OrchestratorService, AccessService, StorageService, DocumentsService, ChatService, ManagerAgentService, AgentEvalsService, PipelineService, ReportsService, ReportCycleService, PlImportService, SpApiService, MarketplaceApiService, OpsMailService, TestClientPurgeService, PortalBotService, FlipkartMappingService, OrdersPlService, FlipkartReportsService, CaFilesService, TicketsService, CatalogService, FulfilmentService, AdminService, LabelCropsService, CatalogFormsService, ProductLookupService,
+    PrismaService, AuditService, AuthService, RazorpayClient, BillingService, SkillsService, EntitlementsService, DispatcherService, OrchestratorService, AccessService, StorageService, DocumentsService, ChatService, ManagerAgentService, AgentEvalsService, PipelineService, ReportsService, ReportCycleService, PlImportService, SpApiService, MarketplaceApiService, OpsMailService, TestClientPurgeService, PortalBotService, FlipkartMappingService, OrdersPlService, FlipkartReportsService, CaFilesService, FlipkartListingService, TicketsService, CatalogService, FulfilmentService, AdminService, LabelCropsService, CatalogFormsService, ProductLookupService,
     { provide: APP_GUARD, useClass: ThrottlerGuard },
     { provide: APP_GUARD, useClass: AuthGuard },
   ],

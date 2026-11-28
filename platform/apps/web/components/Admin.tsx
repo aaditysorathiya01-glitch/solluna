@@ -448,9 +448,9 @@ function AmazonCheck() {
   );
 }
 
-interface PortalRunRow { id: string; client: string; requestId: string | null; status: string; input: { fsn?: string; asin?: string; sku: string; values: Record<string, string> }; missing: { field: string; reason: string }[] | null; error: string | null; listingRef: string | null; createdAt: string; updatedAt: string }
+interface PortalRunRow { id: string; client: string; requestId: string | null; status: string; input: { fsn?: string; asin?: string; title?: string; sku: string; values: Record<string, string> }; missing: { field: string; reason: string }[] | null; error: string | null; listingRef: string | null; createdAt: string; updatedAt: string }
 interface PortalRunFull extends PortalRunRow { filled: { field: string; value: string }[] | null; shots: { step: string; png: string }[] | null }
-const RUN_LABEL: Record<string, string> = { RUNNING: 'Filling the form…', READY: 'Waiting for your approval', SUBMITTING: 'Submitting…', SUBMITTED: 'Submitted · waiting for Flipkart to make it live', LIVE: 'Live on Flipkart ✓', FAILED: 'Stopped', REJECTED: 'Rejected' };
+const RUN_LABEL: Record<string, string> = { RUNNING: 'Filling the form…', PREVIEW: 'Preview (new listing, steps built so far)', READY: 'Waiting for your approval', SUBMITTING: 'Submitting…', SUBMITTED: 'Submitted · waiting for Flipkart to make it live', LIVE: 'Live on Flipkart ✓', FAILED: 'Stopped', REJECTED: 'Rejected' };
 /** Flipkart mapping bot (safety mode): the bot fills Seller Hub and stops before Submit; the owner checks the screenshots and approves. */
 function PortalBotPanel({ onFlash }: { onFlash: (f: FlashMsg) => void }) {
   const rows = useApi<PortalRunRow[]>('/admin/portal-bot/runs');
@@ -470,7 +470,7 @@ function PortalBotPanel({ onFlash }: { onFlash: (f: FlashMsg) => void }) {
         {rows.data?.map((r) => (
           <div key={r.id} className="card flex flex-wrap items-center justify-between gap-2 p-4 text-sm">
             <div className="min-w-0">
-              <p className="font-medium">{r.client} · SKU {r.input.sku} · {r.input.asin ? `Amazon ASIN ${r.input.asin}` : `Flipkart FSN ${r.input.fsn}`}</p>
+              <p className="font-medium">{r.client} · SKU {r.input.sku || '—'} · {r.input.asin ? `Amazon ASIN ${r.input.asin}` : r.input.fsn ? `Flipkart FSN ${r.input.fsn}` : `Flipkart new listing: ${r.input.title ?? ''}`}</p>
               <p className="text-xs text-ink-3">{dt(r.createdAt)} · <span className={r.status === 'READY' ? 'font-semibold text-amber-700' : r.status === 'FAILED' ? 'text-red-700' : ''}>{RUN_LABEL[r.status] ?? r.status}</span>{r.error && !r.error.startsWith('live-check') ? ` · ${r.error}` : ''}{r.listingRef ? ` · ${r.listingRef}` : ''}</p>
             </div>
             <div className="flex gap-2">

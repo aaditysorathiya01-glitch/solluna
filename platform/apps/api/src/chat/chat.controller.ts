@@ -1,6 +1,7 @@
 import { PortalBotService } from '../portal/portal-bot.service';
 import { FlipkartMappingService } from '../portal/flipkart-mapping.service';
 import { FlipkartReportsService } from '../portal/flipkart-reports.service';
+import { FlipkartListingService } from '../portal/flipkart-listing.service';
 import { TestClientPurgeService } from '../admin/test-client-purge.service';
 import { Body, Controller, Get, HttpCode, MessageEvent, Param, Patch, Post, Query, Sse } from '@nestjs/common';
 import { SkipThrottle } from '@nestjs/throttler';
@@ -83,7 +84,7 @@ export class OpsChatController {
 @Controller('admin')
 @StaffOnly('SUPER_ADMIN', 'OPERATIONS_MANAGER')
 export class AdminClientsController {
-  constructor(private readonly chat: ChatService, private readonly agent: ManagerAgentService, private readonly evals: AgentEvalsService, private readonly spapi: SpApiService, private readonly purge: TestClientPurgeService, private readonly bot: PortalBotService, private readonly fkMap: FlipkartMappingService, private readonly fkReports: FlipkartReportsService) {}
+  constructor(private readonly chat: ChatService, private readonly agent: ManagerAgentService, private readonly evals: AgentEvalsService, private readonly spapi: SpApiService, private readonly purge: TestClientPurgeService, private readonly bot: PortalBotService, private readonly fkMap: FlipkartMappingService, private readonly fkReports: FlipkartReportsService, private readonly fkListing: FlipkartListingService) {}
 
   /** Portal bot probe (super admin): run a few steps in Seller Hub / Seller Central and get screenshots back. */
   @Post('portal-bot/probe') @HttpCode(200) @StaffOnly('SUPER_ADMIN') probe(@CurrentUser() u: AuthUser, @Body() body: unknown) { return this.bot.startProbe(u, body); }
@@ -93,6 +94,8 @@ export class AdminClientsController {
   /** Flipkart report files (Orders + Settled Transactions) for a month: start now / list. */
   @Post('portal-bot/reports') @HttpCode(200) @StaffOnly('SUPER_ADMIN') fetchReports(@CurrentUser() u: AuthUser, @Body() b: { organizationId?: string; period?: string; purpose?: 'PL' | 'CA' }) { return this.fkReports.start(u, String(b?.organizationId ?? ''), String(b?.period ?? ''), b?.purpose ?? 'PL'); }
   @Get('portal-bot/reports') @StaffOnly('SUPER_ADMIN') reportFetches() { return this.fkReports.list(); }
+  /** Flipkart new listing (being built step by step): preview what the bot does so far for a request. */
+  @Post('portal-bot/new-listing/:requestId') @HttpCode(200) @StaffOnly('SUPER_ADMIN') newListingPreview(@CurrentUser() u: AuthUser, @Param('requestId') requestId: string) { return this.fkListing.preview(u, requestId); }
   @Get('portal-bot/runs') @StaffOnly('SUPER_ADMIN') runs() { return this.fkMap.list(); }
   @Get('portal-bot/runs/:id') @StaffOnly('SUPER_ADMIN') run(@Param('id') id: string) { return this.fkMap.get(id); }
   @Post('portal-bot/mapping/:requestId') @HttpCode(200) @StaffOnly('SUPER_ADMIN') prepareMapping(@CurrentUser() u: AuthUser, @Param('requestId') requestId: string, @Query('review') review?: string) { return this.fkMap.prepare(u, requestId, review === '1'); }

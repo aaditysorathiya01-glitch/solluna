@@ -107,8 +107,8 @@ const many = (key: string, label: string, extra: Partial<Field> = {}): Field => 
 /** Flipkart new listing — owner's field list (7 Nov 2026), in Seller Hub order. Product attributes follow the owner's example vertical. */
 const flipkartNewListing: Section[] = [
   { title: 'Product', fields: [
-    { key: 'vertical', label: 'Select The Vertical For Your Product', type: 'text', required: true, maxLength: 120, placeholder: 'e.g. Floor Cleaner', suggestions: ['Floor Cleaner', 'Toilet Cleaner', 'Bathroom Cleaner', 'Kitchen Cleaner', 'Glass Cleaner', 'Multi-Surface Cleaner', 'Room Freshener', 'Dishwash Liquid', 'Detergent'] },
-    { key: 'brand', label: 'Brand', type: 'text', required: true, maxLength: 80 },
+    { key: 'vertical', label: 'Select The Vertical For Your Product', type: 'text', required: true, maxLength: 120, placeholder: 'e.g. Floor Cleaner', help: 'The product category, e.g. Floor Cleaner, Electric Bulb. If it is not exactly Flipkart’s name, we pick the nearest one from your product name and description.', suggestions: ['Floor Cleaner', 'Toilet Cleaner', 'Bathroom Cleaner', 'Kitchen Cleaner', 'Glass Cleaner', 'Multi-Surface Cleaner', 'Room Freshener', 'Dishwash Liquid', 'Detergent'] },
+    { key: 'brand', label: 'Brand', type: 'text', required: true, maxLength: 80, help: 'Write your brand’s full name, exactly as it should appear on Flipkart (e.g. Pidilite Roff, not Roff)' },
     { key: 'images', label: 'Product images', type: 'images', required: true, minItems: 3, maxItems: 5, help: 'Add at least 3 clear photos of the product from different angles (front, back, side), up to 5. JPG, PNG or WEBP. First image = main image: white background, at least 1000 px' },
   ] },
   ...flipkartCommercial,

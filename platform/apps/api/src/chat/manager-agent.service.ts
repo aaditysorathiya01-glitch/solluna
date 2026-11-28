@@ -25,7 +25,7 @@ import { checkInput, checkOutput, flagNotes, rewriteNote, SAFE_FALLBACK, SOFT_VI
  */
 export const AGENT_MODEL = process.env.MANAGER_AGENT_MODEL ?? 'claude-haiku-5-5';
 /** USD per million tokens (Claude Haiku 5.5 list price; cache prices estimated). Override per env when prices change. */
-const PRICE = {
+export const PRICE = {
   input: Number(process.env.AGENT_PRICE_INPUT ?? 0.1),
   output: Number(process.env.AGENT_PRICE_OUTPUT ?? 0.5),
   cacheRead: Number(process.env.AGENT_PRICE_CACHE_READ ?? 0.01),
